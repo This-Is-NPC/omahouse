@@ -1,5 +1,3 @@
-*Em português: [`guia.md`](guia.md).*
-
 # Using omahouse
 
 This guide takes somebody who has installed omahouse as far as a profile that
@@ -155,7 +153,7 @@ Three things that have to be on the list and are not obvious:
 - **Do not release a terminal in a profile that is meant to hold.** A program
   started from inside a terminal inherits the terminal's scope: whoever has a
   terminal released runs whatever they like, and all of it counts as terminal
-  time. This is `spec.md` §10, and there is no fixing it in the engine.
+  time. This is [`design.md`](design.md) §10, and there is no fixing it in the engine.
 
 `julia`'s list on the run came out like this:
 
@@ -447,8 +445,9 @@ The writing keys, all of them going through `pkexec`:
 
 ## 6. What does not work yet
 
-Six things were measured broken on a real Omarchy. None of them has a fix in
-omahouse today.
+Everything below was measured broken. None of it has a fix in omahouse today.
+This is the whole list: nothing else in the documentation names a defect that is
+not here.
 
 ### 6.1 Programs opened from the menu cannot be allowed by name
 
@@ -535,7 +534,40 @@ sudo omahouse allow julia chromium --limit 3m
 sudo omahouse allow julia org.chromium.Chromium --limit 3m
 ```
 
-### 6.7 Studio defects
+### 6.7 `/` in the studio filters all three lists at once
+
+**What happens.** There is one filter, and it is applied to the people, the
+programs and the day together. A needle that misses the person on the people
+list empties the people list — and then the programs view has nobody to be about
+and draws *nobody is under rules yet* over a household that is right there. The
+key sheet says `/ filter this list`. This is not yet that.
+
+**What to do in the meantime.** Filter with something that also matches the
+profile's own name, or press `Esc` and walk the list with `j` / `k`.
+
+### 6.8 A refusal loses its reason on the way to the studio
+
+**What happens.** Only the last line the CLI printed reaches the status bar
+(`Admin::lastLine`). The sentence that says *what* was refused and why —
+`profile add: howl is in wheel, and an administrator does not fiscalise
+themselves by accident.` — is the line above it, and it is dropped. What is on
+screen is the advice with the verdict missing.
+
+**What to do in the meantime.** Run the same verb from a terminal to read the
+whole refusal.
+
+### 6.9 A scope nothing can name has no screen in the studio
+
+**What happens.** `omahouse status` reports these prominently — a
+`tmux-spawn-<uuid>.scope` with twenty processes in it is somebody at the
+keyboard, and [`design.md`](design.md) §5 asks for what cannot be accounted for
+to be said out loud. The window computes the number and no view reads it. What
+the status bar does show is the other number, `n it cannot see`, which is the
+processes in `session.slice` — a different fact.
+
+**What to do in the meantime.** Use `omahouse status` for that number.
+
+### 6.10 Studio defects, smaller
 
 - The `+` key leaks into the "more time today" field and leaves `ok` greyed out.
   Clear the `+` before typing.
@@ -560,6 +592,7 @@ What the model does hold, because none of it depends on the goodwill of the
 session: the clock, the `loginctl` logout, the counting (the ledger is written by
 root) and the daemon itself (`Restart=always`).
 
-`spec.md` says why each of those choices was made; `docs/cli.md` has the verbs in
-full; `vm/OMARCHY-VM.md` describes the machine the images in this guide were
-taken on.
+[How it is built](design.md) says why each of those choices was made, and
+[the command line](cli.md) has the verbs in full. The images in this guide come
+from one run through a VM with Omarchy installed on it, driven by keyboard and
+captured frame by frame; they are not regenerable, which is why they are kept.

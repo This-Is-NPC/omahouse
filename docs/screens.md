@@ -1,17 +1,9 @@
-*English only. There is no `telas.md`, and the section below says why.*
-
 # Every screen omahouse-studio draws
 
-An inventory, not a tour. `docs/guide.md` teaches somebody to build a profile
-and shows the screens they pass through on the way; this lists **all** of them,
-including the ones a happy path never reaches, so that a change to the window
-has somewhere to be checked against.
-
-There is no Portuguese pair for this page. `docs/guide.md` has `docs/guia.md`
-beside it because a guide is read by whoever is setting a machine up, and that
-person is Brazilian. This is an index of the program's own screens kept next to
-the generator that writes it, and a second copy of an index is a second thing to
-keep in step for a reader it does not have.
+An inventory, not a tour. [The guide](guide.md) teaches somebody to build a
+profile and shows the screens they pass through on the way; this lists **all** of
+them, including the ones a happy path never reaches, so that a change to the
+window has somewhere to be checked against.
 
 ---
 
@@ -139,7 +131,8 @@ something that also matches the profile's own name. One filter is applied to all
 three lists at once, so a needle that misses the person on the people list
 empties the people list — and then the programs view has nobody to be about and
 draws *nobody is under rules yet* over a household that is right there. The key
-sheet says `/ filter this list`. This is not yet that.
+sheet says `/ filter this list`. This is not yet that — it is §6.7 of the
+guide.
 
 ### The questions
 
@@ -204,7 +197,8 @@ the urgent colour, rather than doing nothing.
 Only the last line of what the CLI printed reaches the bar. The sentence that
 says *what* was refused and why — `profile add: root is root, and an
 administrator does not fiscalise themselves by accident.` — is above it, and is
-dropped. What is on screen is the advice with the verdict missing.
+dropped. What is on screen is the advice with the verdict missing — §6.8 of
+the guide.
 
 **Nobody under rules yet.** A machine where the program has just been installed.
 
@@ -237,12 +231,12 @@ is `32`.
 
 **A scope nothing can name.** `omahouse status` reports these prominently — a
 `tmux-spawn-<uuid>.scope` with twenty processes in it is somebody at the
-keyboard, and spec.md §5 asks for what cannot be accounted for to be said out
-loud. The example household has one, with four processes in it. It appears
-nowhere in this window: `House` computes `unnamedProcesses` for every profile and
-no view reads it. What the status bar does say is the other number,
+keyboard, and [`design.md`](design.md) §5 asks for what cannot be accounted for
+to be said out loud. The example household has one, with four processes in it. It
+appears nowhere in this window: `House` computes `unnamedProcesses` for every
+profile and no view reads it. What the status bar does say is the other number,
 `7 it cannot see`, which is the processes in `session.slice` — a different fact,
-and not this one.
+and not this one. It is §6.9 of the guide.
 
 ## 1.2 The subject face
 
@@ -269,8 +263,8 @@ way to change it.
 
 ![The today view on the subject face: the whole day, the two program budgets, and the day's log.](img/21-subject-today.png)
 
-This is the screen spec.md §8 is about: the fiscalised account is shown what is
-left, and the decisions are somebody else's.
+This is the screen [`design.md`](design.md) §8 is about: the fiscalised account
+is shown what is left, and the decisions are somebody else's.
 
 ### `?` · the keys
 
@@ -293,10 +287,10 @@ fact and there is nothing this reader could press about it.
 
 # 2. From the live system — `vm/shots/`
 
-One run of the script in `vm/OMARCHY-VM.md` through the `omahouse-omarchy` VM,
-on **2026-09-04, between 08:29 and 08:54**, driven by `ydotool` and captured by
-`virsh screenshot` and by `grim`. [`../vm/shots/README.md`](../vm/shots/README.md)
-catalogues all 43 frames, in Portuguese, with what each one was.
+One run through a VM with Omarchy installed on it, on **2026-09-04, between
+08:29 and 08:54**, driven by `ydotool` and captured by `virsh screenshot` and by
+`grim`. Forty-three frames; [the guide](guide.md) is where they are read in
+order, with what each one was.
 
 These are not regenerable, and they are not in the generator on purpose. Every
 screen below belongs to something other than this window — a display manager, a
