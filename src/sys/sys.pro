@@ -8,10 +8,12 @@
 # of and the account table live on this side of the line instead, and the core
 # stays a thing that can be proved with a QDateTime made up on the spot.
 #
-# Stage 7 of plan.md grows this library rather than adding another: closing a
-# scope is a write to its cgroup.kill, warning is a systemd-run, and logging out
-# is /etc/omahouse/blocked plus terminate-user. All three are the machine, and
-# all three belong beside the reading of it.
+# So does the loop that joins them: `Watch` is the caller `spec.md` §5 describes,
+# and it is here because the clock, the ledger file and the notification are all
+# the machine. Warning is a systemd-run, and that arrived with stage 6. Stage 7
+# grows this library rather than adding another for the two that are left:
+# closing a scope is a write to its cgroup.kill, and logging out is
+# /etc/omahouse/blocked plus terminate-user.
 OMAHOUSE_PROJECT_DIR = $$PWD
 OMAHOUSE_SOURCE_ROOT = $$clean_path($$PWD/../..)
 include($$PWD/../../qmake/layout.pri)
@@ -26,11 +28,15 @@ TARGET    = omahousesys
 INCLUDEPATH += $$PWD/../core
 
 HEADERS += \
+    Notify.h \
     Paths.h \
     Proc.h \
-    Users.h
+    Users.h \
+    Watch.h
 
 SOURCES += \
+    Notify.cpp \
     Paths.cpp \
     Proc.cpp \
-    Users.cpp
+    Users.cpp \
+    Watch.cpp

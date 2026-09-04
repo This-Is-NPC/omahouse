@@ -4,7 +4,7 @@
 
 House rules for the accounts on an Omarchy machine: which programs each profile may open, and for how long.
 
-Reading needs no privilege at all: `status`, `report` and `profile list|show` are for anybody, and the fiscalised user runs `omahouse status` to see what is left of their own day. Writing needs root, because /etc/omahouse/profiles.json is the file a root daemon reads; the studio of stage 8 gets there through `pkexec`, and a run without the privilege says so and prints the line to try. `watch`, the daemon that counts and closes, arrives with stage 6 of `plan.md` and is named here when typed, rather than answered with `unknown command`, because it is not a typo.
+Reading needs no privilege at all: `status`, `report` and `profile list|show` are for anybody, and the fiscalised user runs `omahouse status` to see what is left of their own day. Writing needs root, because /etc/omahouse/profiles.json is the file a root daemon reads; the studio of stage 8 gets there through `pkexec`, and a run without the privilege says so and prints the line to try. `watch` is the one verb that keeps running, and the only one that writes a ledger. It counts, it warns, and it closes nothing: closing an app and ending a session are the teeth of stage 7 of `plan.md`, exercised in a VM and not on a development machine, and until they arrive a profile that would close something says so in the journal and leaves it open.
 
 An app is named by the id of its scope -- `chromium`, `org.freedesktop.Platform` -- and `omahouse status` is what lists the ones that are open. A length of time is `45m`, `2h`, `1h30m`, or a bare `90` for the minutes everything is counted in; anything else is refused rather than taken for minutes, because `--limit 2h` read as two minutes is a session that closes at nine in the morning and refusing costs one retyped word.
 
@@ -257,3 +257,42 @@ A budget the profile does not have is refused: time added to a counter the daemo
 ### Flags
 - **`--session <duration>`** — More of the session: 10m
 - **`--budget <id>=<duration>`** — More of one budget: minecraft=15m
+
+## `omahouse watch`
+
+- **Usage:** `omahouse watch [FLAGS]`
+
+The loop of `spec.md` §5, and the one verb here that keeps running.
+
+Every cycle: find the accounts with a profile that have a session, list the app scopes under their `app.slice`, hand the scopes and the profile and the day's ledger and the time to the core, write the ledger back, and carry out what comes of it. The clock enters in the loop and nowhere else -- the core takes `now` by parameter, which is what lets a two hour budget be proved in microseconds by a test that never touches the clock of the machine it runs on.
+
+The debit is once per budget with at least one live app matching its selector, and never once per process. Twenty-one Chromium processes are one app, because the identity of an app is its systemd scope; a scope under `app.slice` whose unit name is not an app scope name -- the twenty-three `tmux-spawn-<uuid>.scope` of the development machine -- has no id to match a rule against and is not counted either way. The ledger is written by tmp and `rename`, so a reader of it sees the whole of the last cycle or the whole of the one before, and it is written only when it changed: an unchanged file rewritten every two seconds is a disk that never rests to say nothing.
+
+It carries out the warnings, and only those. `poc/findings.md` round 2 measured how, against a real notification daemon: `systemd-run --uid=<uid> --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<uid>/bus notify-send <summary> <body>`. A `watch` running as the very account it is watching already has a session bus in its environment and calls `notify-send` by itself, which is what makes one cycle something to try here rather than only in a VM. Both programs move by variable -- `$OMAHOUSE_NOTIFY_SEND` and `$OMAHOUSE_SYSTEMD_RUN` -- for the reason `$OMAHOUSE_USERADD` does: a suite proves the command without a notification appearing on the screen of whoever runs it.
+
+The words are written here and not in the core. A decision arrives as a reason and a number of seconds -- refused, a `warnAt` mark crossed, the grace window started, out of time -- and what to say about it depends on things the core is right to ignore: what the budget does when it runs out, and whether the teeth are in at all. A profile that is only watching is never told that something will close, because a notification that promises what does not happen teaches whoever reads it to ignore the next one.
+
+Each thing is said once, and the ledger is what remembers it: a mark that fires without being written down is a notification every two seconds for five minutes. So the ledger is written before a word goes out, and a warning that could not be delivered is a line in the journal rather than one that comes back on the next cycle.
+
+Closing an app and ending a session are stage 7 of `plan.md`. This build does not have them -- not held back by a flag, absent -- so no run of it can end anybody's session. A decision of either kind is named in the journal and stepped over, which in ordinary use does not even come up: a profile is born observing, and the core emits neither without `enforce`.
+
+The journal is quiet on purpose. A line when something changed -- somebody logged in, an app opened or closed, a budget started or stopped being spent -- and a line for everything said, and nothing at all for a cycle that looks like the one before it. A two second loop that logs every tick puts seventeen hundred identical lines a day where the one line that mattered was.
+
+The rules are read again every cycle and not held from the start, because `spec.md` §1 asks that an operator be able to hand over ten minutes with the game still running. A `profiles.json` that stops parsing is complained about once and the last good reading of it is kept: a broken file must not read as nobody being under rules.
+
+The day's ledger is the only thing it writes, so root is the only thing it asks for, and it asks before it reads anything. A run with `$OMAHOUSE_STATE_DIR` pointed somewhere of its own asks for nothing, and neither does `--dry-run`.
+
+With no profile anywhere it says so and comes back. A daemon spinning every two seconds over an empty list is a fan running for nothing.
+
+It stops on SIGINT and SIGTERM after the cycle it is in, which is a `rename` away from being no cycle at all.
+
+### Flags
+- **`--interval <seconds>`** — Seconds between cycles, two by default.
+
+  One number for the wait and for the debit, because they are the same thing: a loop that wakes every five seconds and debits two is a day that never ends, and one that wakes every two and debits five is a day that ends at teatime. Whole seconds, from 1 to 3600, and anything else is a usage error -- the ceiling is there to catch a number typed for something else, not to be used, since an hour debited as one tick is not accounting.
+- **`--once`** — One cycle, and out.
+
+  No loop behind it, so it is a question rather than a daemon: what does omahouse count right now, and what would it say. It prints the accounting -- the apps it found, the budgets it debited, and what is left of each -- because somebody typed it and is waiting for an answer, where the loop only writes its journal.
+- **`--dry-run`** — Decide, and touch nothing.
+
+  It reads the tree, debits the tick and prints the whole of the accounting, and then writes no ledger and sends no notification. What makes the loop safe to point at a machine nobody meant to fiscalise, and it needs no privilege of any kind.

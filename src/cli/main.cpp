@@ -1,10 +1,12 @@
 #include "Duration.h"
 #include "Ledger.h"
+#include "Notify.h"
 #include "Paths.h"
 #include "Proc.h"
 #include "Profile.h"
 #include "Users.h"
 #include "Version.h"
+#include "Watch.h"
 
 #include <QCoreApplication>
 #include <QDate>
@@ -12,11 +14,17 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSocketNotifier>
 #include <QString>
 #include <QStringList>
 #include <QTextStream>
+#include <QTimer>
+
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <csignal>
 
 #ifndef OMAHOUSE_VERSION
 #error "OMAHOUSE_VERSION is not defined -- qmake/version.pri was not included."
@@ -68,12 +76,15 @@ struct Options {
     QString limit;
     QString session;
     QString budget;
+    QString interval;
     bool createUser = false;
     bool keepAccount = false;
     bool on = false;
     bool off = false;
     bool allow = false;
     bool deny = false;
+    bool once = false;
+    bool dryRun = false;
     QStringList given;
 };
 
@@ -136,6 +147,7 @@ bool parseOptions(const QStringList &args, Options *options, QStringList *positi
         {"--limit", &Options::limit, "a length of time, like 45m"},
         {"--session", &Options::session, "a length of time, like 2h"},
         {"--budget", &Options::budget, "an id and a length of time, like minecraft=45m"},
+        {"--interval", &Options::interval, "a number of seconds, like 2"},
     };
     struct Flag {
         const char *name;
@@ -145,6 +157,7 @@ bool parseOptions(const QStringList &args, Options *options, QStringList *positi
         {"--create-user", &Options::createUser}, {"--keep-account", &Options::keepAccount},
         {"--on", &Options::on},                  {"--off", &Options::off},
         {"--allow", &Options::allow},            {"--deny", &Options::deny},
+        {"--once", &Options::once},              {"--dry-run", &Options::dryRun},
     };
 
     for (int i = 0; i < args.size(); ++i) {
@@ -1770,6 +1783,363 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
     return kOk;
 }
 
+// -- watch -------------------------------------------------------------------
+//
+// The loop of spec.md §5, and the one verb of this build that keeps running.
+// The work itself is `Watch` in src/sys, because counting is reading the machine
+// and warning is speaking to it; what is here is the command line, the screen
+// and the journal.
+//
+// Three things make it safe to try on a machine nobody meant to fiscalise, and
+// all three are asked for by plan.md, which puts stages 6 and 7 in the VM:
+// `--dry-run` decides and touches nothing, `--once` is a single cycle with no
+// loop behind it, and the four roots move by variable exactly as they do for
+// every other verb. `Close` and `Logout` are not implemented at all here -- not
+// held back by a flag, not present -- so no run of this build can end a session.
+
+/// The slowest tick worth allowing. An hour between cycles is an hour of
+/// somebody's afternoon debited as one tick, which is not accounting; the number
+/// is here to catch `--interval 3600` typed for something else, not to be used.
+constexpr int kSlowestTick = 3600;
+
+/// One line for the journal: when, who, and what happened.
+///
+/// stderr, because stdout carries the `--json` stream and a person reading the
+/// journal and a script reading the documents must not have to share a channel.
+void say(const QDateTime &at, const QString &user, const QString &line)
+{
+    err() << at.toString(Qt::ISODate) << ' ' << user << ": " << line << '\n';
+}
+
+/// What one user's cycle was, in one sentence.
+QString whatHappened(const Watched &watched)
+{
+    if (!watched.error.isEmpty())
+        return watched.error;
+    if (!watched.enabled)
+        return QStringLiteral("the profile is switched off; not counting");
+    if (!watched.account)
+        return QStringLiteral("no account of that name on this machine");
+    if (!watched.session)
+        return QStringLiteral("not logged in; nothing to count");
+
+    const QString apps = watched.apps.isEmpty()
+        ? QStringLiteral("no apps")
+        : QStringLiteral("%1 app%2 (%3)")
+              .arg(watched.apps.size())
+              .arg(watched.apps.size() == 1 ? QString() : QStringLiteral("s"),
+                   watched.apps.join(QStringLiteral(", ")));
+    const QString clock = watched.debited.isEmpty()
+        ? QStringLiteral("nothing on the clock")
+        : QStringLiteral("counting %1").arg(watched.debited.join(QStringLiteral(", ")));
+    return QStringLiteral("%1, %2").arg(apps, clock);
+}
+
+/// How a notification went, as a parenthesis after it.
+QString howItWent(const Said &said, bool dryRun)
+{
+    if (dryRun)
+        return QStringLiteral(" (dry run: not sent)");
+    if (said.sent)
+        return {};
+    return QStringLiteral(" (not sent: %1)").arg(said.error);
+}
+
+QString whatWasNotDone(const Decision &decision)
+{
+    const QString what = decision.kind == Decision::Kind::Logout
+        ? QStringLiteral("logout")
+        : QStringLiteral("close %1").arg(decision.scopeUnit);
+    return QStringLiteral("%1 — not run: the teeth arrive with stage 7 of plan.md").arg(what);
+}
+
+/// The journal of one cycle: a line for anything that changed, and a line for
+/// everything said.
+///
+/// Silence is the ordinary state. A tick that finds the same apps open and the
+/// same budgets running writes nothing at all, because a two second loop that
+/// logs every cycle puts seventeen hundred identical lines a day into the
+/// journal and buries the one line that mattered.
+void logCycle(const Cycle &cycle)
+{
+    for (const Watched &watched : cycle.users) {
+        if (watched.worthSaying)
+            say(cycle.at, watched.user, whatHappened(watched));
+        for (const Said &said : watched.said) {
+            say(cycle.at, watched.user,
+                QStringLiteral("%1: %2 — %3%4")
+                    .arg(decisionReasonName(said.decision.reason), said.words.summary,
+                         said.words.body, howItWent(said, cycle.dryRun)));
+        }
+        for (const Decision &decision : watched.notYet)
+            say(cycle.at, watched.user, whatWasNotDone(decision));
+    }
+    err().flush();
+}
+
+/// One cycle on the screen, for somebody who typed `--once` and wants the
+/// accounting rather than a log line.
+void printCycle(const Cycle &cycle, const Profiles &profiles)
+{
+    out() << QStringLiteral("omahouse watch — one cycle at %1, counting %2s\n")
+                 .arg(cycle.at.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")))
+                 .arg(cycle.tickSeconds);
+    if (cycle.dryRun)
+        out() << "dry run: nothing was written, and nothing was said\n";
+
+    for (const Watched &watched : cycle.users) {
+        out() << '\n' << watched.user;
+        if (!watched.displayName.isEmpty())
+            out() << QStringLiteral(" (%1)").arg(watched.displayName);
+        out() << '\n';
+        out() << QStringLiteral("  %1\n").arg(whatHappened(watched));
+
+        if (!watched.session || !watched.error.isEmpty() || !watched.enabled
+            || !watched.account) {
+            continue;
+        }
+
+        const QString path = paths::ledgerFile(watched.user, cycle.at.date());
+        out() << QStringLiteral("  %1 — %2\n")
+                     .arg(path,
+                          watched.wrote ? QStringLiteral("written")
+                                        : (cycle.dryRun ? QStringLiteral("left alone")
+                                                        : QStringLiteral("nothing to change")));
+
+        const Profile *profile = profileFor(profiles, watched.user);
+        const QVector<Balance> balances =
+            profile ? balancesOf(*profile, watched.ledger) : QVector<Balance>();
+        if (!balances.isEmpty()) {
+            out() << '\n';
+            printBalances(balances);
+        }
+        for (const Said &said : watched.said) {
+            out() << QStringLiteral("\n  %1 — %2%3\n")
+                         .arg(said.words.summary, said.words.body,
+                              howItWent(said, cycle.dryRun));
+        }
+        for (const Decision &decision : watched.notYet)
+            out() << QStringLiteral("  %1\n").arg(whatWasNotDone(decision));
+    }
+}
+
+QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
+{
+    QJsonArray users;
+    for (const Watched &watched : cycle.users) {
+        QJsonArray said;
+        for (const Said &one : watched.said) {
+            QJsonObject object {
+                {QStringLiteral("reason"), decisionReasonName(one.decision.reason)},
+                {QStringLiteral("budget"), one.decision.budgetId},
+                {QStringLiteral("scope"), one.decision.scopeUnit},
+                {QStringLiteral("app"), one.app},
+                {QStringLiteral("secondsLeft"), one.decision.secondsLeft},
+                {QStringLiteral("summary"), one.words.summary},
+                {QStringLiteral("body"), one.words.body},
+                {QStringLiteral("sent"), one.sent},
+            };
+            object.insert(QStringLiteral("error"),
+                          one.error.isEmpty() ? QJsonValue() : QJsonValue(one.error));
+            said.append(object);
+        }
+        QJsonArray notYet;
+        for (const Decision &decision : watched.notYet) {
+            notYet.append(QJsonObject {
+                {QStringLiteral("kind"), decisionKindName(decision.kind)},
+                {QStringLiteral("reason"), decisionReasonName(decision.reason)},
+                {QStringLiteral("budget"), decision.budgetId},
+                {QStringLiteral("scope"), decision.scopeUnit},
+            });
+        }
+        const Profile *profile = profileFor(profiles, watched.user);
+        QJsonObject object {
+            {QStringLiteral("user"), watched.user},
+            {QStringLiteral("uid"), static_cast<qint64>(watched.uid)},
+            {QStringLiteral("account"), watched.account},
+            {QStringLiteral("enabled"), watched.enabled},
+            {QStringLiteral("session"), watched.session},
+            {QStringLiteral("apps"), QJsonArray::fromStringList(watched.apps)},
+            {QStringLiteral("debited"), QJsonArray::fromStringList(watched.debited)},
+            {QStringLiteral("wrote"), watched.wrote},
+            {QStringLiteral("said"), said},
+            // The decisions this stage does not carry out, named rather than
+            // dropped: a Close that nothing acted on is exactly what a reader of
+            // stage 6 needs to be able to see.
+            {QStringLiteral("notYet"), notYet},
+            {QStringLiteral("budgets"),
+             profile ? balancesToJson(balancesOf(*profile, watched.ledger)) : QJsonArray()},
+        };
+        object.insert(QStringLiteral("error"),
+                      watched.error.isEmpty() ? QJsonValue() : QJsonValue(watched.error));
+        users.append(object);
+    }
+    return QJsonObject {
+        {QStringLiteral("at"), cycle.at.toString(Qt::ISODate)},
+        {QStringLiteral("tickSeconds"), cycle.tickSeconds},
+        {QStringLiteral("dryRun"), cycle.dryRun},
+        {QStringLiteral("users"), users},
+    };
+}
+
+// -- stopping when told ------------------------------------------------------
+
+int g_stopPipe[2] = {-1, -1};
+
+/// One byte down a pipe, and nothing else.
+///
+/// A signal handler may call almost nothing -- not `QCoreApplication::quit`, not
+/// anything that takes a lock -- so it writes a byte and the event loop does the
+/// rest. Which means the cycle in flight finishes first: the ledger is written
+/// by a single `rename`, and a SIGTERM in the middle of a cycle leaves the day
+/// whole either way.
+void onStopSignal(int number)
+{
+    const char byte = static_cast<char>(number);
+    const ssize_t written = ::write(g_stopPipe[1], &byte, 1);
+    static_cast<void>(written);
+}
+
+/// SIGINT and SIGTERM end the loop between cycles. False if the pipe could not
+/// be made, and then the default disposition still ends the process -- less
+/// tidily, and without a last flush.
+bool stopWhenTold(QObject *guard)
+{
+    if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, g_stopPipe) != 0)
+        return false;
+    auto *notifier = new QSocketNotifier(g_stopPipe[0], QSocketNotifier::Read, guard);
+    QObject::connect(notifier, &QSocketNotifier::activated, guard,
+                     [] { QCoreApplication::quit(); });
+    std::signal(SIGINT, onStopSignal);
+    std::signal(SIGTERM, onStopSignal);
+    return true;
+}
+
+int cmdWatch(const Globals &g, const QStringList &positionals, const Options &options)
+{
+    if (!positionals.isEmpty()) {
+        fail(QStringLiteral("watch: it watches every profile there is and takes no user; "
+                            "omahouse status %1 answers about one")
+                 .arg(positionals.first()));
+        return kUsage;
+    }
+
+    int interval = 2;
+    if (!options.interval.isEmpty()) {
+        bool ok = false;
+        interval = options.interval.toInt(&ok);
+        if (!ok || interval < 1 || interval > kSlowestTick) {
+            fail(QStringLiteral("watch: --interval wants whole seconds between 1 and %1, "
+                                "not '%2'")
+                     .arg(kSlowestTick)
+                     .arg(options.interval));
+            return kUsage;
+        }
+    }
+
+    // The ledger is the only thing this writes, so it is the only privilege it
+    // asks for -- and a dry run asks for none at all, which is what lets anybody
+    // point the four roots at a directory of their own and watch one cycle of
+    // their own session.
+    if (!options.dryRun
+        && !mayWrite(QStringLiteral("watch"), paths::stateDir(), paths::stateDirIsTheSystems(),
+                     g)) {
+        return kUsage;
+    }
+
+    int status = kOk;
+    Profiles profiles;
+    if (!loadProfiles(&profiles, &status))
+        return status;
+    // Nobody to watch is not a loop with nothing in it. plan.md is plain about
+    // this: a daemon spinning every two seconds over an empty list is a fan
+    // running for nothing, and the answer somebody wants is the sentence that
+    // says so.
+    if (profiles.all.isEmpty()) {
+        note(profiles.missing
+                 ? QStringLiteral("omahouse: there is no %1 yet, so nobody is under rules "
+                                  "and there is nothing to watch")
+                       .arg(paths::profilesFile())
+                 : QStringLiteral("omahouse: %1 holds no profiles, so there is nothing to "
+                                  "watch")
+                       .arg(paths::profilesFile()));
+        return kOk;
+    }
+
+    const Proc proc;
+    DesktopNotifier notifier;
+    Watch::Options watching;
+    watching.tickSeconds = interval;
+    watching.dryRun = options.dryRun;
+    Watch watch(&proc, &notifier, watching);
+
+    const auto cycle = [&](const Profiles &current) {
+        // The clock enters here and nowhere else. `evaluate` takes `now` by
+        // parameter for exactly this reason, and it is what lets a two hour
+        // budget be proved in microseconds by a test that never touches the
+        // clock of the machine it runs on.
+        const Cycle done = watch.tick(current.all, QDateTime::currentDateTime());
+        logCycle(done);
+        if (g.json)
+            printJson(cycleToJson(done, current));
+        else if (options.once)
+            printCycle(done, current);
+        out().flush();
+    };
+
+    if (options.once) {
+        cycle(profiles);
+        return kOk;
+    }
+
+    QObject guard;
+    if (!stopWhenTold(&guard)) {
+        note(QStringLiteral("omahouse: could not arrange to stop on a signal; a SIGTERM will "
+                            "end this run abruptly rather than after the cycle it is in"));
+    }
+
+    // Read again every cycle, and not held from here. spec.md §1: the operator
+    // hands over ten minutes with the game still running, and a daemon holding a
+    // copy of the rules from when it started cannot honour that. A file that
+    // stops parsing is complained about once and the loop keeps its last good
+    // reading of it, because a broken profiles.json must not read as nobody
+    // being under rules.
+    QString complaint;
+    Profiles current = profiles;
+    QTimer timer(&guard);
+    timer.setInterval(interval * 1000);
+    QObject::connect(&timer, &QTimer::timeout, &guard, [&] {
+        Profiles read;
+        QString error;
+        if (readProfiles(paths::profilesFile(), &read.all, &error, &read.missing)) {
+            if (!complaint.isEmpty()) {
+                note(QStringLiteral("omahouse: %1 reads again").arg(paths::profilesFile()));
+                complaint.clear();
+            }
+            current = read;
+        } else if (error != complaint) {
+            complaint = error;
+            fail(QStringLiteral("watch: %1 (carrying on with the last reading of it)")
+                     .arg(error));
+            err().flush();
+        }
+        cycle(current);
+    });
+
+    note(QStringLiteral("omahouse: watching %1 profile%2, a cycle every %3s%4")
+             .arg(profiles.all.size())
+             .arg(profiles.all.size() == 1 ? QString() : QStringLiteral("s"))
+             .arg(interval)
+             .arg(options.dryRun ? QStringLiteral(" — dry run, nothing is written or said")
+                                 : QString()));
+    // The first cycle now rather than one interval from now: a daemon that says
+    // nothing for its first two seconds is a daemon nobody can tell from one
+    // that failed to start.
+    cycle(current);
+    timer.start();
+    return QCoreApplication::exec() == 0 ? kOk : kUsage;
+}
+
 // -- the screen --------------------------------------------------------------
 
 void printHelp()
@@ -1797,6 +2167,13 @@ Writing, and root needed — the studio gets there by pkexec:
   limit <user> --session 2h | --budget minecraft=45m
   grant <user> --session 10m | --budget minecraft=15m
 
+The loop, which is the only verb that keeps running:
+  watch [--interval 2] [--once] [--dry-run]
+                           count what every profile has open, and warn before
+                           the time is out. It writes the day's ledger and
+                           nothing else; --dry-run writes nothing and says
+                           nothing, and --once is a single cycle
+
 An app is named by the id of its scope: `chromium`, `org.freedesktop.Platform`.
 `omahouse status` lists the ones that are open, and says when a scope holds
 something other than what its name says.
@@ -1814,8 +2191,12 @@ Files:
   /var/lib/omahouse/<user>/<date>.json the day's ledger     (OMAHOUSE_STATE_DIR)
   /sys/fs/cgroup                       the scopes           (OMAHOUSE_CGROUP_ROOT)
   /proc                                what a scope runs    (OMAHOUSE_PROC_ROOT)
+  notify-send                          how a warning is said (OMAHOUSE_NOTIFY_SEND)
+  systemd-run                          how it reaches a session (OMAHOUSE_SYSTEMD_RUN)
 
-`watch`, the daemon that counts and closes, arrives with stage 6 of plan.md.
+`watch` counts and warns. Closing an app and ending a session arrive with
+stage 7 of plan.md; until then a profile that would close something says so in
+the journal and closes nothing.
 
 Exit: 0 it answered, 1 a usage error or a file it could not read, 2 no such
 account or no such profile.
@@ -1866,11 +2247,13 @@ int dispatch(const Globals &g, const QStringList &args)
             return kUsage;
         return cmdGrant(g, positionals, options);
     }
-    // The verb spec.md §7 declares and stage 6 of plan.md builds. Named, rather
-    // than met with "unknown command", because it is not a typo.
     if (verb == QLatin1String("watch")) {
-        fail(QStringLiteral("watch: the daemon arrives with stage 6 of plan.md"));
-        return kUsage;
+        if (!onlyTheseOptions(options,
+                              {QStringLiteral("--interval"), QStringLiteral("--once"),
+                               QStringLiteral("--dry-run")},
+                              verb))
+            return kUsage;
+        return cmdWatch(g, positionals, options);
     }
     fail(QStringLiteral("omahouse: unknown command '%1' (try omahouse --help)").arg(verb));
     return kUsage;

@@ -14,8 +14,8 @@ check.
 
 ## Using it
 
-Today the CLI reads and configures. The daemon that counts arrives with stage 6
-of `plan.md`, and acting on a decision with stage 7.
+Today the CLI reads, configures and counts. `watch` is the loop, and it warns;
+closing an app and ending a session arrive with stage 7 of `plan.md`.
 
 ```bash
 omahouse status [user]     # live app scopes, what they are, and what is left
@@ -29,6 +29,9 @@ sudo omahouse allow julia minecraft-launcher --limit 45m
 sudo omahouse limit julia --session 2h
 sudo omahouse grant julia --session 10m        # with the game still open
 sudo omahouse profile enforce julia --on       # after a day of the report
+
+omahouse watch --once --dry-run   # one cycle: what is open, and what is left
+sudo omahouse watch               # the loop, every two seconds
 ```
 
 Reading needs no privilege — the fiscalised user runs `omahouse status` and sees

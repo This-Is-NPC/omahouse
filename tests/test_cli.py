@@ -8,9 +8,11 @@ Chromium open in it. The fake cgroup tree is built out of unit names that were
 measured: poc/findings.md for the flatpak scope, the escaped one and the shim of
 round 4, the development machine for the rest.
 
-Two things this suite must never do to the machine it runs on: create an account
-and write under /etc. The first goes through an injected `useradd` that records
-the call, and the second is asserted by being refused.
+Three things this suite must never do to the machine it runs on: create an
+account, write under /etc, and put a notification on somebody's screen. The
+first goes through an injected `useradd` that records the call, the second is
+asserted by being refused, and the third through an injected `notify-send` that
+every run gets, whether or not the case is about `watch`.
 
 A verb that parses and does nothing is indistinguishable from one that works
 until somebody depends on it."""
@@ -167,6 +169,26 @@ class Box:
         self.state = self.root / "var"
         self.config.mkdir()
         self.state.mkdir()
+        self.notified = self.root / "notified.log"
+        self.notify_send = self.root / "notify-send"
+        # A tab between the summary and the body, because both of them are
+        # sentences with spaces in them and the assertions are about the words.
+        self.notify_send.write_text(
+            f'#!/bin/sh\n{{ printf "%s\\t" "$@"; printf "\\n"; }} >> {self.notified}\n')
+        self.notify_send.chmod(0o755)
+
+    def said(self):
+        """Every notification the binary handed to `notify-send`, as it built it.
+
+        The real one is never on the other end. `watch` warns, and a suite that
+        proves it does has no business making the machine it runs on flash a
+        message at whoever started it -- which is the same reasoning that keeps
+        `useradd` behind a variable.
+        """
+        if not self.notified.exists():
+            return []
+        return [line.split("\t")[:-1]
+                for line in self.notified.read_text().splitlines() if line]
 
     def write_profiles(self, document=None):
         (self.config / "profiles.json").write_text(
@@ -177,6 +199,28 @@ class Box:
         directory.mkdir(parents=True, exist_ok=True)
         (directory / f"{day.isoformat()}.json").write_text(
             json.dumps(ledger_document(day, seconds)))
+
+    def write_day(self, day, budgets):
+        """A day with nothing in it but the seconds already spent.
+
+        The one above carries grants and events, which is what `report` is asked
+        to print. A cycle of `watch` is about what happens next, and it has to
+        start from a day nobody has been warned in yet.
+        """
+        directory = self.state / USER
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"{day.isoformat()}.json").write_text(json.dumps({
+            "schemaVersion": 1,
+            "user": USER,
+            "date": day.isoformat(),
+            "budgets": budgets,
+            "grants": [],
+            "events": [],
+        }))
+
+    def day(self, day):
+        path = self.state / USER / f"{day.isoformat()}.json"
+        return json.loads(path.read_text()) if path.exists() else None
 
     def fake_useradd(self):
         """A useradd that records the call and creates nothing.
@@ -200,6 +244,10 @@ class Box:
             "OMAHOUSE_PROC_ROOT": str(self.proc),
             "OMAHOUSE_CONFIG_DIR": str(self.config),
             "OMAHOUSE_STATE_DIR": str(self.state),
+            # Always, and not only for the cases about `watch`: a stray
+            # notification on somebody's screen is the kind of thing a suite gets
+            # to do exactly once before nobody runs it again.
+            "OMAHOUSE_NOTIFY_SEND": str(self.notify_send),
         }
         env.pop("OMAHOUSE_JSON", None)
         # The roots put back where the machine keeps them, which is how the
@@ -215,6 +263,9 @@ class Box:
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             # Never the terminal the suite was started from.
             stdin=subprocess.DEVNULL,
+            # `watch` is the one verb that can decide to keep running, and a
+            # suite that hangs is a suite nobody can read the failure of.
+            timeout=60,
         )
 
 
@@ -297,10 +348,11 @@ def check_help_and_refusals(box):
     for verb in ("allow", "deny", "limit", "grant", "profile add"):
         assert verb in helped.stdout, verb
 
-    # The one verb a later stage still builds is named rather than called a typo.
-    later = box.run("watch")
-    assert later.returncode == 1
-    assert "stage 6" in later.stderr, later.stderr
+    # The loop is on the screen too, and what it does not do yet is said in the
+    # same place: this build warns, and closing an app and ending a session
+    # arrive with stage 7.
+    assert "watch" in helped.stdout
+    assert "stage 7" in helped.stdout
 
     # An option that belongs to another verb is refused rather than dropped: a
     # limit somebody asked for and did not get is worse than a usage error.
@@ -1014,6 +1066,210 @@ def check_the_writing_verbs_want_a_profile_that_is_there(box):
         assert "one of them" in vague.stderr, args
 
 
+# -- watch --------------------------------------------------------------------
+#
+# The loop of spec.md §5, driven the same way everything else here is: the four
+# roots in a temporary directory, no root, no session of the fiscalised user, and
+# `notify-send` pointed at a script that writes down what it was handed.
+#
+# `--once` is what makes it drivable at all -- one cycle and out, with no event
+# loop behind it -- and it is also what stage 7 will run in the nspawn box of
+# testing.md.
+
+
+def watching_profile(enforce=False, default="deny"):
+    """A profile over the fake session: two hours of it, forty-five minutes of
+    Chromium, and an editor that is counted and never runs out."""
+    return {
+        "schemaVersion": 1,
+        "profiles": [{
+            "user": USER,
+            "displayName": "Júlia",
+            "enabled": True,
+            "enforce": enforce,
+            "default": default,
+            "warnAt": [10, 5, 1],
+            "grace": 20,
+            "rules": [
+                {"match": "chromium", "verdict": "allow"},
+                {"match": "code", "verdict": "allow"},
+            ],
+            "budgets": [
+                {"id": "session", "match": "*", "dailyMinutes": 120,
+                 "onExhausted": "logout"},
+                {"id": "chromium", "match": "chromium", "dailyMinutes": 45,
+                 "onExhausted": "close"},
+                {"id": "code", "match": "code"},
+            ],
+        }],
+    }
+
+
+def check_watch_says_when_there_is_nobody_to_watch(box):
+    """No profiles is not a loop with nothing in it.
+
+    Both spellings of it: no profiles.json at all, which is every machine before
+    the first `profile add`, and a file that holds an empty list. And without
+    `--once`, so that what is asserted is that it really does come back rather
+    than spinning every two seconds over nobody.
+    """
+    nobody = box.run("watch")
+    assert nobody.returncode == 0, nobody.stderr
+    assert "nothing to watch" in nobody.stderr
+    assert nobody.stdout == ""
+
+    box.write_profiles({"schemaVersion": 1, "profiles": []})
+    empty = box.run("watch")
+    assert empty.returncode == 0, empty.stderr
+    assert "holds no profiles" in empty.stderr
+
+
+def check_watch_dry_run_counts_and_touches_nothing(box):
+    """The mode that makes stage 6 safe to try on a development machine.
+
+    It reads the tree, debits the tick, and prints the accounting -- and writes
+    no ledger, sends no notification, and leaves the day exactly as it found it.
+    """
+    box.write_profiles(watching_profile())
+    ran = box.run("watch", "--once", "--dry-run")
+    assert ran.returncode == 0, ran.stderr
+    assert "dry run" in ran.stdout
+
+    # One tick of two seconds, once per budget with a live app matching it and
+    # never once per process: the nineteen processes of the Chromium scope are
+    # one app.
+    assert row_for(ran.stdout, "session", after="BUDGET")[:4] \
+        == ["session", "2h00m", "2s", "1h59m"]
+    assert row_for(ran.stdout, "chromium", after="BUDGET")[:4] \
+        == ["chromium", "45m", "2s", "44m"]
+
+    assert not (box.state / USER).exists()
+    assert box.said() == []
+
+    # The same cycle as one document, for whatever reads a stream of them.
+    document = json.loads(box.run("watch", "--once", "--dry-run", "--json").stdout)
+    assert document["dryRun"] and document["tickSeconds"] == 2
+    watched = document["users"][0]
+    assert watched["user"] == USER and watched["session"] and not watched["wrote"]
+    assert watched["debited"] == ["chromium", "code", "session"]
+    # The scopes with no id are seen and not counted: this machine's twenty-three
+    # `tmux-spawn-<uuid>.scope` are the second blind spot of poc/findings.md
+    # round 4, and a scope no rule can name is not one to invent a name for.
+    assert "chromium" in watched["apps"]
+    assert not any(app.startswith("tmux-spawn") for app in watched["apps"])
+
+
+def check_watch_debits_the_day_and_warns_once(box):
+    """A cycle writes the day, and the mark fires once.
+
+    Seeded five minutes from the end of a two hour session, which is a warnAt
+    mark the profile carries. The second cycle debits again and says nothing:
+    the ledger is where a once-only decision remembers it has fired, and without
+    that a two second loop is a notification every two seconds for five minutes.
+    """
+    # Allowing by default, so that the only thing said is the one about time: a
+    # profile is born this way, and the refusals have a case of their own.
+    box.write_profiles(watching_profile(default="allow"))
+    box.write_day(TODAY, {"session": 120 * 60 - 300})
+
+    first = box.run("watch", "--once")
+    assert first.returncode == 0, first.stderr
+    day = box.day(TODAY)
+    assert day["budgets"]["session"] == 120 * 60 - 298
+    assert day["budgets"]["chromium"] == 2
+
+    said = box.said()
+    assert len(said) == 1, said
+    assert said[0][0] == "5 minutes left"
+    # The clock time of spec.md §6's example, worked out by the caller from the
+    # seconds the core handed back.
+    assert re.fullmatch(r"Your session runs out at \d\d:\d\d\.", said[0][1]), said
+
+    # And both marks are in the day, which is what a restarted daemon reads.
+    # The seeded ledger crossed the ten minute mark and the five in the same
+    # tick, so both are written down and neither can fire later at a time that
+    # would be a lie -- and one thing is said, the smaller of them, because two
+    # notifications in the same second saying different numbers is worse than
+    # one saying the number that matters.
+    assert [(event["kind"], event["budget"], event["minutes"]) for event in day["events"]] \
+        == [("warn", "session", 10), ("warn", "session", 5)]
+
+    second = box.run("watch", "--once")
+    assert second.returncode == 0, second.stderr
+    assert box.day(TODAY)["budgets"]["session"] == 120 * 60 - 296
+    assert box.said() == said
+
+
+def check_watch_carries_out_warnings_and_nothing_else(box):
+    """spec.md §5 decides three things and this stage does one of them.
+
+    With the teeth on, the core hands back a Close for every app that is not on
+    the list. Stage 6 names them in the journal and steps over them -- plan.md
+    keeps them for stage 7 and the VM -- and what it does carry out is the
+    warning.
+    """
+    box.write_profiles(watching_profile(enforce=True))
+    ran = box.run("watch", "--once")
+    assert ran.returncode == 0, ran.stderr
+
+    summaries = [line[0] for line in box.said()]
+    assert "xdg-terminal-exec is not allowed" in summaries, summaries
+    assert "org.freedesktop.Platform is not allowed" in summaries, summaries
+    # The ones a rule allows are not refused, whatever else is true of them.
+    assert not any(said.startswith("chromium is not") for said in summaries)
+    for said in box.said():
+        assert said[1] == "It is not one of the programs released for Júlia."
+
+    # Named, and not run. The unit is in the line, because it is what
+    # `cgroup.kill` will be found under when stage 7 arrives.
+    assert "not run: the teeth arrive with stage 7" in ran.stderr, ran.stderr
+    assert "close app-" in ran.stderr, ran.stderr
+
+    # Observing is the default of a new profile, and under it the core emits no
+    # Close at all -- so there is nothing to hold back and nothing to say.
+    box.write_profiles(watching_profile(enforce=False))
+    observing = box.run("watch", "--once")
+    assert observing.returncode == 0, observing.stderr
+    assert "not run" not in observing.stderr, observing.stderr
+
+
+def check_watch_refuses_what_it_does_not_do(box):
+    box.write_profiles(watching_profile())
+
+    for bad in ("0", "-1", "abc", "2.5", "5000"):
+        wrong = box.run("watch", "--once", "--interval", bad)
+        assert wrong.returncode == 1, bad
+        assert "--interval wants whole seconds" in wrong.stderr, bad
+
+    # It watches everybody with a profile. A user is what `status` takes.
+    one = box.run("watch", USER)
+    assert one.returncode == 1
+    assert "takes no user" in one.stderr
+
+    # The ledger is the one thing it writes, so it is the only privilege it asks
+    # for -- and it asks before it reads anything, so the answer is about
+    # privilege rather than about a file that was not there.
+    system = box.run("watch", "--once", system_roots=True)
+    assert system.returncode == 1
+    assert "needs root" in system.stderr
+    assert "pkexec omahouse watch --once" in system.stderr
+
+    # A dry run writes nothing, so it needs nothing.
+    dry = box.run("watch", "--once", "--dry-run", system_roots=True)
+    assert "needs root" not in dry.stderr
+
+
+def check_watch_counts_a_faster_tick(box):
+    """The interval and the debit are one number.
+
+    A loop that wakes every five seconds and debits two is a day that never ends,
+    and one that wakes every two and debits five is a day that ends at teatime.
+    """
+    box.write_profiles(watching_profile())
+    assert box.run("watch", "--once", "--interval", "5").returncode == 0
+    assert box.day(TODAY)["budgets"]["session"] == 5
+
+
 # -- the promise of the stage -------------------------------------------------
 
 def check_the_reading_verbs_write_nothing(box):
@@ -1068,6 +1324,12 @@ def main():
         check_create_user_is_built_but_never_run_here,
         check_a_length_of_time_is_refused_rather_than_guessed,
         check_the_writing_verbs_want_a_profile_that_is_there,
+        check_watch_says_when_there_is_nobody_to_watch,
+        check_watch_dry_run_counts_and_touches_nothing,
+        check_watch_debits_the_day_and_warns_once,
+        check_watch_carries_out_warnings_and_nothing_else,
+        check_watch_refuses_what_it_does_not_do,
+        check_watch_counts_a_faster_tick,
         check_the_reading_verbs_write_nothing,
     ]
     for case in cases:
