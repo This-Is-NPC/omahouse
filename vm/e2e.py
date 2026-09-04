@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Layer 2 of testing.md: the teeth, in a machine that is not this one.
+"""The VM suite: the teeth, in a machine that is not this one.
 
 `mise run verify` proves everything that can be proved without a graphical
 session. This proves the rest, and the rest is the dangerous half: a SIGTERM into
@@ -46,7 +46,7 @@ HERE = Path(__file__).resolve().parent
 class Blocked(Exception):
     """A prerequisite that is not there.
 
-    testing.md §6: a missing prerequisite is an explicit `blocked`, never a case
+    A missing prerequisite is an explicit `blocked`, never a case
     quietly skipped. A suite that prints green because it did nothing is worse
     than one that prints red.
     """
@@ -101,9 +101,9 @@ class VM:
         if self.domain not in listed:
             raise Blocked(
                 f"there is no libvirt domain called {self.domain} on {self.uri}.\n"
-                "        poc/findings.md round 2 made it, and it is the seed of the\n"
-                "        prepared base of testing.md §3. It is not recreated here:\n"
-                "        installing it again is twenty minutes of manual work.")
+                "        It is not recreated here: installing it again is twenty\n"
+                "        minutes of manual work. `vm/provision-omarchy.sh` is the\n"
+                "        script that built it.")
 
         disks = self.virsh("domblklist", self.domain)
         expected = self.manifest["domain"]["disk"]
@@ -203,7 +203,7 @@ class VM:
 
         The environment is the session's, because that is the whole point: a
         `uwsm app` launched without it lands in the wrong cgroup, and
-        poc/findings.md round 2 measured exactly that difference.
+        docs/design.md round 2 measured exactly that difference.
         """
         env = (f"XDG_RUNTIME_DIR=/run/user/{self.uid} WAYLAND_DISPLAY=wayland-1 "
                f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{self.uid}/bus")
@@ -266,9 +266,9 @@ class VM:
     def session_slice_pids(self):
         """Every pid in the subject's session.slice, by unit.
 
-        This is what `session_slice_intocada` compares before and after, and it
+        This is what `session_slice_untouched` compares before and after, and it
         is read from the cgroup tree rather than from `pgrep` so that the thing
-        asserted about is exactly the thing spec.md §5 says is never judged.
+        asserted about is exactly the thing docs/design.md §5 says is never judged.
         """
         out = self.ssh(
             f"for unit in $(find {shlex.quote(self.session_slice)} -maxdepth 1 "
@@ -306,7 +306,7 @@ class VM:
     def launch(self, app="omahouse-polite", args="900"):
         """One app in the subject's session, the way the Omarchy launchers do.
 
-        `uwsm app --`, which is what poc/findings.md round 2 measured putting a
+        `uwsm app --`, which is what docs/design.md round 2 measured putting a
         process in a scope of its own under `app.slice` -- and what a raw
         `hyprctl dispatch exec` was measured *not* doing. So the scope that comes
         back is `app-uwsm-<app>-<hex>.scope`, and its id is `<app>`, which is what
@@ -343,7 +343,7 @@ class VM:
                   "|| true", check=False)
         self.root(f"pkill -9 -u {self.subject} -x sleep || true", check=False)
         self.wait_for(lambda: not self.scopes(), 20, "the app scopes to go")
-        # And a session again. `logout_bloqueia_o_reingresso` ends the one that
+        # And a session again. `logout_blocks_the_way_back` ends the one that
         # was there and the tty1 autologin brings up a new one, which takes the
         # notification daemon with it -- so every case starts from a session that
         # is up rather than from whatever the case before it left, and the order
@@ -354,7 +354,7 @@ class VM:
         """A profile, written through the verbs an operator would type.
 
         `grace` and `warnAt` have no verb of their own -- they are fields of
-        spec.md §4 that this build's CLI does not expose -- so those two are
+        docs/design.md §4 that this build's CLI does not expose -- so those two are
         patched into the file afterwards. Everything else goes through
         `omahouse`, which is the point: the rules under test are the ones a
         person could have written.
@@ -387,7 +387,7 @@ class VM:
     def seed_ledger(self, spent):
         """A day that has already been going on for a while.
 
-        The limits in profiles.json are whole minutes, and testing.md asks for
+        The limits in profiles.json are whole minutes, and the cases want
         budgets of forty and fifteen seconds. This is how the two meet: a one
         minute budget with twenty seconds already on it has forty seconds left,
         and it is the same shape as a machine that has been on since lunch.
@@ -439,11 +439,11 @@ def deploy(vm):
     vm.put(binary, "/tmp/omahouse")
     vm.root("install -Dm755 /tmp/omahouse /usr/bin/omahouse")
 
-    # The fake apps of testing.md. The allowlist matches the identity of a
+    # The fake apps. The allowlist matches the identity of a
     # systemd scope, so a browser and a one line shell script are the same thing
     # to `Proc` -- and the two of them are not interchangeable: one leaves on its
     # SIGTERM and one does not, which is the only way to exercise both halves of
-    # spec.md §5's sequence.
+    # docs/design.md §5's sequence.
     for fixture in sorted((HERE / "fixtures").iterdir()):
         vm.put(fixture, f"/tmp/{fixture.name}")
         vm.root(f"install -Dm755 /tmp/{fixture.name} /usr/local/bin/{fixture.name}")
@@ -461,7 +461,7 @@ def deploy(vm):
 
     # The scriptlet, run the way pacman runs it. This is the case for the
     # `.install`: the PAM line, the two directories and the enable, on a machine
-    # that already has the line from poc/findings.md round 3 -- so it is also the
+    # that already has the line from docs/design.md round 3 -- so it is also the
     # proof that running it twice changes nothing.
     vm.put(packaging / "omahouse.install", "/tmp/omahouse.install")
     vm.root("systemctl daemon-reload")
@@ -485,7 +485,7 @@ def wait_for_the_session(vm, timeout=180):
         raise Blocked("Hyprland never came up. `sudo modprobe vkms` and look at "
                       "`journalctl -u getty@tty1` on the guest.")
 
-    # mako, because `grace_avisa_antes_de_fechar` asserts a notification arrived
+    # mako, because `grace_warns_before_closing` asserts a notification arrived
     # and there has to be something on the far side of the bus to receive it.
     if not vm.pid_of("mako"):
         vm.julia("setsid --fork sh -c 'cd /tmp && exec mako' </dev/null >/dev/null 2>&1",
@@ -494,9 +494,9 @@ def wait_for_the_session(vm, timeout=180):
     if not vm.pid_of("mako"):
         raise Blocked("mako would not start in the subject's session")
 
-    # And the session plumbing testing.md names by hand. The VM is not a full
+    # And the session plumbing, started by hand. The VM is not a full
     # Omarchy -- there is no quickshell on it -- but pipewire is the other unit
-    # `session_slice_intocada` is about, and a case that only ever saw the
+    # `session_slice_untouched` is about, and a case that only ever saw the
     # compositor would be a weaker case than the one that was asked for.
     vm.julia("systemctl --user start pipewire.service wireplumber.service", check=False)
 
@@ -538,7 +538,7 @@ def main():
     os.environ.setdefault("LIBVIRT_DEFAULT_URI", manifest["domain"]["uri"])
     vm = VM(manifest)
 
-    say(f"omahouse — layer 2, {manifest['domain']['name']}")
+    say(f"omahouse — the VM suite, {manifest['domain']['name']}")
     say()
 
     results = []
@@ -572,7 +572,7 @@ def main():
         say(f"  BLOCKED  {blocked}")
         results.append(("the run itself", "BLOCKED", str(blocked)))
     finally:
-        # The report comes after the cleanup, never before -- testing.md §6.
+        # The report comes after the cleanup, never before.
         if started:
             try:
                 vm.reset()

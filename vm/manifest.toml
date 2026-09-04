@@ -1,6 +1,6 @@
 # The one machine this suite is allowed to touch.
 #
-# testing.md §6: no case runs against the developer's machine. omahouse closes
+# No case runs against the developer's machine. omahouse closes
 # processes and ends sessions, and a run that confused the host with the guest
 # would not be a red test -- it would be a logout in the middle of somebody's
 # afternoon. So every field below is checked before a single command is sent,
@@ -20,7 +20,7 @@ hostname = "omahouse-poc"
 
 [access]
 key = "~/.ssh/id_vms"
-# The operator of spec.md §1: in wheel, with passwordless sudo, entering the way
+# The operator of docs/design.md §1: in wheel, with passwordless sudo, entering the way
 # an administrator would.
 operator = "arch"
 
@@ -30,10 +30,10 @@ user = "julia"
 uid = 1001
 
 [budgets]
-# testing.md, "the budgets are small and the clock is real". Nobody waits two
+# The budgets are small and the clock is real. Nobody waits two
 # hours to prove a two hour limit, and moving the clock of a machine running
 # systemd is how a suite becomes flaky. The arithmetic of hours and of the turn
-# of the day is proved in layer 0 with an injected `now`; what is proved here is
+# of the day is proved by the unit suite with an injected `now`; what is proved here is
 # that the mechanism fires.
 #
 # The limits themselves are whole minutes, because that is what

@@ -1,10 +1,10 @@
 """The case that justifies the whole layer.
 
-testing.md names it and says why: this is not about time running out -- the
-arithmetic of that is proved in milliseconds by layer 0. It is about the one way
+This is not about time running out -- the arithmetic of that is proved in
+milliseconds by the unit suite. It is about the one way
 omahouse could fail that would end the product. A profile with `enforce: true`
 and an empty allowlist means every app scope is refused and closed. If the model
-of spec.md §5 is wrong about which cgroups those are, what happens is that
+of docs/design.md §5 is wrong about which cgroups those are, what happens is that
 Hyprland goes down two seconds after somebody logs in, and the person is looking
 at a greeter with no idea why.
 
@@ -28,7 +28,7 @@ def run(vm):
     if not hyprland:
         raise Failed("Hyprland is not running, so there is nothing to protect")
 
-    # Everything spec.md §5 says is never judged, by unit and by pid.
+    # Everything docs/design.md §5 says is never judged, by unit and by pid.
     before = vm.session_slice_pids()
     for unit in ("wayland-wm@hyprland.desktop.service", "pipewire.service",
                  "dbus-broker.service"):

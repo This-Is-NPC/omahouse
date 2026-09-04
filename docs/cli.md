@@ -14,7 +14,7 @@ Four roots, and every one of them can be moved by a variable, which is what lets
 
 - `/etc/omahouse/blocked`, or `$OMAHOUSE_CONFIG_DIR/blocked` -- the accounts that may not log in, one name per line, which stock `pam_listfile` reads. Written by `watch` and by nothing else, and its whole content is rewritten every cycle from what is true right now, which is what takes a name back out at the turn of the day.
 - `/etc/omahouse/profiles.json`, or `$OMAHOUSE_CONFIG_DIR/profiles.json` -- who is under rules. Root writes it and everyone reads it. Its absence is not an error: it is the state of every machine before the first profile is written, and `status` says so and goes on scanning.
-- `/var/lib/omahouse/<user>/<AAAA-MM-DD>.json`, or the same under `$OMAHOUSE_STATE_DIR` -- one ledger per day. A day with no file is a day nobody spent, and it is left out of a report rather than printed as a row of zeroes.
+- `/var/lib/omahouse/<user>/<YYYY-MM-DD>.json`, or the same under `$OMAHOUSE_STATE_DIR` -- one ledger per day. A day with no file is a day nobody spent, and it is left out of a report rather than printed as a row of zeroes.
 - `/sys/fs/cgroup`, or `$OMAHOUSE_CGROUP_ROOT` -- where the app scopes are read from.
 - `/proc`, or `$OMAHOUSE_PROC_ROOT` -- where the executable of a scope's processes is read from.
 
@@ -31,7 +31,7 @@ The identity of a running app is its systemd scope and not the path of its execu
   The shapes, by verb:
 
   - `status` -- `user`, `uid`, `date`, `session`, `profile` (the whole profile, or null), `scopes`, `unnamed`, `outOfReach` and `budgets`. A `scopes` entry is `id`, `unit`, `cgroup` and `processes`, plus `verdict` where there is a profile to give one, plus `exe`, `exeProcesses` and `exeAgrees` -- the executable most of its processes are running, how many of them are running it, and whether that backs up the id. `exe` and `exeAgrees` are null together when nothing in the scope could be read, which is no opinion and not a disagreement. `unnamed` is the same minus the id and the agreement, for a scope under `app.slice` whose unit name is not an app scope name. `outOfReach` is `processes` and the `units` they are in.
-  - `report` -- `user`, `since`, `until`, `days` and `totals`. A day is the ledger of `spec.md` §4 without its `schemaVersion` and `user`, both of which would be the same words on every day of the range.
+  - `report` -- `user`, `since`, `until`, `days` and `totals`. A day is the ledger of `docs/design.md` §4 without its `schemaVersion` and `user`, both of which would be the same words on every day of the range.
   - `profile list` -- an array of `user`, `displayName`, `enabled`, `enforce`, `default`, and the counts of `rules` and `budgets`.
   - `profile show` -- the profile as `/etc/omahouse/profiles.json` holds it.
   - every verb that writes a profile -- `profile add`, `profile remove`, `profile enforce`, `profile default`, `allow`, `deny`, `limit` -- prints the profile it wrote, or for `remove` the one it took out. So a script can write and read in one call, and the answer is the same shape `profile show` gives.
@@ -53,11 +53,11 @@ With no profile for that user -- or with no profiles.json at all -- it runs as a
 
 With a profile it adds the verdict each app would get and a line per budget: the limit including whatever an operator granted today, what has been spent, what is left, and what happens when it is gone. It reads the day's ledger and does not write it; only `watch` writes.
 
-And it reports what it cannot see, which `spec.md` §5 asks of it in so many words.
+And it reports what it cannot see, which `docs/design.md` §5 asks of it in so many words.
 
 Two things it cannot name, and they are not the same thing. A scope under `app.slice` whose unit name is not an app scope name -- a `tmux-spawn-<uuid>.scope`, say -- is counted and not named. It is under `Counted, not named`, and the word is meant: its processes are real, so every budget whose selector is `*` -- the session -- is debited for it, because somebody who has been in a terminal all afternoon is somebody using the machine. What the missing id costs it is the two things that need a name: a limit of its own, and being allowed by name. So no rule can reach it and its verdict is the profile's default, which under `default: deny` with the teeth in means it is closed -- the honest reading of an allowlist, since a thing nobody can name is certainly not on it, and `enforce: false` is what a new profile is born with. Processes in `session.slice` are the real blind spot: an app started outside `uwsm app`, by a raw `exec` in a keybinding or from inside a terminal, lands in the compositor's own cgroup, where it cannot be told from Hyprland itself. It is not counted and it cannot be closed, because `cgroup.kill` there would take the session with it. That number is never zero on a live session -- the compositor's own processes are in it -- and saying so plainly is the point: the honest report of a limit, not an alarm.
 
-And it says when a scope is not what its name says. An app launched through a shim takes the shim's name, so the id is the launcher's and not the program's: `poc/findings.md` round 4 found seven `app-Hyprland-gtk\x2dlaunch-*.scope` on the development machine with VS Code inside every one of them, and the terminal calling itself `xdg-terminal-exec`. Under `Not what the name says`, `status` prints the id, the executable most of its processes are running, and how many of them -- because a rule about `gtk-launch` is a rule about whatever it launches next, and nobody can weigh that without seeing what is in there. A flatpak reads the same way and is the opposite case: the id is right and the executable is `/usr/bin/bwrap` for every flatpak alike. Neither signal can overrule the other, which is why this is a sentence and never a verdict -- the rule goes on matching the id, and `evaluate` is never shown the executable.
+And it says when a scope is not what its name says. An app launched through a shim takes the shim's name, so the id is the launcher's and not the program's: `docs/design.md` round 4 found seven `app-Hyprland-gtk\x2dlaunch-*.scope` on the development machine with VS Code inside every one of them, and the terminal calling itself `xdg-terminal-exec`. Under `Not what the name says`, `status` prints the id, the executable most of its processes are running, and how many of them -- because a rule about `gtk-launch` is a rule about whatever it launches next, and nobody can weigh that without seeing what is in there. A flatpak reads the same way and is the opposite case: the id is right and the executable is `/usr/bin/bwrap` for every flatpak alike. Neither signal can overrule the other, which is why this is a sentence and never a verdict -- the rule goes on matching the id, and `evaluate` is never shown the executable.
 
 ### Arguments
 - **`[user]`** — Whose session to look at; defaults to whoever ran it
@@ -68,7 +68,7 @@ And it says when a scope is not what its name says. An app launched through a sh
 
 The day's ledger, or a range of days.
 
-What was spent per budget, the time an operator granted, and what the daemon already said out loud -- the warnings, the exhaustions and the refusals of `spec.md` §4. The events are not decoration: they are where a once-only decision remembers it has fired, so reading them is reading why a warning did or did not come.
+What was spent per budget, the time an operator granted, and what the daemon already said out loud -- the warnings, the exhaustions and the refusals of `docs/design.md` §4. The events are not decoration: they are where a once-only decision remembers it has fired, so reading them is reading why a warning did or did not come.
 
 A user with no ledger is not an error. It is somebody who has not been counted yet, and it is said in one line naming the file that is not there, rather than as an empty table.
 
@@ -78,7 +78,7 @@ This verb does not ask whether the account exists. A profile, and the days it ac
 - **`<user>`**
 
 ### Flags
-- **`--since <date>`** — Report from this day forward, AAAA-MM-DD.
+- **`--since <date>`** — Report from this day forward, YYYY-MM-DD.
 
   Every day from that one to today that has a ledger, then a total across them. Days with no file are left out rather than printed as zeroes. A date in the future, one more than 366 days back, and anything that is not a date are each a usage error that says which.
 
@@ -94,9 +94,9 @@ The profiles: who is under rules, and what the rules are
 
 Put an account under rules.
 
-The profile is born observing and allowing: `enforce: false`, `default: allow`, the warn marks of `spec.md` §4 at ten, five and one minute, and twenty seconds of grace. Both defaults are the same choice, and `spec.md` gives the reason twice. A profile that counts without biting is one somebody can look at for a day and then switch on -- which is what the lan house always did -- and a profile written by halves that denies everything locks somebody out of their own machine. It is the reasoning of `onerr=succeed` on the PAM line of §2: the failure that leaves the rules soft is recoverable, and the one that leaves them hard is not.
+The profile is born observing and allowing: `enforce: false`, `default: allow`, the warn marks of `docs/design.md` §4 at ten, five and one minute, and twenty seconds of grace. Both defaults are the same choice, and `docs/design.md` gives the reason twice. A profile that counts without biting is one somebody can look at for a day and then switch on -- which is what the lan house always did -- and a profile written by halves that denies everything locks somebody out of their own machine. It is the reasoning of `onerr=succeed` on the PAM line of §2: the failure that leaves the rules soft is recoverable, and the one that leaves them hard is not.
 
-An account in `wheel` is refused, and this is the one place this build refuses rather than warns. `spec.md` §1 makes the operator whoever is in wheel, so a profile for one of them is somebody fiscalising themselves by accident, and the person who could undo it is the person it would be imposed on.
+An account in `wheel` is refused, and this is the one place this build refuses rather than warns. `docs/design.md` §1 makes the operator whoever is in wheel, so a profile for one of them is somebody fiscalising themselves by accident, and the person who could undo it is the person it would be imposed on.
 
 An account the machine does not have yet is not refused. The profile is written and the missing account is said out loud, because a profile can be written before its account and can outlive it -- which is also why `report` never asks either.
 
@@ -107,9 +107,9 @@ Only one profile per account: two would be two sets of rules nobody could point 
 
 ### Flags
 - **`--name <name>`** — What to call them on screen, like "Júlia"
-- **`--create-user`** — Create the account first, with `useradd -m`, and nothing else -- `spec.md` §7.
+- **`--create-user`** — Create the account first, with `useradd -m`, and nothing else -- `docs/design.md` §7.
 
-  The program it runs is `/usr/sbin/useradd`, or `$OMAHOUSE_USERADD`. The variable is not a convenience: `plan.md` puts `useradd` among the things irreversible enough never to be exercised outside the VM, so the end to end suite points it at a script that records the call and creates nothing, and the real one is exercised in the nspawn box of `testing.md`.
+  The program it runs is `/usr/sbin/useradd`, or `$OMAHOUSE_USERADD`. The variable is not a convenience: `useradd` is irreversible enough never to be exercised outside the VM, so the end to end suite points it at a script that records the call and creates nothing.
 
   An account that is already there is left alone and said so; a useradd that fails is the profile not being written.
 
@@ -121,7 +121,7 @@ Take an account off the books.
 
 The profile is removed from `/etc/omahouse/profiles.json` and nothing else moves. The days already counted stay where they are under `/var/lib/omahouse/<user>/`, because a report is evidence and it outlives the rules it was collected under.
 
-The account itself is never touched. `--keep-account` reads as though leaving it out would delete it; this build does not run `userdel` either way, and the flag says out loud what happens in both cases. Deleting somebody's account and their home directory because their screen time was taken off the books is a loss nothing here can undo, and `--create-user` is already the one verb `plan.md` says may not be exercised outside the VM.
+The account itself is never touched. `--keep-account` reads as though leaving it out would delete it; this build does not run `userdel` either way, and the flag says out loud what happens in both cases. Deleting somebody's account and their home directory because their screen time was taken off the books is a loss nothing here can undo, and `--create-user` is already the one verb that may not be exercised outside the VM.
 
 ### Arguments
 - **`<user>`**
@@ -137,7 +137,7 @@ Switch the teeth on or off.
 
 `--off` is observation: the budgets are counted and the report is written, and nothing is closed and nobody is logged out. It is what a new profile is born as, and what a day of `omahouse report` is read from before `--on`.
 
-`--on` is the same rules with the actions of `spec.md` §5 behind them. Nothing about the rules or the budgets changes: this is one field.
+`--on` is the same rules with the actions of `docs/design.md` §5 behind them. Nothing about the rules or the budgets changes: this is one field.
 
 ### Arguments
 - **`<user>`**
@@ -152,7 +152,7 @@ Switch the teeth on or off.
 
 What happens to an app no rule names.
 
-`--deny` makes the rules a list of what is allowed, and `--allow` makes them a list of what is not. It is the same engine either way -- `spec.md` §2 -- and it is the field a profile is most likely to be wrong about, which is why the answer is printed as a sentence about programs rather than as the word that was written.
+`--deny` makes the rules a list of what is allowed, and `--allow` makes them a list of what is not. It is the same engine either way -- `docs/design.md` §2 -- and it is the field a profile is most likely to be wrong about, which is why the answer is printed as a sentence about programs rather than as the word that was written.
 
 A profile is born `--allow`, and `--deny` is the switch that turns a written allowlist into an allowlist that bites.
 
@@ -192,11 +192,11 @@ Let an app run, and put it on the clock.
 
 The app is named by the id of its scope, which is what `omahouse status` lists. A rule that is already there is changed in place rather than appended to: the first rule that names an app is the one that wins, so a second line about it would be a line that never fires.
 
-`--limit` is sugar, and `spec.md` §7 says why: the rule and the budget are one thought at the moment somebody is configuring, and making them two commands is making the second easy to forget. The budget it writes closes that app when it runs out; the one that ends the session is the session's, and `omahouse limit --session` writes that one.
+`--limit` is sugar, and `docs/design.md` §7 says why: the rule and the budget are one thought at the moment somebody is configuring, and making them two commands is making the second easy to forget. The budget it writes closes that app when it runs out; the one that ends the session is the session's, and `omahouse limit --session` writes that one.
 
 An app allowed without a limit of its own spends the session's budget and nothing else.
 
-It warns, and does not refuse, when the id does not name one program. An app launched through a shim takes the shim's name -- `poc/findings.md` round 4 found seven `gtk-launch` scopes on the development machine with VS Code inside every one of them -- so allowing that id is allowing whatever it launches next. The warning prints what is running inside the scopes that are open under it, and the rule is written anyway: it may be exactly what was meant, and a flatpak reads the same way for the opposite reason, since every flatpak on a machine runs `/usr/bin/bwrap`. With nothing open under that id there is no evidence, and with no evidence there is nothing said.
+It warns, and does not refuse, when the id does not name one program. An app launched through a shim takes the shim's name -- `docs/design.md` round 4 found seven `gtk-launch` scopes on the development machine with VS Code inside every one of them -- so allowing that id is allowing whatever it launches next. The warning prints what is running inside the scopes that are open under it, and the rule is written anyway: it may be exactly what was meant, and a flatpak reads the same way for the opposite reason, since every flatpak on a machine runs `/usr/bin/bwrap`. With nothing open under that id there is no evidence, and with no evidence there is nothing said.
 
 ### Arguments
 - **`<user>`**
@@ -225,7 +225,7 @@ A budget written for that app is left where it is. The rule and the clock are tw
 
 How long a day, for the session or for one app.
 
-`--session` is the budget whose selector is `*`, which is the whole of what makes the session an ordinary budget -- `spec.md` §2, and the reason there is no branch for `the user's time` anywhere in the core. It logs the session out when it runs out. `--budget <id>=<duration>` is one app's, and it closes that app.
+`--session` is the budget whose selector is `*`, which is the whole of what makes the session an ordinary budget -- `docs/design.md` §2, and the reason there is no branch for `the user's time` anywhere in the core. It logs the session out when it runs out. `--budget <id>=<duration>` is one app's, and it closes that app.
 
 A budget that is already there gets the new number and keeps everything else: what a budget does when it runs out is a decision somebody made once, and a new limit is not a reason to take it back.
 
@@ -244,9 +244,9 @@ A budget can be written for an app no rule names. That is a program somebody wan
 
 Hand over more time today, with the app still open.
 
-The verb that is the difference between an operator and a form. `spec.md` §7 marks it as the one thing beyond the four items of the agreed scope, and keeps it because an operator who cannot hand over ten minutes with the game running is not an operator.
+The verb that is the difference between an operator and a form. `docs/design.md` §7 marks it as the one thing beyond the four items of the agreed scope, and keeps it because an operator who cannot hand over ten minutes with the game running is not an operator.
 
-The minutes go into the day's own ledger, `/var/lib/omahouse/<user>/<AAAA-MM-DD>.json`, and so they expire when the file does: the balance resets at the local turn of the date, and a grant that survived it would be tomorrow's time given away today. It adds to the limit rather than replacing it, and two grants add up.
+The minutes go into the day's own ledger, `/var/lib/omahouse/<user>/<YYYY-MM-DD>.json`, and so they expire when the file does: the balance resets at the local turn of the date, and a grant that survived it would be tomorrow's time given away today. It adds to the limit rather than replacing it, and two grants add up.
 
 Signed with the name of whoever asked. Under `pkexec` that is the person polkit authenticated and not root, because `root gave julia ten minutes` is not the line an operator wants to read back in a month.
 
@@ -263,29 +263,29 @@ A budget the profile does not have is refused: time added to a counter the daemo
 
 - **Usage:** `omahouse watch [FLAGS]`
 
-The loop of `spec.md` §5, and the one verb here that keeps running.
+The loop of `docs/design.md` §5, and the one verb here that keeps running.
 
 Every cycle: find the accounts with a profile that have a session, list the app scopes under their `app.slice`, hand the scopes and the profile and the day's ledger and the time to the core, write the ledger back, and carry out what comes of it. The clock enters in the loop and nowhere else -- the core takes `now` by parameter, which is what lets a two hour budget be proved in microseconds by a test that never touches the clock of the machine it runs on.
 
 The debit is once per budget with at least one live app matching its selector, and never once per process. Twenty-one Chromium processes are one app, because the identity of an app is its systemd scope; a scope under `app.slice` whose unit name is not an app scope name -- the twenty-three `tmux-spawn-<uuid>.scope` of the development machine -- is counted all the same, once, by every budget whose selector is `*`: a scope with processes in it is somebody at the keyboard whether or not anything can name it, and a session budget that skipped these would let an afternoon in a terminal debit nothing at all. What it has no id for is a budget or a rule of its own, so it is never billed to a budget about one app and its verdict is the profile's default. The ledger is written by tmp and `rename`, so a reader of it sees the whole of the last cycle or the whole of the one before, and it is written only when it changed: an unchanged file rewritten every two seconds is a disk that never rests to say nothing.
 
-It says what it is going to do before it does it. `poc/findings.md` round 2 measured how, against a real notification daemon: `systemd-run --uid=<uid> --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<uid>/bus notify-send <summary> <body>`. A `watch` running as the very account it is watching already has a session bus in its environment and calls `notify-send` by itself, which is what makes one cycle something to try here rather than only in a VM. Both programs move by variable -- `$OMAHOUSE_NOTIFY_SEND` and `$OMAHOUSE_SYSTEMD_RUN`, and `$OMAHOUSE_LOGINCTL` for the one that ends a session -- for the reason `$OMAHOUSE_USERADD` does: a suite proves the command is built right without a notification appearing on anybody's screen and without anybody's session ending.
+It says what it is going to do before it does it. `docs/design.md` round 2 measured how, against a real notification daemon: `systemd-run --uid=<uid> --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<uid>/bus notify-send <summary> <body>`. A `watch` running as the very account it is watching already has a session bus in its environment and calls `notify-send` by itself, which is what makes one cycle something to try here rather than only in a VM. Both programs move by variable -- `$OMAHOUSE_NOTIFY_SEND` and `$OMAHOUSE_SYSTEMD_RUN`, and `$OMAHOUSE_LOGINCTL` for the one that ends a session -- for the reason `$OMAHOUSE_USERADD` does: a suite proves the command is built right without a notification appearing on anybody's screen and without anybody's session ending.
 
 The words are written here and not in the core. A decision arrives as a reason and a number of seconds -- refused, a `warnAt` mark crossed, the grace window started, out of time -- and what to say about it depends on things the core is right to ignore: what the budget does when it runs out, and whether the teeth are in at all. A profile that is only watching is never told that something will close, because a notification that promises what does not happen teaches whoever reads it to ignore the next one.
 
 Each thing is said once, and the ledger is what remembers it: a mark that fires without being written down is a notification every two seconds for five minutes. So the ledger is written before a word goes out, and a warning that could not be delivered is a line in the journal rather than one that comes back on the next cycle.
 
-Closing an app is the sequence of `spec.md` §5, spread across ticks rather than slept through: SIGTERM to every process in the scope, then that scope's `cgroup.kill` once the profile's `grace` has gone by. The polite half first, so an editor writes its buffers and a browser does not come back with a crash bar; the write second, because it takes the whole cgroup at once with no reaping order, no orphan and no hunting for pids that forked while the list was being read. A scope whose processes all leave is a scope `cgroup.kill` is never asked about. A daemon restarted mid-window sends a second SIGTERM and starts the window again, which is a scope getting more time and never less.
+Closing an app is the sequence of `docs/design.md` §5, spread across ticks rather than slept through: SIGTERM to every process in the scope, then that scope's `cgroup.kill` once the profile's `grace` has gone by. The polite half first, so an editor writes its buffers and a browser does not come back with a crash bar; the write second, because it takes the whole cgroup at once with no reaping order, no orphan and no hunting for pids that forked while the list was being read. A scope whose processes all leave is a scope `cgroup.kill` is never asked about. A daemon restarted mid-window sends a second SIGTERM and starts the window again, which is a scope getting more time and never less.
 
 `session.slice` is never reached, and that is structural rather than careful. Only `app.slice` is walked, only a scope found in this cycle's walk of it can be named by a decision, and the write is refused unless the path is inside that very user's `app.slice`, is a `.scope`, has no `session.slice` anywhere in it, and sits in a cgroup tree that really is `/sys/fs/cgroup`. This is the failure that would kill the product -- an allowlist taking Hyprland down two seconds after somebody logs in, leaving them at a greeter with no explanation -- so the check is spelled out five times over rather than left implied once.
 
-Logging somebody out is two things and never one. `poc/findings.md` round 2 measured `loginctl terminate-user` on a machine with a tty1 autologin: the sessions went down in seconds and came straight back up, Hyprland and all. So the name goes into `/etc/omahouse/blocked` first, stock `pam_listfile` refuses the next login, and only then is the session ended -- and a run whose configuration is not `/etc/omahouse` writes its `blocked` and refuses the termination, because a session ended behind a file no PAM stack reads is an eviction with no lock on the door.
+Logging somebody out is two things and never one. `docs/design.md` round 2 measured `loginctl terminate-user` on a machine with a tty1 autologin: the sessions went down in seconds and came straight back up, Hyprland and all. So the name goes into `/etc/omahouse/blocked` first, stock `pam_listfile` refuses the next login, and only then is the session ended -- and a run whose configuration is not `/etc/omahouse` writes its `blocked` and refuses the termination, because a session ended behind a file no PAM stack reads is an eviction with no lock on the door.
 
 The name comes out on its own, and nothing has to remember to take it out. Every cycle works out from today's ledger which accounts should be refused right now and writes exactly that set, so the turn of the day, a grant of ten minutes, `profile enforce --off` and `profile remove` each let somebody back in without knowing the file exists. A `blocked` that cannot be read is said out loud every cycle and never written over: by `onerr=succeed` it is refusing nobody, and the machine goes on looking fiscalised while it is not.
 
 The journal is quiet on purpose. A line when something changed -- somebody logged in, an app opened or closed, a budget started or stopped being spent -- and a line for everything said, and nothing at all for a cycle that looks like the one before it. A two second loop that logs every tick puts seventeen hundred identical lines a day where the one line that mattered was.
 
-The rules are read again every cycle and not held from the start, because `spec.md` §1 asks that an operator be able to hand over ten minutes with the game still running. A `profiles.json` that stops parsing is complained about once and the last good reading of it is kept: a broken file must not read as nobody being under rules.
+The rules are read again every cycle and not held from the start, because `docs/design.md` §1 asks that an operator be able to hand over ten minutes with the game still running. A `profiles.json` that stops parsing is complained about once and the last good reading of it is kept: a broken file must not read as nobody being under rules.
 
 Two files are all it writes -- the day's ledger and `/etc/omahouse/blocked` -- so root is the only thing it asks for, and it asks for both before it reads anything. A run with `$OMAHOUSE_STATE_DIR` and `$OMAHOUSE_CONFIG_DIR` pointed somewhere of their own asks for nothing, and neither does `--dry-run`.
 

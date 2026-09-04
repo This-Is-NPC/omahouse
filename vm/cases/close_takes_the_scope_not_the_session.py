@@ -1,12 +1,12 @@
 """A budget runs out, the app closes, and the compositor does not notice.
 
-poc/findings.md round 2 measured the mechanism on its own: one write to a
+docs/design.md round 2 measured the mechanism on its own: one write to a
 scope's `cgroup.kill` took it from one process to none while Hyprland, pid 484,
 carried on either side of it. This is the same write, arrived at the way it
 really will be -- a budget in /etc/omahouse/profiles.json, a ledger under
 /var/lib, a daemon under systemd, and nobody typing anything.
 
-Two apps, because spec.md §5's sequence has two halves and one app can only show
+Two apps, because docs/design.md §5's sequence has two halves and one app can only show
 one of them. `omahouse-polite` takes its SIGTERM and goes, which is the ordinary
 ending and the one where `cgroup.kill` is never needed. `omahouse-stubborn`
 ignores it, which is what makes the write necessary rather than decorative -- and
@@ -14,7 +14,7 @@ the first run of this suite is what found that out, because with only the polite
 one the journal never said `cgroup.kill` at all.
 
 The limit is one minute with forty-five seconds already spent, which is the
-fifteen seconds testing.md asks for. The clock is the real one.
+fifteen seconds the fixture wants. The clock is the real one.
 """
 
 import time
@@ -77,7 +77,7 @@ def run(vm):
         raise Failed("the journal does not show the polite half:\n" + journal)
     if f"cgroup.kill on omahouse-stubborn ({stubborn})" not in journal:
         raise Failed("the journal does not show cgroup.kill, so the second half of "
-                     "spec.md §5's sequence never ran:\n" + journal)
+                     "docs/design.md §5's sequence never ran:\n" + journal)
     # And the one that did leave on its signal was never written about, which is
     # the point of doing the polite half first.
     if f"cgroup.kill on omahouse-polite" in journal:

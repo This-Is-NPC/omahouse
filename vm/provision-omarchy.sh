@@ -212,7 +212,7 @@ systemctl mask NetworkManager-wait-online.service >/dev/null 2>&1 || true
 systemctl enable NetworkManager.service
 rm -f /etc/systemd/network/10-cloud-init-eth0.network
 
-# The clock and the encoding. Neither is decoration: the ledger of spec.md §4 is
+# The clock and the encoding. Neither is decoration: the ledger of docs/design.md §4 is
 # one file per *local* date, so a machine on UTC turns the day over at nine in
 # the evening; and Qt on a C locale prints a paragraph about it on every run,
 # into the journal `omahouse` writes its one important line to.
@@ -233,7 +233,7 @@ EOSH
 say "howl the operator, julia the subject"
 guest 'sudo bash -s' <<'EOSH'
 set -e
-# spec.md §1: the operator is whoever is in wheel, and the subject is an account
+# docs/design.md §1: the operator is whoever is in wheel, and the subject is an account
 # with no privilege at all. julia is not in wheel and `omahouse profile add`
 # would refuse her if she were.
 id julia >/dev/null 2>&1 || useradd -m -s /bin/bash julia
@@ -275,7 +275,7 @@ chown sddm:sddm /var/lib/sddm/state.conf
 # session's VT with a black screen on it, and `loginctl show-seat seat0`
 # answering `Sessions=` with nothing after it.
 #
-# poc/findings.md round 2 measured `terminate-user` against a tty1 autologin,
+# docs/design.md round 2 measured `terminate-user` against a tty1 autologin,
 # where getty respawned the session in seconds; the worry there was that the
 # user came *back* too fast. Under a display manager -- which is what Omarchy
 # actually ships -- the opposite happens and nobody comes back at all, not even
@@ -391,4 +391,4 @@ omahouse profile enforce julia --on
 omahouse profile show julia
 EOSH
 
-say "done. $DOMAIN is at $ADDRESS; see vm/OMARCHY-VM.md"
+say "done. $DOMAIN is at $ADDRESS"

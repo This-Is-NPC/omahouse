@@ -1,7 +1,7 @@
-"""The unit of spec.md §9, installed by the package and put back when it dies.
+"""The unit of docs/design.md §9, installed by the package and put back when it dies.
 
 `Restart=always` is not tidiness. A stopped daemon is a rule switched off, and
-the whole of spec.md §1's "the terminal does not trust itself" rests on the
+the whole of docs/design.md §1's "the terminal does not trust itself" rests on the
 counting outliving anything that happens to it. An account without privilege
 cannot stop a system service, so the only way this ends is a crash -- and a crash
 must not be how somebody gets their evening back.

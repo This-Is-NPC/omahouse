@@ -1,11 +1,11 @@
-"""Nobody is cut off cold -- spec.md §6.
+"""Nobody is cut off cold -- docs/design.md §6.
 
 The sequence is always warning, then `warnAt`, then `grace`, then the end, and
 this asserts the two halves that only a real session can show: that the
 notification arrived at a real notification daemon on the other side of a bus the
 root daemon is not on, and that the app was still there when it did.
 
-poc/findings.md round 2 measured the notification path -- `systemd-run --uid=
+docs/design.md round 2 measured the notification path -- `systemd-run --uid=
 --setenv=DBUS_SESSION_BUS_ADDRESS=... notify-send`, with `makoctl list` on the
 far side showing it. The same check is made here, against the daemon rather than
 against a hand-typed command.
@@ -43,7 +43,7 @@ def run(vm):
 
     # And the last word before the window, which is the one that says how long
     # is left. `Time is up` with `closes in N seconds` is the GraceStarted of
-    # spec.md §6; it has to come out while the app is still open.
+    # docs/design.md §6; it has to come out while the app is still open.
     def told_the_window():
         return "Time is up" in vm.julia("makoctl list", check=False)[1]
 

@@ -1,6 +1,6 @@
 # omahouse — built from a working tree, packaged the way pacman would.
 #
-# spec.md §9 puts the real PKGBUILD in `omarchy-pkgs`, built from the tarball of
+# docs/design.md §9 puts the real PKGBUILD in `omarchy-pkgs`, built from the tarball of
 # a tag. This one is its local twin: same file list, same `.install`, same
 # `pkgname`, and `source=()` because the tree is already on the machine. It
 # exists so the demo VM gets omahouse through `pacman -U` rather than through a

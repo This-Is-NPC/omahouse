@@ -1,6 +1,6 @@
-"""`logout` is two things, and this is the case that says why -- spec.md §2.
+"""`logout` is two things, and this is the case that says why -- docs/design.md §2.
 
-poc/findings.md round 2 measured `loginctl terminate-user` on this very machine:
+docs/design.md round 2 measured `loginctl terminate-user` on this very machine:
 the sessions went down in seconds, and the tty1 autologin put them straight back
 up. On a household machine that is the ordinary case, and it makes
 `onExhausted: "logout"` theatre.
@@ -31,7 +31,7 @@ def run(vm):
     # be the worst possible result.
     stack = vm.ssh("cat /etc/pam.d/system-login")
     if "pam_listfile.so" not in stack or "/etc/omahouse/blocked" not in stack:
-        raise Failed("the PAM line of spec.md §2 is not in /etc/pam.d/system-login")
+        raise Failed("the PAM line of docs/design.md §2 is not in /etc/pam.d/system-login")
     if "onerr=succeed" not in stack:
         raise Failed("the PAM line has no onerr=succeed, which would lock this machine "
                      "out of itself the moment /etc/omahouse/blocked went missing")
@@ -85,7 +85,7 @@ def run(vm):
         raise Failed("the name came out of the file while the budget was still spent")
 
     # 3. The operator hands over ten minutes with the machine still shut --
-    #    spec.md §1 -- and nothing else has to be done.
+    #    docs/design.md §1 -- and nothing else has to be done.
     vm.root(f"omahouse grant {vm.subject} --session 10m")
     vm.wait_for(lambda: vm.subject not in vm.blocked(), 30,
                 f"{vm.subject} to come out of /etc/omahouse/blocked")

@@ -3,12 +3,12 @@
 #
 # The one that makes `cgroup.kill` necessary rather than decorative. Without it
 # the polite app leaves on the signal, the write never happens, and the half of
-# spec.md §5 that the whole model rests on goes untested -- which is exactly what
+# docs/design.md §5 that the whole model rests on goes untested -- which is exactly what
 # the first run of this suite found.
 #
 # It is not a strawman either. A game mid-save, a shell with a job in the
 # foreground and anything that installed a handler and got it wrong all look like
-# this from outside, and `poc/findings.md` round 2 measured the write precisely
+# this from outside, and `docs/design.md` round 2 measured the write precisely
 # because a hunt for pids cannot deal with them.
 trap '' TERM
 sleep "${1:-900}" &
