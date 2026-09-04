@@ -152,6 +152,12 @@ the same warning going out every two seconds; an `exhausted` carries the instant
 that opens the `grace` window, read from disk rather than from a counter in
 memory, so a daemon restarted mid-window resumes it instead of reopening it.
 
+Since §5.1 the day also carries a `presence` object: seconds of the day spent in
+each state of being in front of the machine, keyed by the state's name. It sits
+**beside** `budgets` and never inside it, and it is written only once there is
+something to say — a machine that has never measured presence goes on writing
+exactly the file it has always written.
+
 The same schema with `default: "allow"` and a `deny` rule per distraction is a
 focus profile for an adult. Nothing in the engine changes.
 
@@ -219,6 +225,38 @@ by a named rule: it falls through to the profile's **default verdict**. The
 consequence is intentional: under `default: deny` with `enforce: true`, a scope
 with no id is closed, which is the coherent reading of an allowlist. `status`
 says both of those things out loud.
+
+### 5.1 Presence, which is measured and does not act
+
+A spike put a Chromium extension on real Omarchy and asked `chrome.idle` every
+twenty seconds for thirty minutes with nobody at the keyboard
+(`.temp/spike-extension.md` §5). It answered `active` every single time, including
+the last twenty-five minutes with the monitor physically off. A browser does not
+merely fail to notice idleness — it reports presence that is not there, and any
+time-per-site meter built on it runs all night beside a sleeping child.
+
+So presence is omahouse's own question, asked of the machine. Two facts, both of
+them read every cycle by the daemon that is already root:
+
+- **the screen** — `/sys/class/drm/<connector>/dpms`, for every connector whose
+  `status` is `connected`. On if any of them is on. The kernel writes it, and
+  Hyprland turning a monitor off is an atomic modeset that carries into it.
+- **the seat** — `loginctl show-seat <seat> -p ActiveSession`, then that
+  session's `User`. logind is root's own service and the daemon already ends
+  sessions through `loginctl`, so this is not a new door.
+
+**What is deliberately not read is the fiscalised user's compositor.** Root
+could connect to `$XDG_RUNTIME_DIR/hypr/$HIS/.socket.sock` and ask `hyprctl
+monitors`; it works, and it costs 0.17 ms. It is refused because that socket
+lives in a directory the fiscalised user owns, and a child who kills her own
+Hyprland and puts her own program on that path is a child feeding bytes to a
+JSON parser running as root. The measurement of what that refusal costs, and of
+every candidate that lost, is `.temp/poc-presence.md`.
+
+**It is measured and reported, and it acts on nothing.** What an app is billed
+is its running time — the decision above, and published — and a screen going
+dark does not change it. Presence appears in `status`, in the journal line, and
+in the day's ledger beside the budgets. What will use it is the time per site.
 
 ### Where the logic lives
 
