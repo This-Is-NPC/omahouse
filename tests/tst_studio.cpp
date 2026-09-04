@@ -1115,7 +1115,7 @@ void TestStudio::seedTheExampleHousehold()
     // ever be looking at.
     const QVector<QStringList> verbs{
         {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("nobody"),
-         QStringLiteral("--name"), QStringLiteral("Júlia")},
+         QStringLiteral("--name"), QStringLiteral("Kid")},
         {QStringLiteral("profile"), QStringLiteral("default"), QStringLiteral("nobody"),
          QStringLiteral("--deny")},
         {QStringLiteral("profile"), QStringLiteral("enforce"), QStringLiteral("nobody"),
@@ -1317,7 +1317,7 @@ void TestStudio::writesTheOperatorShots()
 
     m_admin->run(QStringLiteral("fixture"),
                  {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("nobody"),
-                  QStringLiteral("--name"), QStringLiteral("Júlia")});
+                  QStringLiteral("--name"), QStringLiteral("Kid")});
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
     m_admin->clear();
     settle();

@@ -9,6 +9,13 @@ from that run, and what does **not** work is in §6, under the name it has. A
 guide that teaches a path with a hole in it lies the first time somebody walks
 it.
 
+Two things about the names below. Every verb takes the **login name of an
+account that already exists on this machine** as its first argument; `kid` in
+the commands is a placeholder for it, spelled the way `id` or `ls /home` would
+spell it. And the account under rules on the machine the pictures came from was
+called `julia`, which is drawn into them and cannot be regenerated — so the
+pictures say `julia` where the commands beside them say `kid`.
+
 ---
 
 ## 1. What it is
@@ -32,15 +39,18 @@ Reading needs no privilege: `omahouse status`, `omahouse report` and
 
 ### 2.1 Create the profile
 
+`kid` is the account name, not a keyword: put the login name of the account you
+are putting under rules. `--name` is only the label the window shows.
+
 ```bash
-sudo omahouse profile add julia --name "Júlia"
+sudo omahouse profile add kid --name "Kid"      # `kid` is the account name
 ```
 
 ```
-julia: profile written to /etc/omahouse/profiles.json
+kid: profile written to /etc/omahouse/profiles.json
   observing — it counts and reports and closes nothing. Watch a day of
-  `omahouse report julia`, then `omahouse profile enforce julia --on`.
-  every app is allowed: `omahouse profile default julia --deny` turns the
+  `omahouse report kid`, then `omahouse profile enforce kid --on`.
+  every app is allowed: `omahouse profile default kid --deny` turns the
   rules into a list of what is allowed instead.
 ```
 
@@ -130,11 +140,11 @@ uwsm app -- omahouse.desktop
 ### 2.4 Release a program
 
 ```bash
-sudo omahouse allow julia chromium --limit 3m
+sudo omahouse allow kid chromium --limit 3m
 ```
 
 ```
-julia: chromium allowed, 3m a day, and it closes when the time is out.
+kid: chromium allowed, 3m a day, and it closes when the time is out.
 ```
 
 `--limit` is sugar: it writes the rule and the budget in one go. A program
@@ -155,15 +165,15 @@ Three things that have to be on the list and are not obvious:
   terminal released runs whatever they like, and all of it counts as terminal
   time. This is [`design.md`](design.md) §10, and there is no fixing it in the engine.
 
-`julia`'s list on the run came out like this:
+The list on the run these images came from was built like this:
 
 ```bash
-sudo omahouse allow julia xdg-terminal-exec
-sudo omahouse allow julia omahouse
-sudo omahouse allow julia chromium --limit 3m
-sudo omahouse allow julia org.chromium.Chromium --limit 3m
-sudo omahouse allow julia omarchy-hyprland-monitor-watch
-sudo omahouse allow julia udiskie
+sudo omahouse allow kid xdg-terminal-exec
+sudo omahouse allow kid omahouse
+sudo omahouse allow kid chromium --limit 3m
+sudo omahouse allow kid org.chromium.Chromium --limit 3m
+sudo omahouse allow kid omarchy-hyprland-monitor-watch
+sudo omahouse allow kid udiskie
 ```
 
 In the studio, `a` opens a picker fed from the installed `.desktop` entries. It
@@ -173,18 +183,18 @@ In the studio, `a` opens a picker fed from the installed `.desktop` entries. It
 
 After the picker comes `How long a day for foot?`, and then polkit. The footer
 confirms in the same sentence the CLI prints:
-`julia: foot allowed, 5m a day, and it closes when the time is out.`
+`kid: foot allowed, 5m a day, and it closes when the time is out.`
 
 ### 2.5 Set the session limit, and close the list
 
 ```bash
-sudo omahouse limit julia --session 2h
-sudo omahouse profile default julia --deny
+sudo omahouse limit kid --session 2h
+sudo omahouse profile default kid --deny
 ```
 
 ```
-julia: session 2h a day, and it logs out when the time is out.
-julia: only what is on the list runs. 6 rules on it.
+kid: session 2h a day, and it logs out when the time is out.
+kid: only what is on the list runs. 6 rules on it.
 ```
 
 A length of time is `45m`, `2h`, `1h30m`, or a bare number of minutes. Anything
@@ -197,11 +207,11 @@ list runs" and "everything runs but what is on the list".
 ### 2.6 Look at it, and only then put the teeth in
 
 ```bash
-omahouse profile show julia
+omahouse profile show kid
 ```
 
 ```
-omahouse profile — julia (Júlia)
+omahouse profile — kid (Kid)
 
 SETTING  VALUE
 enabled  yes
@@ -239,11 +249,11 @@ ends nobody's session. It needs no privilege.
 On:
 
 ```bash
-sudo omahouse profile enforce julia --on
+sudo omahouse profile enforce kid --on
 ```
 
 ```
-julia: enforcing — budgets now close and log out.
+kid: enforcing — budgets now close and log out.
 ```
 
 In the studio, `e`.
@@ -298,7 +308,7 @@ session ended. The right password no longer gets in: the greeter's box turns
 ![The Omarchy greeter with the password box red and the padlock red. No message explains why.](../vm/shots/18-login-recusado.png)
 
 The journal on the other side says `pam_listfile(sddm:account): Refused user
-julia`. The greeter says nothing — whoever is in front of the machine does not
+kid`. The greeter says nothing — whoever is in front of the machine does not
 find out from it that the time ran out.
 
 ### Reading your own balance
@@ -318,12 +328,12 @@ pkexec`. The footer counts what omahouse cannot see: `8 it cannot see`.
 ### More time now, with the program open
 
 ```bash
-sudo omahouse grant julia --session 10m
-sudo omahouse grant julia --budget chromium=15m
+sudo omahouse grant kid --session 10m
+sudo omahouse grant kid --budget chromium=15m
 ```
 
 ```
-julia: +10m of session, from howl. 2h10m left today.
+kid: +10m of session, from howl. 2h10m left today.
 ```
 
 The time goes into the day's ledger and expires with it. Two `grant`s add up. If
@@ -349,9 +359,9 @@ In the studio, `+`:
 ### Loosening the limits for good
 
 ```bash
-sudo omahouse limit julia --session 4h            # a longer day
-sudo omahouse profile enforce julia --off         # counts and reports, closes nothing
-sudo omahouse profile default julia --allow       # everything runs but what is denied
+sudo omahouse limit kid --session 4h            # a longer day
+sudo omahouse profile enforce kid --off         # counts and reports, closes nothing
+sudo omahouse profile default kid --allow       # everything runs but what is denied
 ```
 
 `enforce --off` is the observing mode, and it is where to go back to when
@@ -360,24 +370,24 @@ something is biting too hard and you do not yet know what.
 ### Taking a program off the list, or somebody off the books
 
 ```bash
-sudo omahouse deny julia chromium
-sudo omahouse profile remove julia
+sudo omahouse deny kid chromium
+sudo omahouse profile remove kid
 ```
 
 `profile remove` takes the profile away and touches neither the account nor the
-history: the days already counted stay in `/var/lib/omahouse/julia/`, because a
+history: the days already counted stay in `/var/lib/omahouse/kid/`, because a
 report is evidence and outlives the rule that collected it. In the studio, `x`
 does either one depending on the tab you are on.
 
 ### Reading the day
 
 ```bash
-omahouse report julia
-omahouse report julia --since 2026-09-01
+omahouse report kid
+omahouse report kid --since 2026-09-01
 ```
 
 ```
-omahouse report — julia
+omahouse report — kid
 
 2026-09-04
   nothing counted
@@ -406,7 +416,7 @@ uwsm app -- omahouse.desktop
 The studio has **two faces**, and nobody picks which. Whoever is in `wheel` gets
 the operator's; everybody else gets the subject's. The header says which:
 `howl · operator · is in wheel · writes through pkexec` against
-`julia · subject · under rules · writes through pkexec`.
+`kid · subject · under rules · writes through pkexec`.
 
 Every action exists as a **key and as a chip**, because there is one table of
 commands in the window: the chips are drawn from it, the keys are looked up in
@@ -422,8 +432,8 @@ no `n`, no `a`, no `+`, no **here, right now** section:
 
 ![`julia`'s key map: *move*, *go* and *window*, and nothing else.](../vm/shots/21-studio-teclas-julia.png)
 
-The palette (`:`) obeys the same table: in `julia`'s session it holds one
-command, `back to the people`.
+The palette (`:`) obeys the same table: in the fiscalised person's session it
+holds one command, `back to the people`.
 
 The writing keys, all of them going through `pkexec`:
 
@@ -460,7 +470,7 @@ program is closed before its window appears, and the notification accuses
 **What to do in the meantime.** Build the allowlist out of Omarchy's key
 bindings, which give real ids, and open what is missing with
 `uwsm app -- <name>.desktop` from a terminal that is allowed.
-`sudo omahouse allow julia gtk-launch` makes the menu work — and releases the
+`sudo omahouse allow kid gtk-launch` makes the menu work — and releases the
 whole menu, which is an unknown and moving set of programs.
 
 ### 6.2 If the screen locks on idle, the last warnings go unseen
@@ -530,8 +540,8 @@ image in §3).
 same number:
 
 ```bash
-sudo omahouse allow julia chromium --limit 3m
-sudo omahouse allow julia org.chromium.Chromium --limit 3m
+sudo omahouse allow kid chromium --limit 3m
+sudo omahouse allow kid org.chromium.Chromium --limit 3m
 ```
 
 ### 6.7 `/` in the studio filters all three lists at once

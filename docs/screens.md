@@ -36,7 +36,7 @@ finds the whole set stale at once.
 Everything below is about one profile, written by the real verbs:
 
 ```
-omahouse profile add nobody --name "Júlia"
+omahouse profile add nobody --name "Kid"
 omahouse profile default nobody --deny        # only the listed programs run
 omahouse profile enforce nobody --on          # closing and logging out
 omahouse limit nobody --session 2h
@@ -68,7 +68,7 @@ Whoever is in `wheel`. The header says so and nobody chooses it.
 
 The list of accounts under rules. `1`, or the **people** chip.
 
-![The people view: one row, "Júlia / nobody / logged in", "only the listed programs run · closing and logging out · 4 programs", and on the right "1h left of 2h10m" over a half-full bar. The chip bar reads open, back, new profile, watch only, all but listed, off the books.](img/01-operator-people.png)
+![The people view: one row, "Kid / nobody / logged in", "only the listed programs run · closing and logging out · 4 programs", and on the right "1h left of 2h10m" over a half-full bar. The chip bar reads open, back, new profile, watch only, all but listed, off the books.](img/01-operator-people.png)
 
 The row carries the display name, the account name, whether they are logged in,
 what the policy does to programs, whether the rules have teeth, how many
@@ -247,7 +247,7 @@ in step.
 
 ### `1` · the people
 
-![The people view on the subject face: header "nobody · subject · under rules", chip bar cut to "open" and "back", and the same Júlia row with "1h left of 2h10m".](img/19-subject-people.png)
+![The people view on the subject face: header "nobody · subject · under rules", chip bar cut to "open" and "back", and the same Kid row with "1h left of 2h10m".](img/19-subject-people.png)
 
 One row, their own. The rest of the household is not shown here — the file is
 world readable, but a window is not a reason to publish it.
@@ -291,6 +291,11 @@ One run through a VM with Omarchy installed on it, on **2026-09-04, between
 08:29 and 08:54**, driven by `ydotool` and captured by `virsh screenshot` and by
 `grim`. Forty-three frames; [the guide](guide.md) is where they are read in
 order, with what each one was.
+
+The account under rules on that machine was called `julia`, and the name is
+drawn into the pictures. Everywhere else in this repository the example account
+is `kid`, which stands for whatever the account is called on the machine you are
+reading this on.
 
 These are not regenerable, and they are not in the generator on purpose. Every
 screen below belongs to something other than this window — a display manager, a

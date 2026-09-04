@@ -24,16 +24,20 @@ the MIT license.
 
 ## Start here
 
-```bash
-sudo omahouse profile add julia --name "Júlia"
-omahouse status                                # the ids of what is open
-sudo omahouse allow julia chromium --limit 45m
-sudo omahouse limit julia --session 2h
-sudo omahouse profile default julia --deny     # only what is allowed runs
-sudo omahouse profile enforce julia --on       # after a day of the report
+Every verb takes the **name of an existing account on this machine** as its
+first argument. `kid` below is a placeholder: put the login name of the account
+you want to put under rules, as `id` or `ls /home` would spell it.
 
-omahouse report julia
-sudo omahouse grant julia --session 10m        # with the game still open
+```bash
+sudo omahouse profile add kid --name "Kid"     # `kid` is the account name
+omahouse status                                # the ids of what is open
+sudo omahouse allow kid chromium --limit 45m
+sudo omahouse limit kid --session 2h
+sudo omahouse profile default kid --deny       # only what is allowed runs
+sudo omahouse profile enforce kid --on         # after a day of the report
+
+omahouse report kid
+sudo omahouse grant kid --session 10m          # with the game still open
 ```
 
 A new profile is born **observing and allowing everything**: it counts and

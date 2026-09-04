@@ -8,7 +8,7 @@ Reading needs no privilege at all: `status`, `report` and `profile list|show` ar
 
 An app is named by the id of its scope -- `chromium`, `org.freedesktop.Platform` -- and `omahouse status` is what lists the ones that are open. A length of time is `45m`, `2h`, `1h30m`, or a bare `90` for the minutes everything is counted in; anything else is refused rather than taken for minutes, because `--limit 2h` read as two minutes is a session that closes at nine in the morning and refusing costs one retyped word.
 
-Exit codes: 0, the run answered; 1, a usage error or a file that is there and would not parse; 2, something it was asked about is not there -- no such account, no such profile. The split matters to a script: a profiles.json full of half-written JSON must not read as `julia has no profile`.
+Exit codes: 0, the run answered; 1, a usage error or a file that is there and would not parse; 2, something it was asked about is not there -- no such account, no such profile. The split matters to a script: a profiles.json full of half-written JSON must not read as `kid has no profile`.
 
 Four roots, and every one of them can be moved by a variable, which is what lets the end to end suite create, edit and read a profile as an ordinary user with nothing installed:
 
@@ -106,7 +106,7 @@ Only one profile per account: two would be two sets of rules nobody could point 
 - **`<user>`**
 
 ### Flags
-- **`--name <name>`** — What to call them on screen, like "Júlia"
+- **`--name <name>`** — What to call them on screen, like "Kid"
 - **`--create-user`** — Create the account first, with `useradd -m`, and nothing else -- `docs/design.md` §7.
 
   The program it runs is `/usr/sbin/useradd`, or `$OMAHOUSE_USERADD`. The variable is not a convenience: `useradd` is irreversible enough never to be exercised outside the VM, so the end to end suite points it at a script that records the call and creates nothing.
@@ -248,7 +248,7 @@ The verb that is the difference between an operator and a form. `docs/design.md`
 
 The minutes go into the day's own ledger, `/var/lib/omahouse/<user>/<YYYY-MM-DD>.json`, and so they expire when the file does: the balance resets at the local turn of the date, and a grant that survived it would be tomorrow's time given away today. It adds to the limit rather than replacing it, and two grants add up.
 
-Signed with the name of whoever asked. Under `pkexec` that is the person polkit authenticated and not root, because `root gave julia ten minutes` is not the line an operator wants to read back in a month.
+Signed with the name of whoever asked. Under `pkexec` that is the person polkit authenticated and not root, because `root gave kid ten minutes` is not the line an operator wants to read back in a month.
 
 A budget the profile does not have is refused: time added to a counter the daemon never looks at would read on the report as though it had been given.
 
