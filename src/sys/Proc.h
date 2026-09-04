@@ -43,6 +43,9 @@ public:
     /// assert what `status` prints, and a real session is a moving target.
     static QString defaultCgroupRoot();
 
+    /// `/sys/fs/cgroup` itself, whatever this instance was pointed at.
+    static QString systemCgroupRoot();
+
     /// `/proc`, or `$OMAHOUSE_PROC_ROOT`. The same door as the cgroup root and
     /// for the same reason: the dominant executable of a scope is read from the
     /// kernel's process table, and a suite that needs a real session with a real
@@ -54,6 +57,15 @@ public:
 
     QString cgroupRoot() const { return m_cgroupRoot; }
     QString procRoot() const { return m_procRoot; }
+
+    /// Whether that tree is still the machine's own, compared by value so that
+    /// pointing the variable back at /sys/fs/cgroup means what not setting it
+    /// means -- exactly as `paths::configDirIsTheSystems` does it.
+    ///
+    /// This is the question the teeth ask first. A tree somewhere else is a tree
+    /// whose `cgroup.procs` were written by a person, and the numbers in it are
+    /// real pids belonging to whoever is running the suite.
+    bool cgroupRootIsTheSystems() const { return m_cgroupRoot == systemCgroupRoot(); }
 
     /// `<root>/user.slice/user-<uid>.slice/user@<uid>.service/app.slice`, the
     /// path of spec.md §5 step 2.
@@ -119,5 +131,15 @@ private:
     QString m_cgroupRoot;
     QString m_procRoot;
 };
+
+/// Every pid in one cgroup and in everything below it, in the order the kernel
+/// wrote them.
+///
+/// A free function and not a method, because the two callers want it for
+/// opposite reasons and neither of them wants a `Proc`: `resolveDominantExe`
+/// reads what those processes are running, and `Enforcer::terminate` sends them
+/// a signal. The second is why a line that is not a number is skipped rather
+/// than taken for pid zero -- `kill(0, SIGTERM)` is the whole process group.
+QVector<qint64> pidsInCgroupTree(const QString &cgroupPath);
 
 } // namespace omahouse

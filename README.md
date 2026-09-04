@@ -14,8 +14,9 @@ check.
 
 ## Using it
 
-Today the CLI reads, configures and counts. `watch` is the loop, and it warns;
-closing an app and ending a session arrive with stage 7 of `plan.md`.
+The CLI reads, configures, counts and acts. `watch` is the loop: it warns
+before the time is out, closes an app when its budget does, and ends a session
+when the day's is gone.
 
 ```bash
 omahouse status [user]     # live app scopes, what they are, and what is left
@@ -52,7 +53,17 @@ user with nothing installed:
 | `OMAHOUSE_CGROUP_ROOT` | `/sys/fs/cgroup` | where the app scopes are read from |
 | `OMAHOUSE_PROC_ROOT` | `/proc` | what the processes in a scope are running |
 | `OMAHOUSE_USERADD` | `/usr/sbin/useradd` | what `--create-user` runs |
+| `OMAHOUSE_NOTIFY_SEND` | `notify-send` | how a warning is said |
+| `OMAHOUSE_SYSTEMD_RUN` | `systemd-run` | how it reaches another session |
+| `OMAHOUSE_LOGINCTL` | `loginctl` | how a session is ended |
 | `OMAHOUSE_JSON` | unset | same as `--json` |
+
+The first two of those are also what keeps a run pointed somewhere else from
+biting. A `Close` is refused unless the cgroup tree really is `/sys/fs/cgroup`,
+because a tree in `$TMPDIR` holds pids somebody typed and those are real pids on
+whatever machine is reading it; and a `terminate-user` is refused unless the
+configuration really is `/etc/omahouse`, because the block behind it would be a
+file no PAM stack reads. Both refusals name themselves in the journal.
 
 `status` also reports what it cannot see: a scope under `app.slice` whose name
 it could not read, and the processes in `session.slice` it can neither count nor
@@ -68,6 +79,44 @@ and `allow` says it again at the moment somebody writes the rule. It warns and
 does not refuse — the same reading calls a flatpak a shim, because every flatpak
 runs `/usr/bin/bwrap` — and the rule goes on matching the id, which is the only
 thing the model decides by.
+
+## What happens when the time is out
+
+Three things, and the first two are one sequence.
+
+**Closing** is `SIGTERM` to every process in the app's scope, then that scope's
+`cgroup.kill` once the profile's `grace` has gone by. The polite half first, so
+an editor writes its buffers; the write second, because it takes the whole
+cgroup at once with no reaping order and no orphan. An app that leaves on its
+signal is never written about.
+
+**`session.slice` is never reached**, and that is structural rather than
+careful. Only `app.slice` is walked, only a scope found in that walk can be
+named, and the write is refused unless the path is inside that user's own
+`app.slice`, is a `.scope`, has no `session.slice` in it, and lives in a real
+cgroup tree. This is the failure that would end the product — an allowlist
+taking Hyprland down two seconds after somebody logs in — so it is checked five
+times over rather than implied once, and proved in a VM with a real Hyprland
+on a real seat.
+
+**Logging out is two things.** `loginctl terminate-user` on a machine with
+autologin was measured putting the session straight back up, so the name goes
+into `/etc/omahouse/blocked` first and stock `pam_listfile` refuses the next
+login:
+
+```
+account required pam_listfile.so item=user sense=deny \
+        file=/etc/omahouse/blocked onerr=succeed
+```
+
+`onerr=succeed` is not optional: a missing or unreadable file has to let
+everybody in, or a machine locks itself out. The package installs that line and
+takes it out again when it is removed, along with the list.
+
+The name comes out on its own, and nothing has to remember to take it out.
+Every cycle works out from today's ledger who should be refused right now and
+writes exactly that, so the turn of the day, a `grant` of ten minutes,
+`profile enforce --off` and `profile remove` each let somebody back in.
 
 ## The window
 
@@ -125,7 +174,15 @@ mise run studio:test # the window, by keyboard and by mouse, with no screen
 mise run usage:gen   # docs/cli.md, from omahouse.usage.kdl
 mise run verify      # the local gate: all of the above
 mise run hooks:install
+mise run test:vm     # the teeth, in the VM — never on this machine
 ```
+
+`test:vm` is layer 2 of `testing.md` and is deliberately not in the gate. It
+starts the `omahouse-poc` domain, waits for a real Hyprland session, installs
+the build and the packaging, and then closes processes and ends a login. It
+proves it is talking to that machine three ways — the domain and its disk, an
+address that is not one of this machine's, and `uname -n` on the far side of the
+ssh — before it loads a single case.
 
 Shadow build only — qmake refuses to configure inside the source tree.
 

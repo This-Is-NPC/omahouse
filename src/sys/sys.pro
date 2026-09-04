@@ -11,9 +11,11 @@
 # So does the loop that joins them: `Watch` is the caller `spec.md` §5 describes,
 # and it is here because the clock, the ledger file and the notification are all
 # the machine. Warning is a systemd-run, and that arrived with stage 6. Stage 7
-# grows this library rather than adding another for the two that are left:
-# closing a scope is a write to its cgroup.kill, and logging out is
-# /etc/omahouse/blocked plus terminate-user.
+# grew this library rather than adding another for the two that were left:
+# `Enforce` closes a scope by writing its cgroup.kill and ends a session with
+# `loginctl terminate-user`, and `Blocked` is the /etc/omahouse/blocked that
+# stock `pam_listfile` reads -- the half of `logout` without which the other half
+# is theatre.
 OMAHOUSE_PROJECT_DIR = $$PWD
 OMAHOUSE_SOURCE_ROOT = $$clean_path($$PWD/../..)
 include($$PWD/../../qmake/layout.pri)
@@ -28,6 +30,8 @@ TARGET    = omahousesys
 INCLUDEPATH += $$PWD/../core
 
 HEADERS += \
+    Blocked.h \
+    Enforce.h \
     Notify.h \
     Paths.h \
     Proc.h \
@@ -35,6 +39,8 @@ HEADERS += \
     Watch.h
 
 SOURCES += \
+    Blocked.cpp \
+    Enforce.cpp \
     Notify.cpp \
     Paths.cpp \
     Proc.cpp \

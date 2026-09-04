@@ -1,0 +1,45 @@
+# The one machine this suite is allowed to touch.
+#
+# testing.md §6: no case runs against the developer's machine. omahouse closes
+# processes and ends sessions, and a run that confused the host with the guest
+# would not be a red test -- it would be a logout in the middle of somebody's
+# afternoon. So every field below is checked before a single command is sent,
+# and a mismatch is `blocked`, never a case that quietly ran somewhere else.
+
+[domain]
+# The libvirt domain, and the disk it must be running from. A domain of the same
+# name with a different definition is somebody else's machine that happens to
+# share a name.
+name = "omahouse-poc"
+uri = "qemu:///system"
+disk = "/var/lib/libvirt/images/omahouse-poc.qcow2"
+# What `uname -n` has to answer on the far side of the ssh. The last check, and
+# the only one that is about the machine that will actually run the commands
+# rather than about the machine that was asked to start.
+hostname = "omahouse-poc"
+
+[access]
+key = "~/.ssh/id_vms"
+# The operator of spec.md §1: in wheel, with passwordless sudo, entering the way
+# an administrator would.
+operator = "arch"
+
+[subject]
+# The account under rules. No privilege, autologin on tty1, Hyprland under uwsm.
+user = "julia"
+uid = 1001
+
+[budgets]
+# testing.md, "the budgets are small and the clock is real". Nobody waits two
+# hours to prove a two hour limit, and moving the clock of a machine running
+# systemd is how a suite becomes flaky. The arithmetic of hours and of the turn
+# of the day is proved in layer 0 with an injected `now`; what is proved here is
+# that the mechanism fires.
+#
+# The limits themselves are whole minutes, because that is what
+# /etc/omahouse/profiles.json holds -- so the seconds below are made by seeding
+# the day's ledger with what has already been spent, which is the same thing a
+# machine that has been on since lunch looks like.
+session_seconds = 40
+app_seconds = 15
+grace_seconds = 3

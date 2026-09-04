@@ -23,8 +23,20 @@ QString configDir();
 /// `/var/lib/omahouse`, or `$OMAHOUSE_STATE_DIR`.
 QString stateDir();
 
+/// `/etc/omahouse` itself, whatever this run was pointed at. Named rather than
+/// spelled again by whoever needs it, so that the refusal in `whyNotBlockable`
+/// and the check in `configDirIsTheSystems` cannot come to disagree.
+QString systemConfigDir();
+
 /// `<configDir>/profiles.json` -- root writes it, everyone reads it.
 QString profilesFile();
+/// `<configDir>/blocked` -- the file the PAM line of spec.md §2 reads.
+///
+/// Not JSON, and it cannot be: `pam_listfile.so` reads one name per line, and
+/// the whole point of §2 is that the block is a stock PAM module and not a
+/// module of ours. So this is the one file omahouse writes that it did not
+/// choose the format of.
+QString blockedFile();
 /// `<stateDir>/<user>` -- one directory per fiscalised account.
 QString userStateDir(const QString &user);
 /// `<stateDir>/<user>/<AAAA-MM-DD>.json` -- one ledger per day.

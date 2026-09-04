@@ -1,5 +1,7 @@
 #include <QtTest>
 
+#include "Blocked.h"
+#include "Enforce.h"
 #include "Ledger.h"
 #include "Notify.h"
 #include "Paths.h"
@@ -58,6 +60,73 @@ public:
     /// delivered must not come back every two seconds for the rest of the day.
     bool refuse = false;
 };
+
+/// Everything the teeth would have done, and nothing that happened.
+///
+/// The same seam as `Recorder`, and here it is not a convenience: the thing this
+/// suite is asserting about is a signal sent to a process and a session ended,
+/// and there is no version of "run the real one and see" that is safe on the
+/// machine this suite runs on. testing.md §6 says so in as many words, and
+/// `whyNotCloseable` refuses the temporary tree below anyway -- this records what
+/// would have been asked for on the far side of that refusal.
+class Bite : public Enforcer {
+public:
+    bool terminate(const AppScope &scope, int *count, QString *error) override
+    {
+        termed.append(scope.unit);
+        if (count)
+            *count = scope.pidCount;
+        if (!refuse)
+            return true;
+        if (error)
+            *error = QStringLiteral("no such process");
+        return false;
+    }
+
+    bool killTree(const AppScope &scope, QString *error) override
+    {
+        killed.append(scope.unit);
+        if (!refuse)
+            return true;
+        if (error)
+            *error = QStringLiteral("cgroup.kill is not writable");
+        return false;
+    }
+
+    bool endSessions(const QString &user, QString *error) override
+    {
+        ended.append(user);
+        if (!refuse)
+            return true;
+        if (error)
+            *error = QStringLiteral("logind is not answering");
+        return false;
+    }
+
+    QStringList termed;
+    QStringList killed;
+    QStringList ended;
+    bool refuse = false;
+};
+
+QStringList unitsOf(const QVector<Done> &done, Done::What what)
+{
+    QStringList units;
+    for (const Done &one : done) {
+        if (one.what == what)
+            units.append(one.unit);
+    }
+    return units;
+}
+
+const Done *firstOf(const QVector<Done> &done, Done::What what)
+{
+    for (const Done &one : done) {
+        if (one.what == what)
+            return &one;
+    }
+    return nullptr;
+}
 
 } // namespace
 
@@ -141,6 +210,13 @@ private:
         QVERIFY2(writeLedger(ledgerPath(date), ledger, &error), qPrintable(error));
     }
 
+    /// The names in the `blocked` of this test's own configuration directory.
+    QStringList blockedNames() const
+    {
+        QString error;
+        return readBlocked(paths::blockedFile(), &error);
+    }
+
     Ledger readBack(const QDate &date)
     {
         Ledger ledger;
@@ -168,9 +244,18 @@ private slots:
         m_box = m_tree.filePath(QString::fromLatin1(QTest::currentTestFunction()));
         QVERIFY(QDir().mkpath(m_box));
         qputenv("OMAHOUSE_STATE_DIR", QFile::encodeName(m_box + QStringLiteral("/var")));
+        // And the configuration, which since stage 7 the loop writes to as well:
+        // `/etc/omahouse/blocked` is the half of `logout` that does the work,
+        // and a suite that left this pointed at /etc would be a suite trying to
+        // refuse whoever runs it a login.
+        qputenv("OMAHOUSE_CONFIG_DIR", QFile::encodeName(m_box + QStringLiteral("/etc")));
     }
 
-    void cleanupTestCase() { qunsetenv("OMAHOUSE_STATE_DIR"); }
+    void cleanupTestCase()
+    {
+        qunsetenv("OMAHOUSE_STATE_DIR");
+        qunsetenv("OMAHOUSE_CONFIG_DIR");
+    }
 
     // -- the cycle -----------------------------------------------------------
 
@@ -182,7 +267,8 @@ private slots:
         makeSession();
         const Proc reader = proc();
         Recorder recorder;
-        Watch watch(&reader, &recorder, Watch::Options {2, false});
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
 
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         const Cycle cycle = watch.tick({profile()}, now);
@@ -224,7 +310,8 @@ private slots:
         makeSession();
         const Proc reader = proc();
         Recorder recorder;
-        Watch watch(&reader, &recorder, Watch::Options {5, false});
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {5, false});
 
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         watch.tick({profile()}, now);
@@ -244,7 +331,8 @@ private slots:
 
         const Proc reader = proc();
         Recorder recorder;
-        Watch watch(&reader, &recorder, Watch::Options {2, false});
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
 
         const Cycle first = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(first.users.first().said.size(), 1);
@@ -281,8 +369,9 @@ private slots:
 
         const Proc reader = proc();
         Recorder recorder;
+        Bite teeth;
         recorder.refuse = true;
-        Watch watch(&reader, &recorder, Watch::Options {2, false});
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
 
         const Cycle first = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(first.users.first().said.size(), 1);
@@ -294,11 +383,11 @@ private slots:
         QCOMPARE(recorder.notes.size(), 1);
     }
 
-    // -- the teeth, which are not in --------------------------------------
+    // -- the teeth ------------------------------------------------------------
 
     // `enforce: false` is what a profile is born with, and under it the core
-    // emits no Close and no Logout at all -- so there is nothing for this stage
-    // to hold back, and a run of it cannot end anybody's session by any path.
+    // emits no Close and no Logout at all -- so a run of it cannot close
+    // anything or end anybody's session by any path, whatever else is true.
     void observingCarriesOutNothingButWarnings()
     {
         makeSession();
@@ -313,11 +402,15 @@ private slots:
 
         const Proc reader = proc();
         Recorder recorder;
-        Watch watch(&reader, &recorder, Watch::Options {2, false});
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
         const Cycle cycle = watch.tick({observing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
-        QVERIFY(watched.notYet.isEmpty());
+        QVERIFY(watched.done.isEmpty());
+        QVERIFY(watched.logouts.isEmpty());
+        QVERIFY(!watched.blocked);
+        QVERIFY(teeth.termed.isEmpty() && teeth.killed.isEmpty() && teeth.ended.isEmpty());
         for (const Said &said : watched.said)
             QCOMPARE(said.decision.kind, Decision::Kind::Warn);
 
@@ -329,16 +422,68 @@ private slots:
         QCOMPARE(recorder.notes.size(), 5);
         QVERIFY(recorder.notes.first().summary.endsWith(QStringLiteral("is not allowed")));
 
+        // Nobody was refused a login either, and the file was not so much as
+        // created: an empty answer that matches an absent file is no write.
+        QVERIFY(!QFile::exists(paths::blockedFile()));
+
         // And it is still counted: the seconds happened whatever the verdict
         // was.
         QCOMPARE(readBack(day).secondsFor(QStringLiteral("session")), 120 * 60 + 2);
     }
 
-    // With the teeth switched on the core does emit them, and this stage still
-    // carries out only the warnings. plan.md keeps Close and Logout for stage 7
-    // and the VM, so they are named in the cycle and stepped over -- which is
-    // the one thing a reader of stage 6 has to be able to check.
-    void theTeethAreNamedAndNotUsed()
+    // The rule of testing.md §6, and the reason this suite can exist at all.
+    //
+    // The tree above is a directory in $TMPDIR whose `cgroup.procs` hold pids
+    // somebody typed -- 4000, 4100, 4200 -- and those are real pids on the
+    // machine running this. So with the teeth fully on, every Close is refused
+    // by `whyNotCloseable`, the refusal says why, and no signal is asked for.
+    // A build that got this wrong would be a test suite killing whatever
+    // happened to be process 4000.
+    void aTreeThatIsNotTheMachinesIsCountedAndNeverSignalled()
+    {
+        makeSession();
+        const QDate day(2026, 9, 3);
+        seedLedger(day, {{QStringLiteral("chromium"), 45 * 60}});
+
+        Profile enforcing = profile();
+        enforcing.enforce = true;
+        enforcing.graceSeconds = 0;
+
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
+
+        const Watched &watched = cycle.users.first();
+        // The decision was made, and it names the scope `cgroup.kill` would have
+        // been found under -- so the accounting is whole and only the act is
+        // missing.
+        QCOMPARE(unitsOf(watched.done, Done::What::Terminate),
+                 QStringList({QStringLiteral("app-Hyprland-chromium-031bdc27.scope")}));
+        const Done *refused = firstOf(watched.done, Done::What::Terminate);
+        QVERIFY(refused);
+        QVERIFY(!refused->carriedOut);
+        QVERIFY2(refused->error.contains(QStringLiteral("/sys/fs/cgroup")),
+                 qPrintable(refused->error));
+        QCOMPARE(refused->app, QStringLiteral("chromium"));
+
+        // Nothing was signalled and nothing was killed.
+        QVERIFY(teeth.termed.isEmpty());
+        QVERIFY(teeth.killed.isEmpty());
+
+        // And the seconds were still counted, which is the other half of the
+        // promise: a run that may not bite still keeps the books.
+        QCOMPARE(readBack(day).secondsFor(QStringLiteral("chromium")), 45 * 60 + 2);
+    }
+
+    // -- logout is two things ------------------------------------------------
+
+    // spec.md §2, and the order it has to happen in. The name goes into
+    // `blocked` first, and only a user who is really in that file has their
+    // session ended -- because poc/findings.md round 2 measured a bare
+    // `terminate-user` being undone by the tty1 autologin in the same breath.
+    void logoutWritesTheBlockBeforeItEndsAnything()
     {
         makeSession();
         const QDate day(2026, 9, 3);
@@ -346,33 +491,196 @@ private slots:
 
         Profile enforcing = profile();
         enforcing.enforce = true;
-        enforcing.defaultVerdict = Verdict::Deny;
-        // No window, so the action lands on this very tick rather than on one
-        // twenty seconds from now.
         enforcing.graceSeconds = 0;
 
         const Proc reader = proc();
         Recorder recorder;
-        Watch watch(&reader, &recorder, Watch::Options {2, false});
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
         const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
-        QVERIFY(!watched.notYet.isEmpty());
-        bool logout = false;
-        bool close = false;
-        for (const Decision &decision : watched.notYet) {
-            QVERIFY(decision.kind != Decision::Kind::Warn);
-            logout = logout || decision.kind == Decision::Kind::Logout;
-            close = close || decision.kind == Decision::Kind::Close;
-        }
-        QVERIFY(logout);
-        QVERIFY(close);
+        QCOMPARE(watched.logouts.size(), 1);
+        QCOMPARE(watched.logouts.first().budgetId, QStringLiteral("session"));
 
-        // Everything that was carried out was a warning, and nothing else
-        // reached the machine.
-        QCOMPARE(recorder.notes.size(), watched.said.size());
-        for (const Said &said : watched.said)
-            QCOMPARE(said.decision.kind, Decision::Kind::Warn);
+        // The file, written and readable, with exactly the one name in it.
+        QCOMPARE(blockedNames(), QStringList({m_user}));
+        QCOMPARE(cycle.blocked, QStringList({m_user}));
+        QVERIFY(cycle.blockedError.isEmpty());
+        QVERIFY(watched.blocked);
+        const Done *block = firstOf(watched.done, Done::What::Block);
+        QVERIFY(block);
+        QVERIFY(block->carriedOut);
+
+        // And the termination refused, because this suite's `blocked` is a file
+        // in $TMPDIR that no PAM stack reads. Ending a session behind it would
+        // be an eviction with no lock on the door -- and on this machine it
+        // would be the session of whoever is running the suite.
+        const Done *ended = firstOf(watched.done, Done::What::EndSession);
+        QVERIFY(ended);
+        QVERIFY(!ended->carriedOut);
+        QVERIFY2(ended->error.contains(QStringLiteral("/etc/omahouse")),
+                 qPrintable(ended->error));
+        QVERIFY(teeth.ended.isEmpty());
+    }
+
+    // The other half of §2's promise: the name comes out on its own.
+    //
+    // It comes out because it is never remembered. Every cycle asks today's
+    // ledger whether a logout still stands, so a grant, `enforce --off`, a
+    // profile switched off and the turn of the day all take the name out
+    // without any of them knowing the file exists.
+    void theBlockIsLiftedByWhateverGaveTheTimeBack()
+    {
+        makeSession();
+        const QDate day(2026, 9, 3);
+        seedLedger(day, {{QStringLiteral("session"), 120 * 60}});
+
+        Profile enforcing = profile();
+        enforcing.enforce = true;
+        enforcing.graceSeconds = 0;
+
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+
+        watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
+        QCOMPARE(blockedNames(), QStringList({m_user}));
+
+        // An operator hands over ten minutes with the game still open --
+        // spec.md §1 -- and the very next cycle lets them back in.
+        Ledger day3 = readBack(day);
+        Grant grant;
+        grant.at = QDateTime(day, QTime(19, 0, 1));
+        grant.by = QStringLiteral("howl");
+        grant.budget = QStringLiteral("session");
+        grant.minutes = 10;
+        day3.grants.append(grant);
+        QString error;
+        QVERIFY2(writeLedger(ledgerPath(day), day3, &error), qPrintable(error));
+
+        const Cycle after = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 2)));
+        QCOMPARE(blockedNames(), QStringList());
+        QVERIFY(after.users.first().logouts.isEmpty());
+        QVERIFY(!after.users.first().blocked);
+        const Done *unblock = firstOf(after.users.first().done, Done::What::Unblock);
+        QVERIFY(unblock);
+        QVERIFY(unblock->carriedOut);
+    }
+
+    // The turn of the day, which is the one spec.md §2 names in as many words.
+    // Nothing does it: the balance is a file per day, so tomorrow's ledger is
+    // empty, so no logout stands, so the name is not written.
+    void theTurnOfTheDayLiftsTheBlock()
+    {
+        makeSession();
+        const QDate day(2026, 9, 3);
+        seedLedger(day, {{QStringLiteral("session"), 120 * 60}});
+
+        Profile enforcing = profile();
+        enforcing.enforce = true;
+        enforcing.graceSeconds = 0;
+
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+
+        watch.tick({enforcing}, QDateTime(day, QTime(23, 59, 58)));
+        QCOMPARE(blockedNames(), QStringList({m_user}));
+
+        watch.tick({enforcing}, QDateTime(QDate(2026, 9, 4), QTime(0, 0, 0)));
+        QCOMPARE(blockedNames(), QStringList());
+    }
+
+    // And the block outlives the session it ended, which is the whole point.
+    //
+    // `terminate-user` is what left them without one, so a loop that only asked
+    // about users who are logged in would take the name straight back out and
+    // let them in again -- which is the theatre round 2 measured, arrived at by
+    // a different road.
+    void aUserWithNoSessionStaysBlocked()
+    {
+        // No app.slice at all: nobody is logged in.
+        const QDate day(2026, 9, 3);
+        seedLedger(day, {{QStringLiteral("session"), 120 * 60}});
+
+        Profile enforcing = profile();
+        enforcing.enforce = true;
+        enforcing.graceSeconds = 0;
+
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
+
+        QVERIFY(!cycle.users.first().session);
+        QCOMPARE(blockedNames(), QStringList({m_user}));
+        // Nothing to end, so nothing is asked of logind: they are already out.
+        QVERIFY(unitsOf(cycle.users.first().done, Done::What::EndSession).isEmpty());
+        // And the day was not written by a cycle that counted nothing.
+        QCOMPARE(readBack(day).secondsFor(QStringLiteral("session")), 120 * 60);
+    }
+
+    // A profile switched off, and one whose account is gone, are both "no rules
+    // apply" -- so neither may leave somebody shut out of their own machine.
+    void aProfileThatStopsApplyingLetsThemBackIn()
+    {
+        const QDate day(2026, 9, 3);
+        seedLedger(day, {{QStringLiteral("session"), 120 * 60}});
+
+        Profile enforcing = profile();
+        enforcing.enforce = true;
+        enforcing.graceSeconds = 0;
+
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
+        QCOMPARE(blockedNames(), QStringList({m_user}));
+
+        Profile off = enforcing;
+        off.enabled = false;
+        watch.tick({off}, QDateTime(day, QTime(19, 0, 2)));
+        QCOMPARE(blockedNames(), QStringList());
+
+        // And a profile removed altogether: the user is not in the cycle at all,
+        // so they are not in the set the file is written from.
+        watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 4)));
+        QCOMPARE(blockedNames(), QStringList({m_user}));
+        watch.tick({}, QDateTime(day, QTime(19, 0, 6)));
+        QCOMPARE(blockedNames(), QStringList());
+    }
+
+    // A dry run says who it would shut out and shuts nobody out. The mode that
+    // makes the loop safe to point at a machine nobody meant to fiscalise, kept
+    // true of the half of it that can lock a door.
+    void aDryRunNeverWritesTheBlock()
+    {
+        makeSession();
+        const QDate day(2026, 9, 3);
+        seedLedger(day, {{QStringLiteral("session"), 120 * 60}});
+
+        Profile enforcing = profile();
+        enforcing.enforce = true;
+        enforcing.graceSeconds = 0;
+
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, true});
+        const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
+
+        const Watched &watched = cycle.users.first();
+        QCOMPARE(watched.logouts.size(), 1);
+        const Done *block = firstOf(watched.done, Done::What::Block);
+        QVERIFY(block);
+        QVERIFY(!block->carriedOut);
+        QVERIFY(!QFile::exists(paths::blockedFile()));
+        QVERIFY(teeth.ended.isEmpty() && teeth.termed.isEmpty() && teeth.killed.isEmpty());
     }
 
     // -- the day -------------------------------------------------------------
@@ -385,7 +693,8 @@ private slots:
         makeSession();
         const Proc reader = proc();
         Recorder recorder;
-        Watch watch(&reader, &recorder, Watch::Options {2, false});
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
 
         const QDate before(2026, 9, 3);
         const QDate after(2026, 9, 4);
@@ -410,7 +719,8 @@ private slots:
 
         const Proc reader = proc();
         Recorder recorder;
-        Watch watch(&reader, &recorder, Watch::Options {2, true});
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, true});
         const Cycle cycle = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
 
         // It decided, and it wrote the decision down nowhere.
@@ -431,7 +741,8 @@ private slots:
     {
         const Proc reader = proc();
         Recorder recorder;
-        Watch watch(&reader, &recorder, Watch::Options {2, false});
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         const Cycle cycle = watch.tick({profile()}, now);
 
@@ -448,7 +759,8 @@ private slots:
 
         const Proc reader = proc();
         Recorder recorder;
-        Watch watch(&reader, &recorder, Watch::Options {2, false});
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         const Cycle cycle = watch.tick({off}, now);
 
@@ -467,7 +779,8 @@ private slots:
 
         const Proc reader = proc();
         Recorder recorder;
-        Watch watch(&reader, &recorder, Watch::Options {2, false});
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
         const Cycle cycle = watch.tick({orphan}, QDateTime(QDate(2026, 9, 3), QTime(19, 0, 0)));
 
         QVERIFY(!cycle.users.first().account);
@@ -487,7 +800,8 @@ private slots:
         makeSession();
         const Proc reader = proc();
         Recorder recorder;
-        Watch watch(&reader, &recorder, Watch::Options {2, false});
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
         const QDate day(2026, 9, 3);
 
         QVERIFY(watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)))

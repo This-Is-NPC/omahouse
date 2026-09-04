@@ -1,5 +1,6 @@
 #include "Watch.h"
 
+#include "Blocked.h"
 #include "Paths.h"
 #include "Users.h"
 
@@ -8,6 +9,21 @@
 namespace omahouse {
 
 namespace {
+
+/// The longest a SIGTERMed scope is given before `cgroup.kill`.
+///
+/// The window is the profile's `grace`, because that is the number a household
+/// set for "how long does something get when its time is up", and asking for a
+/// second number would be asking the same question twice. The ceiling is here
+/// because `grace` is also the warning window and somebody may reasonably set it
+/// to ten minutes: ten minutes of an app that ignored its SIGTERM still running
+/// after the ledger says it closed is a report that does not match the screen.
+constexpr int kLongestSettle = 60;
+
+QString settleKey(const QString &user, const QString &unit)
+{
+    return user + QLatin1Char('\n') + unit;
+}
 
 const Budget *budgetOf(const Profile &profile, const QString &id)
 {
@@ -58,16 +74,26 @@ QString whoIsIt(const Profile &profile)
     return profile.displayName.isEmpty() ? profile.user : profile.displayName;
 }
 
+/// The scope a decision names, or null. Looked up in the very list this cycle
+/// read out of `app.slice`, which is the first of the reasons `Close` cannot
+/// reach anywhere else: a unit that is not in that list is a unit nothing here
+/// has a path for.
+const AppScope *scopeOfUnit(const QVector<AppScope> &scopes, const QString &unit)
+{
+    if (unit.isEmpty())
+        return nullptr;
+    for (const AppScope &scope : scopes) {
+        if (scope.unit == unit)
+            return &scope;
+    }
+    return nullptr;
+}
+
 /// The id of the scope a decision names, or an empty string.
 QString appOfUnit(const QVector<AppScope> &scopes, const QString &unit)
 {
-    if (unit.isEmpty())
-        return {};
-    for (const AppScope &scope : scopes) {
-        if (scope.unit == unit)
-            return scope.id;
-    }
-    return {};
+    const AppScope *scope = scopeOfUnit(scopes, unit);
+    return scope ? scope->id : QString();
 }
 
 QStringList sortedWithoutRepeats(QStringList values)
@@ -90,6 +116,23 @@ QString decisionKindName(Decision::Kind kind)
         break;
     }
     return QStringLiteral("warn");
+}
+
+QString doneWhatName(Done::What what)
+{
+    switch (what) {
+    case Done::What::Kill:
+        return QStringLiteral("kill");
+    case Done::What::Block:
+        return QStringLiteral("block");
+    case Done::What::Unblock:
+        return QStringLiteral("unblock");
+    case Done::What::EndSession:
+        return QStringLiteral("end-session");
+    case Done::What::Terminate:
+        break;
+    }
+    return QStringLiteral("terminate");
 }
 
 QString decisionReasonName(Decision::Reason reason)
@@ -175,9 +218,10 @@ Words wordsFor(const Profile &profile, const Decision &decision, const QString &
     return words;
 }
 
-Watch::Watch(const Proc *proc, Notifier *notifier, const Options &options)
+Watch::Watch(const Proc *proc, Notifier *notifier, Enforcer *enforcer, const Options &options)
     : m_proc(proc)
     , m_notifier(notifier)
+    , m_enforcer(enforcer)
     , m_options(options)
 {
 }
@@ -199,15 +243,27 @@ Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now)
         // somebody: no account of that name on this machine, and a profile
         // switched off. Neither is an error. A profile can be written before its
         // account and outlive it, and off is off.
+        //
+        // Both also mean no logout stands, which is how a name comes out of
+        // `blocked` when a profile is switched off or its account is gone.
         uid_t uid = 0;
         watched.account = uidForUser(profile.user, &uid);
         watched.uid = uid;
         if (watched.account && watched.enabled)
             observe(profile, &watched, now);
 
-        watched.worthSaying = worthSaying(watched);
         cycle.users.append(watched);
     }
+
+    // The file first, then the terminations. spec.md §2 makes them one action,
+    // and this is the order that makes them one: a session ended before the name
+    // is in `blocked` is a session the tty1 autologin brings back before the next
+    // cycle, which is exactly what round 2 measured.
+    reconcileBlocked(&cycle);
+    endSessions(&cycle);
+
+    for (Watched &watched : cycle.users)
+        watched.worthSaying = worthSaying(watched);
     return cycle;
 }
 
@@ -220,8 +276,49 @@ void Watch::observe(const Profile &profile, Watched *watched, const QDateTime &n
     // tree that already moves by variable, which is what lets the suite ask it
     // without a session.
     watched->session = m_proc->hasSession(watched->uid);
-    if (!watched->session)
+
+    // The day's own file, spec.md §4. Read by the date of `now` and not by a
+    // date the loop is holding on to, so the turn of midnight simply starts
+    // reading and writing tomorrow's file.
+    //
+    // Read before the session is asked about, and that is stage 7's doing: a
+    // user who has just been logged out has no session, and whether the block of
+    // §2 still stands is a question about their day and not about whether they
+    // are at the keyboard.
+    const QString path = paths::ledgerFile(profile.user, now.date());
+    Ledger before;
+    bool missing = false;
+    QString error;
+    if (!readLedger(path, &before, &error, &missing)) {
+        // A ledger that is there and will not parse is not a day to start over:
+        // counting from zero on top of a file somebody could still repair is how
+        // an afternoon disappears. It is said and skipped, and the other users
+        // go on being counted.
+        //
+        // And no logout stands on a day nobody can read. That is `onerr=succeed`
+        // again, one layer up: the failure that lets somebody in is recoverable
+        // and the one that locks them out is not.
+        watched->error = error;
         return;
+    }
+    if (missing) {
+        before.user = profile.user;
+        before.date = now.date();
+    }
+
+    if (!watched->session) {
+        // Nothing open, nothing to count, nothing to write -- and still the one
+        // question worth asking. `evaluate` over no scopes with a tick of
+        // nothing debits nothing and appends nothing, and answers whether the
+        // budget that ended this session is still out of time.
+        const Outcome quiet = evaluate(profile, {}, before, now, 0);
+        for (const Decision &decision : quiet.decisions) {
+            if (decision.kind == Decision::Kind::Logout)
+                watched->logouts.append(decision);
+        }
+        watched->ledger = before;
+        return;
+    }
 
     const QVector<AppScope> scopes = m_proc->scopesFor(watched->uid);
     QStringList apps;
@@ -234,26 +331,6 @@ void Watch::observe(const Profile &profile, Watched *watched, const QDateTime &n
             apps.append(scope.id);
     }
     watched->apps = sortedWithoutRepeats(apps);
-
-    // The day's own file, spec.md §4. Read by the date of `now` and not by a
-    // date the loop is holding on to, so the turn of midnight simply starts
-    // reading and writing tomorrow's file.
-    const QString path = paths::ledgerFile(profile.user, now.date());
-    Ledger before;
-    bool missing = false;
-    QString error;
-    if (!readLedger(path, &before, &error, &missing)) {
-        // A ledger that is there and will not parse is not a day to start over:
-        // counting from zero on top of a file somebody could still repair is how
-        // an afternoon disappears. It is said and skipped, and the other users
-        // go on being counted.
-        watched->error = error;
-        return;
-    }
-    if (missing) {
-        before.user = profile.user;
-        before.date = now.date();
-    }
 
     const Outcome outcome = evaluate(profile, scopes, before, now, m_options.tickSeconds);
     watched->ledger = outcome.ledger;
@@ -280,14 +357,12 @@ void Watch::observe(const Profile &profile, Watched *watched, const QDateTime &n
         watched->wrote = true;
     }
 
+    // The warnings first, and all of them, before anything closes. spec.md §6:
+    // nobody is cut off cold, and a notification that arrives after the window
+    // it was about is a notification about a window that is already shut.
     for (const Decision &decision : outcome.decisions) {
-        if (decision.kind != Decision::Kind::Warn) {
-            // plan.md stage 7, and testing.md's box. Recorded and stepped over:
-            // in ordinary use it does not even come up, because a profile is
-            // born observing and the core emits neither kind without `enforce`.
-            watched->notYet.append(decision);
+        if (decision.kind != Decision::Kind::Warn)
             continue;
-        }
         Said said;
         said.decision = decision;
         said.app = appOfUnit(scopes, decision.scopeUnit);
@@ -298,6 +373,199 @@ void Watch::observe(const Profile &profile, Watched *watched, const QDateTime &n
         }
         watched->said.append(said);
     }
+
+    QStringList stillOpen;
+    for (const Decision &decision : outcome.decisions) {
+        switch (decision.kind) {
+        case Decision::Kind::Warn:
+            break;
+        case Decision::Kind::Close: {
+            // The scope the decision names, out of the very list this cycle read
+            // from `app.slice`. A unit that is not in it -- a scope that ended
+            // between the read and here -- is nothing to close and nothing to
+            // report: it is already gone.
+            const AppScope *scope = scopeOfUnit(scopes, decision.scopeUnit);
+            if (!scope)
+                break;
+            stillOpen.append(scope->unit);
+            closeScope(profile, watched, decision, *scope, now);
+            break;
+        }
+        case Decision::Kind::Logout:
+            // Held until after `blocked` has been written. The two halves of §2
+            // are one action, and this is the half that has to go second.
+            watched->logouts.append(decision);
+            break;
+        }
+    }
+
+    // What the loop remembers about closing is only ever about scopes that are
+    // still there. Without this the map grows by one entry for every app that
+    // was ever closed, for as long as the daemon runs -- and a scope whose unit
+    // name systemd reused would inherit a window it never had.
+    const QStringList keys = m_termed.keys();
+    for (const QString &key : keys) {
+        if (!key.startsWith(profile.user + QLatin1Char('\n')))
+            continue;
+        if (!stillOpen.contains(key.section(QLatin1Char('\n'), 1)))
+            m_termed.remove(key);
+    }
+}
+
+void Watch::closeScope(const Profile &profile, Watched *watched, const Decision &decision,
+                       const AppScope &scope, const QDateTime &now)
+{
+    Done done;
+    done.decision = decision;
+    done.app = scope.id;
+    done.unit = scope.unit;
+
+    // The one gate that stands between this and somebody's compositor, asked
+    // before anything else and asked of every close alike. Enforce.h has the
+    // five questions and why each of them is there.
+    const QString refusal =
+        whyNotCloseable(m_proc->cgroupRoot(), m_proc->appSlicePath(watched->uid), scope);
+    if (!refusal.isEmpty()) {
+        done.what = Done::What::Terminate;
+        done.error = refusal;
+        watched->done.append(done);
+        return;
+    }
+    if (m_options.dryRun || !m_enforcer) {
+        done.what = Done::What::Terminate;
+        watched->done.append(done);
+        return;
+    }
+
+    const QString key = settleKey(profile.user, scope.unit);
+    const auto termed = m_termed.constFind(key);
+    if (termed == m_termed.constEnd()) {
+        // The polite half, and the first thing that happens to this scope.
+        done.what = Done::What::Terminate;
+        int signalled = 0;
+        done.carriedOut = m_enforcer->terminate(scope, &signalled, &done.error);
+        watched->done.append(done);
+        m_termed.insert(key, now);
+        // A window of nothing means there is nothing to wait for, so the write
+        // follows in the same tick. It is still SIGTERM first: a process that
+        // handles it and leaves in that instant leaves on its own terms.
+        if (qBound(0, profile.graceSeconds, kLongestSettle) > 0)
+            return;
+    } else if (termed->secsTo(now) < qBound(0, profile.graceSeconds, kLongestSettle)) {
+        // Still inside the window it was given. The scope is alive -- it is in
+        // this cycle's list -- and that is the whole of what is happening.
+        return;
+    }
+
+    // spec.md §5: the whole cgroup in one write, with no reaping order, no
+    // orphan and no hunting for pids that forked while the list was being read.
+    Done killed;
+    killed.what = Done::What::Kill;
+    killed.decision = decision;
+    killed.app = scope.id;
+    killed.unit = scope.unit;
+    killed.carriedOut = m_enforcer->killTree(scope, &killed.error);
+    watched->done.append(killed);
+}
+
+void Watch::reconcileBlocked(Cycle *cycle)
+{
+    // The content of the file is the answer, never a change to it. Every cycle
+    // works out the whole set of accounts that should be refused right now and
+    // writes exactly that -- which is what takes a name back out when the day
+    // turns, when an operator grants ten minutes, when enforcement goes off, and
+    // when a profile is removed and its user is not in this list at all.
+    QStringList wanted;
+    for (const Watched &watched : cycle->users) {
+        if (!watched.logouts.isEmpty())
+            wanted.append(watched.user);
+    }
+    wanted = sortedWithoutRepeats(wanted);
+
+    const QString path = paths::blockedFile();
+    QString error;
+    QStringList have = sortedWithoutRepeats(readBlocked(path, &error));
+    if (!error.isEmpty()) {
+        // A `blocked` that cannot be read is a `blocked` refusing nobody --
+        // `onerr=succeed`, spec.md §2 -- so this is worth saying and is not
+        // worth writing over: the file may be somebody's to repair.
+        cycle->blockedError = error;
+        cycle->blocked = have;
+        return;
+    }
+    cycle->blocked = have;
+
+    if (have == wanted)
+        return;
+    if (m_options.dryRun) {
+        // A dry run says who would have been shut out and shuts nobody out.
+        for (Watched &watched : cycle->users) {
+            const bool want = !watched.logouts.isEmpty();
+            if (want == have.contains(watched.user))
+                continue;
+            Done done;
+            done.what = want ? Done::What::Block : Done::What::Unblock;
+            if (want)
+                done.decision = watched.logouts.first();
+            watched.done.append(done);
+        }
+        return;
+    }
+
+    if (!writeBlocked(path, wanted, &error)) {
+        cycle->blockedError = error;
+        return;
+    }
+    cycle->blocked = wanted;
+
+    for (Watched &watched : cycle->users) {
+        const bool want = !watched.logouts.isEmpty();
+        if (want == have.contains(watched.user))
+            continue;
+        Done done;
+        done.what = want ? Done::What::Block : Done::What::Unblock;
+        done.carriedOut = true;
+        if (want)
+            done.decision = watched.logouts.first();
+        watched.done.append(done);
+    }
+}
+
+void Watch::endSessions(Cycle *cycle)
+{
+    for (Watched &watched : cycle->users) {
+        if (watched.logouts.isEmpty())
+            continue;
+        watched.blocked = cycle->blocked.contains(watched.user);
+        // Already out, and asked before anything else: there is no session to
+        // end, so there is nothing here to do and nothing to refuse. The name
+        // stays in the file, which is the half doing the work now -- it is what
+        // turns `terminate-user` from an interruption into a logout.
+        if (!watched.session)
+            continue;
+
+        Done done;
+        done.what = Done::What::EndSession;
+        done.decision = watched.logouts.first();
+
+        // Never without the block. poc/findings.md round 2: `terminate-user` on
+        // a machine with a tty1 autologin put the session back up in the same
+        // breath, so a termination with nothing behind it is not a weaker
+        // version of logging somebody out -- it is a session killed for nothing.
+        const QString refusal = whyNotBlockable(paths::configDir());
+        if (!refusal.isEmpty())
+            done.error = refusal;
+        else if (!watched.blocked)
+            done.error = QStringLiteral("%1 is not in %2, so ending the session would only "
+                                        "hand it back at the next login")
+                             .arg(watched.user, paths::blockedFile());
+        else if (m_options.dryRun || !m_enforcer)
+            done.error.clear();
+        else
+            done.carriedOut = m_enforcer->endSessions(watched.user, &done.error);
+
+        watched.done.append(done);
+    }
 }
 
 bool Watch::worthSaying(const Watched &watched)
@@ -307,6 +575,9 @@ bool Watch::worthSaying(const Watched &watched)
     // is a journal nobody can read. What is worth a line is a change of shape --
     // somebody logged in, an app opened or closed, a budget started or stopped
     // being spent, a file stopped being readable.
+    QStringList acts;
+    for (const Done &done : watched.done)
+        acts.append(doneWhatName(done.what) + QLatin1Char(':') + done.unit);
     const QStringList parts {
         watched.enabled ? QStringLiteral("on") : QStringLiteral("off"),
         watched.account ? QStringLiteral("account") : QStringLiteral("no account"),
@@ -314,6 +585,11 @@ bool Watch::worthSaying(const Watched &watched)
         watched.apps.join(QLatin1Char(',')),
         QString::number(watched.unnamedScopes),
         watched.debited.join(QLatin1Char(',')),
+        // What the teeth did, so that a close and a logout always get a line --
+        // they are the two things this program does that take something away
+        // from somebody, and neither may ever happen quietly.
+        watched.blocked ? QStringLiteral("blocked") : QString(),
+        acts.join(QLatin1Char(',')),
         watched.error,
     };
     const QString shape = parts.join(QLatin1Char('|'));

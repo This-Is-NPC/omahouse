@@ -1825,8 +1825,14 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
 // all three are asked for by plan.md, which puts stages 6 and 7 in the VM:
 // `--dry-run` decides and touches nothing, `--once` is a single cycle with no
 // loop behind it, and the four roots move by variable exactly as they do for
-// every other verb. `Close` and `Logout` are not implemented at all here -- not
-// held back by a flag, not present -- so no run of this build can end a session.
+// every other verb.
+//
+// Since stage 7 the fourth is the one that matters, and it is not a flag. A
+// `Close` is refused unless the cgroup tree really is `/sys/fs/cgroup`, and a
+// `terminate-user` is refused unless the configuration really is
+// `/etc/omahouse` -- so a run pointed at a tree of its own reads it, counts it,
+// prints what it would have closed, and closes nothing. `Enforce.h` has both
+// questions and why they are the right ones.
 
 /// The slowest tick worth allowing. An hour between cycles is an hour of
 /// somebody's afternoon debited as one tick, which is not accounting; the number
@@ -1886,12 +1892,41 @@ QString howItWent(const Said &said, bool dryRun)
     return QStringLiteral(" (not sent: %1)").arg(said.error);
 }
 
-QString whatWasNotDone(const Decision &decision)
+/// What one act of the teeth was, in one sentence.
+///
+/// Every one of them gets a line, always, whether it happened or not. These are
+/// the two things omahouse does that take something away from somebody, and a
+/// program that closes a window without a word in the journal is a program
+/// nobody can hold to account afterwards.
+QString whatWasDone(const Done &done)
 {
-    const QString what = decision.kind == Decision::Kind::Logout
-        ? QStringLiteral("logout")
-        : QStringLiteral("close %1").arg(decision.scopeUnit);
-    return QStringLiteral("%1 — not run: the teeth arrive with stage 7 of plan.md").arg(what);
+    const QString about = done.unit.isEmpty()
+        ? QString()
+        : QStringLiteral(" %1").arg(done.app.isEmpty() ? done.unit
+                                                       : QStringLiteral("%1 (%2)")
+                                                             .arg(done.app, done.unit));
+    QString what;
+    switch (done.what) {
+    case Done::What::Terminate:
+        what = QStringLiteral("SIGTERM into%1").arg(about);
+        break;
+    case Done::What::Kill:
+        what = QStringLiteral("cgroup.kill on%1").arg(about);
+        break;
+    case Done::What::Block:
+        what = QStringLiteral("refused at the next login (%1)").arg(paths::blockedFile());
+        break;
+    case Done::What::Unblock:
+        what = QStringLiteral("let back in (%1)").arg(paths::blockedFile());
+        break;
+    case Done::What::EndSession:
+        what = QStringLiteral("loginctl terminate-user");
+        break;
+    }
+    if (done.carriedOut)
+        return what;
+    return QStringLiteral("%1 — not done: %2")
+        .arg(what, done.error.isEmpty() ? QStringLiteral("dry run") : done.error);
 }
 
 /// The journal of one cycle: a line for anything that changed, and a line for
@@ -1912,8 +1947,14 @@ void logCycle(const Cycle &cycle)
                     .arg(decisionReasonName(said.decision.reason), said.words.summary,
                          said.words.body, howItWent(said, cycle.dryRun)));
         }
-        for (const Decision &decision : watched.notYet)
-            say(cycle.at, watched.user, whatWasNotDone(decision));
+        for (const Done &done : watched.done)
+            say(cycle.at, watched.user, whatWasDone(done));
+    }
+    if (!cycle.blockedError.isEmpty()) {
+        // Worth a line every cycle and not only when it changes: a `blocked`
+        // that cannot be read is a `blocked` refusing nobody, and the machine
+        // goes on looking fiscalised while it is not.
+        say(cycle.at, QStringLiteral("omahouse"), cycle.blockedError);
     }
     err().flush();
 }
@@ -1959,9 +2000,11 @@ void printCycle(const Cycle &cycle, const Profiles &profiles)
                          .arg(said.words.summary, said.words.body,
                               howItWent(said, cycle.dryRun));
         }
-        for (const Decision &decision : watched.notYet)
-            out() << QStringLiteral("  %1\n").arg(whatWasNotDone(decision));
+        for (const Done &done : watched.done)
+            out() << QStringLiteral("  %1\n").arg(whatWasDone(done));
     }
+    if (!cycle.blockedError.isEmpty())
+        out() << QStringLiteral("\n%1\n").arg(cycle.blockedError);
 }
 
 QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
@@ -1984,14 +2027,20 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
                           one.error.isEmpty() ? QJsonValue() : QJsonValue(one.error));
             said.append(object);
         }
-        QJsonArray notYet;
-        for (const Decision &decision : watched.notYet) {
-            notYet.append(QJsonObject {
-                {QStringLiteral("kind"), decisionKindName(decision.kind)},
-                {QStringLiteral("reason"), decisionReasonName(decision.reason)},
-                {QStringLiteral("budget"), decision.budgetId},
-                {QStringLiteral("scope"), decision.scopeUnit},
-            });
+        QJsonArray done;
+        for (const Done &one : watched.done) {
+            QJsonObject object {
+                {QStringLiteral("what"), doneWhatName(one.what)},
+                {QStringLiteral("kind"), decisionKindName(one.decision.kind)},
+                {QStringLiteral("reason"), decisionReasonName(one.decision.reason)},
+                {QStringLiteral("budget"), one.decision.budgetId},
+                {QStringLiteral("scope"), one.unit},
+                {QStringLiteral("app"), one.app},
+                {QStringLiteral("carriedOut"), one.carriedOut},
+            };
+            object.insert(QStringLiteral("error"),
+                          one.error.isEmpty() ? QJsonValue() : QJsonValue(one.error));
+            done.append(object);
         }
         const Profile *profile = profileFor(profiles, watched.user);
         QJsonObject object {
@@ -2007,10 +2056,11 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
             {QStringLiteral("debited"), QJsonArray::fromStringList(watched.debited)},
             {QStringLiteral("wrote"), watched.wrote},
             {QStringLiteral("said"), said},
-            // The decisions this stage does not carry out, named rather than
-            // dropped: a Close that nothing acted on is exactly what a reader of
-            // stage 6 needs to be able to see.
-            {QStringLiteral("notYet"), notYet},
+            // What the teeth did, and what they were refused. A refusal carries
+            // its reason, which is the sentence somebody reading a `close` that
+            // did not happen actually needs.
+            {QStringLiteral("done"), done},
+            {QStringLiteral("blocked"), watched.blocked},
             {QStringLiteral("budgets"),
              profile ? balancesToJson(balancesOf(*profile, watched.ledger)) : QJsonArray()},
         };
@@ -2018,12 +2068,17 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
                       watched.error.isEmpty() ? QJsonValue() : QJsonValue(watched.error));
         users.append(object);
     }
-    return QJsonObject {
+    QJsonObject document {
         {QStringLiteral("at"), cycle.at.toString(Qt::ISODate)},
         {QStringLiteral("tickSeconds"), cycle.tickSeconds},
         {QStringLiteral("dryRun"), cycle.dryRun},
+        {QStringLiteral("blocked"), QJsonArray::fromStringList(cycle.blocked)},
         {QStringLiteral("users"), users},
     };
+    document.insert(QStringLiteral("blockedError"),
+                    cycle.blockedError.isEmpty() ? QJsonValue()
+                                                 : QJsonValue(cycle.blockedError));
+    return document;
 }
 
 // -- stopping when told ------------------------------------------------------
@@ -2081,13 +2136,17 @@ int cmdWatch(const Globals &g, const QStringList &positionals, const Options &op
         }
     }
 
-    // The ledger is the only thing this writes, so it is the only privilege it
-    // asks for -- and a dry run asks for none at all, which is what lets anybody
-    // point the four roots at a directory of their own and watch one cycle of
-    // their own session.
+    // Two files now, and both are asked for before anything is read. The day's
+    // ledger under /var/lib, and -- since the teeth went in -- the
+    // /etc/omahouse/blocked of spec.md §2, which is the half of `logout` that
+    // does the work. A dry run asks for neither, which is what lets anybody
+    // point the roots at a directory of their own and watch one cycle of their
+    // own session.
     if (!options.dryRun
-        && !mayWrite(QStringLiteral("watch"), paths::stateDir(), paths::stateDirIsTheSystems(),
-                     g)) {
+        && (!mayWrite(QStringLiteral("watch"), paths::stateDir(), paths::stateDirIsTheSystems(),
+                      g)
+            || !mayWrite(QStringLiteral("watch"), paths::blockedFile(),
+                         paths::configDirIsTheSystems(), g))) {
         return kUsage;
     }
 
@@ -2112,10 +2171,16 @@ int cmdWatch(const Globals &g, const QStringList &positionals, const Options &op
 
     const Proc proc;
     DesktopNotifier notifier;
+    // The teeth are handed in and not switched on: what decides whether anything
+    // is closed is the profile's `enforce`, and what decides whether it may be
+    // is `Enforce.h`, which asks about the trees the paths are in rather than
+    // about a flag on this command line. A flag would be a thing somebody could
+    // pass by accident on the wrong machine.
+    MachineEnforcer enforcer;
     Watch::Options watching;
     watching.tickSeconds = interval;
     watching.dryRun = options.dryRun;
-    Watch watch(&proc, &notifier, watching);
+    Watch watch(&proc, &notifier, &enforcer, watching);
 
     const auto cycle = [&](const Profiles &current) {
         // The clock enters here and nowhere else. `evaluate` takes `now` by
@@ -2213,10 +2278,9 @@ Writing, and root needed — the studio gets there by pkexec:
 
 The loop, which is the only verb that keeps running:
   watch [--interval 2] [--once] [--dry-run]
-                           count what every profile has open, and warn before
-                           the time is out. It writes the day's ledger and
-                           nothing else; --dry-run writes nothing and says
-                           nothing, and --once is a single cycle
+                           count what every profile has open, warn before the
+                           time is out, and then close it. --dry-run decides
+                           and touches nothing, and --once is a single cycle
 
 An app is named by the id of its scope: `chromium`, `org.freedesktop.Platform`.
 `omahouse status` lists the ones that are open, and says when a scope holds
@@ -2232,15 +2296,24 @@ Globals:
 
 Files:
   /etc/omahouse/profiles.json          who is under rules   (OMAHOUSE_CONFIG_DIR)
+  /etc/omahouse/blocked                who may not log in   (OMAHOUSE_CONFIG_DIR)
   /var/lib/omahouse/<user>/<date>.json the day's ledger     (OMAHOUSE_STATE_DIR)
   /sys/fs/cgroup                       the scopes           (OMAHOUSE_CGROUP_ROOT)
   /proc                                what a scope runs    (OMAHOUSE_PROC_ROOT)
   notify-send                          how a warning is said (OMAHOUSE_NOTIFY_SEND)
   systemd-run                          how it reaches a session (OMAHOUSE_SYSTEMD_RUN)
+  loginctl                             how a session is ended (OMAHOUSE_LOGINCTL)
 
-`watch` counts and warns. Closing an app and ending a session arrive with
-stage 7 of plan.md; until then a profile that would close something says so in
-the journal and closes nothing.
+`watch` counts, warns, and then acts. Closing is SIGTERM into the app's scope
+and then its cgroup.kill; `session.slice` is never touched, so the compositor
+survives. Logging out is the name in /etc/omahouse/blocked and then `loginctl
+terminate-user` — one action, never half of it, because a machine with autologin
+hands the session straight back otherwise. The name comes out on its own when
+the day turns, when time is granted, or when enforcement goes off.
+
+Neither happens against a tree that is not this machine's: a cgroup root that is
+not /sys/fs/cgroup is never signalled, and a configuration that is not
+/etc/omahouse never ends a session.
 
 Exit: 0 it answered, 1 a usage error or a file it could not read, 2 no such
 account or no such profile.

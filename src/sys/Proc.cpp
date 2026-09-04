@@ -165,6 +165,11 @@ QString Proc::defaultCgroupRoot()
     return QString::fromLatin1(kDefaultCgroupRoot);
 }
 
+QString Proc::systemCgroupRoot()
+{
+    return QString::fromLatin1(kDefaultCgroupRoot);
+}
+
 QString Proc::defaultProcRoot()
 {
     const QByteArray fromEnvironment = qgetenv(kProcRootVariable);
@@ -254,8 +259,7 @@ void Proc::resolveDominantExe(AppScope *scope) const
     if (scope->cgroupPath.isEmpty())
         return;
 
-    QVector<qint64> pids;
-    pidsInTree(scope->cgroupPath, &pids);
+    const QVector<qint64> pids = pidsInCgroupTree(scope->cgroupPath);
 
     QHash<QString, int> tally;
     for (qint64 pid : pids) {
@@ -284,6 +288,14 @@ void Proc::resolveDominantExe(QVector<AppScope> *scopes) const
         return;
     for (AppScope &scope : *scopes)
         resolveDominantExe(&scope);
+}
+
+QVector<qint64> pidsInCgroupTree(const QString &cgroupPath)
+{
+    QVector<qint64> pids;
+    if (!cgroupPath.isEmpty())
+        pidsInTree(cgroupPath, &pids);
+    return pids;
 }
 
 int Proc::sessionSliceProcesses(uid_t uid) const

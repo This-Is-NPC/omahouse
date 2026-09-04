@@ -348,11 +348,15 @@ def check_help_and_refusals(box):
     for verb in ("allow", "deny", "limit", "grant", "profile add"):
         assert verb in helped.stdout, verb
 
-    # The loop is on the screen too, and what it does not do yet is said in the
-    # same place: this build warns, and closing an app and ending a session
-    # arrive with stage 7.
+    # The loop is on the screen too, and so are both halves of what it does when
+    # a budget runs out. `session.slice` is named because the promise that the
+    # compositor survives is the promise somebody has to be able to read before
+    # they switch enforcement on, and `blocked` is named because a logout that
+    # were only `terminate-user` would be theatre on any machine with autologin.
     assert "watch" in helped.stdout
-    assert "stage 7" in helped.stdout
+    assert "cgroup.kill" in helped.stdout
+    assert "`session.slice` is never touched" in helped.stdout
+    assert "/etc/omahouse/blocked" in helped.stdout
 
     # An option that belongs to another verb is refused rather than dropped: a
     # limit somebody asked for and did not get is worse than a usage error.
@@ -1283,13 +1287,15 @@ def check_watch_debits_the_day_and_warns_once(box):
     assert box.said() == said
 
 
-def check_watch_carries_out_warnings_and_nothing_else(box):
-    """spec.md §5 decides three things and this stage does one of them.
+def check_watch_decides_the_teeth_and_never_bites_a_tree_it_was_lent(box):
+    """testing.md §6, proved on the machine it is about.
 
-    With the teeth on, the core hands back a Close for every app that is not on
-    the list. Stage 6 names them in the journal and steps over them -- plan.md
-    keeps them for stage 7 and the VM -- and what it does carry out is the
-    warning.
+    The cgroup tree here is a directory in $TMPDIR whose `cgroup.procs` hold pids
+    somebody typed -- 4000, 4100, 4200 -- and those are real pids on the machine
+    running this suite. So with the teeth fully on, every close is decided,
+    named, and refused, and the refusal says which tree it was and which tree it
+    would have had to be. A build that got this wrong would be a test suite
+    killing whatever happened to be process 4000.
     """
     box.write_profiles(watching_profile(enforce=True))
     ran = box.run("watch", "--once")
@@ -1303,17 +1309,85 @@ def check_watch_carries_out_warnings_and_nothing_else(box):
     for said in box.said():
         assert said[1] == "It is not one of the programs released for Júlia."
 
-    # Named, and not run. The unit is in the line, because it is what
-    # `cgroup.kill` will be found under when stage 7 arrives.
-    assert "not run: the teeth arrive with stage 7" in ran.stderr, ran.stderr
-    assert "close app-" in ran.stderr, ran.stderr
+    # Decided, named, and not done. The unit is in the line because it is the
+    # directory `cgroup.kill` would have been written in.
+    assert "SIGTERM into" in ran.stderr, ran.stderr
+    assert "not this machine's to signal" in ran.stderr, ran.stderr
+    assert str(box.cgroup) in ran.stderr, ran.stderr
+
+    document = json.loads(box.run("watch", "--once", "--json").stdout)
+    done = document["users"][0]["done"]
+    assert done, document
+    for act in done:
+        assert act["what"] in ("terminate", "kill", "block", "unblock", "end-session"), act
+        assert not act["carriedOut"], act
+        assert "/sys/fs/cgroup" in act["error"], act
 
     # Observing is the default of a new profile, and under it the core emits no
-    # Close at all -- so there is nothing to hold back and nothing to say.
+    # Close at all -- so there is nothing to refuse and nothing to say.
     box.write_profiles(watching_profile(enforce=False))
     observing = box.run("watch", "--once")
     assert observing.returncode == 0, observing.stderr
-    assert "not run" not in observing.stderr, observing.stderr
+    assert "SIGTERM" not in observing.stderr, observing.stderr
+
+
+def check_watch_writes_the_block_and_refuses_to_end_a_session_behind_it(box):
+    """spec.md §2: `logout` is two things, and the second needs the first.
+
+    The name goes into `blocked` -- one per line, because `pam_listfile` reads it
+    -- and the session is only ended for a user who is really in that file, on a
+    machine whose PAM stack really reads it. Here it is a file in $TMPDIR, so the
+    block is written, the termination is refused, and the sentence says why.
+    """
+    box.write_profiles(watching_profile(enforce=True, default="allow"))
+    # The session budget spent, with no grace, so the logout lands on this tick.
+    box.write_day(TODAY, {"session": 120 * 60})
+    profiles = watching_profile(enforce=True, default="allow")
+    profiles["profiles"][0]["grace"] = 0
+    box.write_profiles(profiles)
+
+    ran = box.run("watch", "--once")
+    assert ran.returncode == 0, ran.stderr
+
+    blocked = box.config / "blocked"
+    assert blocked.exists(), ran.stderr
+    assert blocked.read_text() == f"{USER}\n"
+    assert oct(blocked.stat().st_mode)[-3:] == "644"
+
+    assert "refused at the next login" in ran.stderr, ran.stderr
+    assert "loginctl terminate-user" in ran.stderr, ran.stderr
+    assert "no PAM stack reads" in ran.stderr, ran.stderr
+
+    document = json.loads(box.run("watch", "--once", "--json").stdout)
+    assert document["blocked"] == [USER]
+    assert document["users"][0]["blocked"]
+    acts = {act["what"]: act for act in document["users"][0]["done"]}
+    assert "end-session" in acts and not acts["end-session"]["carriedOut"]
+
+    # And the name comes out on its own, with nothing having to know the file
+    # exists. An operator hands over ten minutes -- spec.md §1, with the game
+    # still running -- and the next cycle lets them back in.
+    granted = box.run("grant", USER, "--session", "10m")
+    assert granted.returncode == 0, granted.stderr
+    after = box.run("watch", "--once")
+    assert after.returncode == 0, after.stderr
+    assert blocked.read_text() == ""
+    assert "let back in" in after.stderr, after.stderr
+
+
+def check_watch_dry_run_never_writes_the_block(box):
+    """The mode that makes the loop safe to point anywhere, kept true of the half
+    of it that can lock a door."""
+    profiles = watching_profile(enforce=True, default="allow")
+    profiles["profiles"][0]["grace"] = 0
+    box.write_profiles(profiles)
+    box.write_day(TODAY, {"session": 120 * 60})
+
+    ran = box.run("watch", "--once", "--dry-run")
+    assert ran.returncode == 0, ran.stderr
+    assert not (box.config / "blocked").exists()
+    assert "refused at the next login" in ran.stdout, ran.stdout
+    assert "not done: dry run" in ran.stdout, ran.stdout
 
 
 def check_watch_refuses_what_it_does_not_do(box):
@@ -1412,7 +1486,9 @@ def main():
         check_watch_dry_run_counts_and_touches_nothing,
         check_watch_counts_a_session_of_nothing_but_nameless_scopes,
         check_watch_debits_the_day_and_warns_once,
-        check_watch_carries_out_warnings_and_nothing_else,
+        check_watch_decides_the_teeth_and_never_bites_a_tree_it_was_lent,
+        check_watch_writes_the_block_and_refuses_to_end_a_session_behind_it,
+        check_watch_dry_run_never_writes_the_block,
         check_watch_refuses_what_it_does_not_do,
         check_watch_counts_a_faster_tick,
         check_the_reading_verbs_write_nothing,

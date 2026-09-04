@@ -20,7 +20,8 @@ SOURCES += \
     tst_ledger.cpp \
     tst_proc.cpp \
     tst_paths.cpp \
-    tst_watch.cpp
+    tst_watch.cpp \
+    tst_enforce.cpp
 
 # The suite links the same archive the CLI links, rather than recompiling the
 # core's sources into itself: a test that builds its own copy of the library can

@@ -1,0 +1,13 @@
+#!/bin/sh
+# A fake app that behaves: it takes its SIGTERM and goes.
+#
+# testing.md's "apps de mentira", and the reason they are one-line scripts: the
+# allowlist matches the identity of the systemd scope, so from `Proc`'s point of
+# view this is indistinguishable from a browser. What matters is that it is a
+# process in a scope of its own with a name a rule can be written about.
+#
+# This one proves the polite half of spec.md §5's sequence. A scope whose
+# processes all leave on the SIGTERM is a scope `cgroup.kill` is never asked
+# about, and that is the ordinary ending: an editor writes its buffers, a browser
+# closes its session, and nothing comes back with a crash bar.
+exec sleep "${1:-900}"

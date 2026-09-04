@@ -40,3 +40,7 @@ run = ".scripts/usage-gen.sh"
 [tasks."usage:check"]
 description = "Checks that docs/cli.md is what omahouse.usage.kdl generates"
 run = ".scripts/usage-check.sh"
+
+[tasks."test:vm"]
+description = "Layer 2 of testing.md: the teeth, in the VM and never here"
+run = "vm/run.sh"

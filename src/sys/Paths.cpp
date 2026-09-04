@@ -35,6 +35,11 @@ QString stateDir()
 // spellings of one path have to mean one thing, or the check is a check somebody
 // can talk their way out of.
 
+QString systemConfigDir()
+{
+    return QString::fromLatin1(kSystemConfigDir);
+}
+
 bool configDirIsTheSystems()
 {
     return configDir() == QString::fromLatin1(kSystemConfigDir);
@@ -48,6 +53,11 @@ bool stateDirIsTheSystems()
 QString profilesFile()
 {
     return configDir() + QStringLiteral("/profiles.json");
+}
+
+QString blockedFile()
+{
+    return configDir() + QStringLiteral("/blocked");
 }
 
 QString userStateDir(const QString &user)
