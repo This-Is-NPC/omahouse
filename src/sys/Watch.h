@@ -75,8 +75,16 @@ struct Watched {
     bool account = false;
     bool enabled = false;
     bool session = false;
-    /// The ids of the live scopes, sorted and without repeats.
+    /// The ids of the live scopes, sorted and without repeats. Only the ones
+    /// that have an id: a scope nothing could name has no word to put in a
+    /// sentence, and an empty string in this list would print as a gap between
+    /// two commas.
     QStringList apps;
+    /// How many live scopes had no id at all. Counted rather than dropped,
+    /// because they are counted: they spend the session budget like everything
+    /// else, and a cycle that debited an hour while reporting `no apps` is the
+    /// journal telling the operator the opposite of what the ledger says.
+    int unnamedScopes = 0;
     /// The budgets that gained seconds this cycle, taken from the ledger before
     /// and after rather than worked out a second time.
     QStringList debited;

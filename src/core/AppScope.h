@@ -15,6 +15,13 @@ namespace omahouse {
 // and carries the flatpak app id in its own name.
 struct AppScope {
     /// What rules and budgets match against: `chromium`, `org.freedesktop.Platform`.
+    ///
+    /// Empty where the parser could not name the unit -- a
+    /// `tmux-spawn-<uuid>.scope`, of which this machine has dozens. That is a
+    /// scope nothing can name, not a scope nothing is running: it still counts
+    /// towards `*`, and what it cannot do is match a budget or a rule that
+    /// names an app, so its verdict is the profile's default. See
+    /// `selectorMatches` and spec.md §5.
     QString id;
     /// The unit as systemd spells it, escapes and random suffix and all. What a
     /// Close decision names, because it is what `cgroup.kill` is found under.
@@ -48,7 +55,17 @@ struct AppScope {
     /// out of twenty looks like what it is.
     int dominantExeCount = 0;
 
-    bool isLive() const { return pidCount > 0 && !id.isEmpty(); }
+    /// Whether this is somebody using the machine right now.
+    ///
+    /// Processes, and nothing else. The id used to be required here and that
+    /// was an accounting bug with a hole in it the size of a terminal: 46
+    /// `tmux-spawn-<uuid>.scope` holding more than a hundred processes were
+    /// stepped over by `Policy::evaluate` entirely, and an afternoon spent
+    /// inside them debited the `session` budget zero seconds. A scope with
+    /// processes in it is a person at the keyboard whether or not anything can
+    /// name it, so the id belongs to matching -- see `selectorMatches` -- and
+    /// not to being alive.
+    bool isLive() const { return pidCount > 0; }
 };
 
 /// The app id inside a scope unit name, or an empty string with `error` set.

@@ -67,10 +67,16 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
     if (!profile.enabled)
         return outcome;
 
-    // A scope with no processes is one on its way out, and a scope whose unit
-    // name the parser refused has no id to judge. Neither is somebody's app
-    // running, and reporting what could not be identified is `status`'s job
-    // (spec.md §5), not this function's.
+    // A scope with no processes is one on its way out, not somebody's app
+    // running.
+    //
+    // A scope whose unit name the parser refused stays: it has no id, but it
+    // has processes, and the second is what "somebody is using this machine"
+    // means. It is `selectorMatches` that knows the difference -- `*` takes it,
+    // a named selector cannot -- so below it is billed by the session, never by
+    // a budget about one app, and judged by the profile's default verdict.
+    // Naming what could not be identified is still `status`'s job (spec.md §5);
+    // counting it is this one's.
     QVector<AppScope> live;
     for (const AppScope &scope : scopes) {
         if (scope.isLive())

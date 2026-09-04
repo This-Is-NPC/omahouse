@@ -225,6 +225,22 @@ debitar no arquivo novo.
    - orçamento esgotado → aviso, `grace`, e a `onExhausted` dele
 6. Persiste o ledger.
 
+**Escopo vivo é escopo vivo, tenha nome ou não.** Um escopo com processos dentro
+é uma pessoa usando a máquina, e o seletor `*` casa com todos eles — inclusive os
+que o parser não consegue nomear, como os 46 `tmux-spawn-<uuid>.scope` desta
+máquina. É o que faz o orçamento `session` medir tempo de máquina em vez de tempo
+de app com nome bonito: sem isso, uma tarde inteira dentro do terminal debita
+zero, e para um perfil de criança essa é a rota de fuga óbvia. O id só é exigido
+onde faz falta de verdade — casar um orçamento ou uma regra **específicos** —, de
+modo que um escopo sem id nunca é debitado por um orçamento de um app só e nunca
+é julgado por uma regra nominal: ele cai no **veredito padrão** do perfil. A
+consequência é intencional: com `default: deny` e `enforce: true`, um escopo sem
+id é fechado, o que é a leitura coerente de uma allowlist — algo que não se
+consegue sequer nomear certamente não está na lista de liberados. O `enforce:
+false` de um perfil novo é o que protege durante a calibragem, e o `status` diz
+essas duas coisas na cara: esses escopos entram no total, e não dá para dar
+limite próprio a eles nem liberá-los por nome.
+
 ### A identidade de um app é o cgroup, não o executável
 
 Este era o desenho anterior — casar `/proc/<pid>/exe` contra caminhos de

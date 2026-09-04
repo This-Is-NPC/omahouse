@@ -442,60 +442,90 @@ bool byProcessesThenName(const AppScope &a, const AppScope &b)
     return a.unit < b.unit;
 }
 
-/// What omahouse saw under app.slice and could not name, and what is in
-/// session.slice where it cannot look -- spec.md §5.
+// How many units of either block below get a line of their own. Dozens of tmux
+// panes is what this machine has, and a status screen that is forty-six lines of
+// uuid is a status screen nobody reads; `--json` carries all of them.
+constexpr int kListed = 5;
+
+/// The live scopes under `app.slice` that omahouse counts and cannot name.
 ///
-/// Printed whether or not there is a profile, and phrased as a fact rather than
-/// as an alarm. On a live graphical session the second number is never zero:
-/// Hyprland's own processes are in it, and omahouse cannot tell them from an app
-/// somebody started with a raw `exec`. Saying so is the point. Pretending the
-/// number is a clean zero would be the lie.
-void printOutOfReach(const QVector<AppScope> &unnamed, const QVector<SessionUnit> &session,
-                     int sessionProcesses)
+/// This block used to sit under `Out of reach` and that was the wrong shelf: a
+/// `tmux-spawn-<uuid>.scope` is not out of reach at all. Its processes are
+/// counted, and every budget whose selector is `*` -- the session -- is debited
+/// for it, because somebody who has been in a terminal all afternoon is somebody
+/// using the machine. What the missing id really costs is the two things that
+/// need a name: a limit of its own, and being let through by name. So the
+/// verdict falls to the profile's default, and the paragraph says which one that
+/// is, because under `deny` with the teeth in that is a scope being closed.
+void printCountedNotNamed(const QVector<AppScope> &unnamed, const Profile *profile)
 {
-    if (unnamed.isEmpty() && session.isEmpty())
+    if (unnamed.isEmpty())
         return;
 
-    // How many of them get a line of their own. Thirty tmux panes is what this
-    // machine has, and a status screen that is thirty lines of uuid is a status
-    // screen nobody reads; `--json` carries all of them.
-    constexpr int kNamed = 5;
+    int processes = 0;
+    for (const AppScope &scope : unnamed)
+        processes += scope.pidCount;
+
+    out() << "\nCounted, not named\n";
+    out() << QStringLiteral("  %1 scope%2 under app.slice omahouse could not name, "
+                            "holding %3 process%4:\n")
+                 .arg(unnamed.size())
+                 .arg(unnamed.size() == 1 ? QString() : QStringLiteral("s"))
+                 .arg(processes)
+                 .arg(processes == 1 ? QString() : QStringLiteral("es"));
+    for (int i = 0; i < unnamed.size() && i < kListed; ++i) {
+        out() << QStringLiteral("    %1  %2\n")
+                     .arg(unnamed.at(i).pidCount, 5)
+                     .arg(unnamed.at(i).unit);
+    }
+    if (unnamed.size() > kListed) {
+        out() << QStringLiteral("    … and %1 more (--json lists them all)\n")
+                     .arg(unnamed.size() - kListed);
+    }
+    out() << "  These are in the total: a scope with processes in it is somebody using\n"
+             "  the machine, so every budget whose match is `*` — the session — is\n"
+             "  debited for them. What the missing name costs is the two things that\n"
+             "  need one: they cannot be given a limit of their own, and they cannot be\n"
+             "  allowed by name.\n";
+    if (!profile) {
+        out() << "  With a profile, the verdict on them would be its default.\n";
+    } else if (profile->defaultVerdict == Verdict::Allow) {
+        out() << "  No rule can name them, so they take the default verdict, allow.\n";
+    } else if (profile->enforce) {
+        out() << "  No rule can name them, so they take the default verdict, deny — and\n"
+                 "  the teeth are in, so they are closed. That is the intended reading of\n"
+                 "  an allowlist: something nobody can name is not on it.\n";
+    } else {
+        out() << "  No rule can name them, so they take the default verdict, deny. Nothing\n"
+                 "  is closed while this profile is only observing.\n";
+    }
+}
+
+/// What is in `session.slice`, where omahouse cannot look -- spec.md §5.
+///
+/// Printed whether or not there is a profile, and phrased as a fact rather than
+/// as an alarm. On a live graphical session the number is never zero: Hyprland's
+/// own processes are in it, and omahouse cannot tell them from an app somebody
+/// started with a raw `exec`. Saying so is the point. Pretending the number is a
+/// clean zero would be the lie.
+void printOutOfReach(const QVector<SessionUnit> &session, int sessionProcesses)
+{
+    if (session.isEmpty())
+        return;
 
     out() << "\nOut of reach\n";
-    if (!unnamed.isEmpty()) {
-        int processes = 0;
-        for (const AppScope &scope : unnamed)
-            processes += scope.pidCount;
-        out() << QStringLiteral("  %1 scope%2 under app.slice omahouse could not name, "
-                                "holding %3 process%4:\n")
-                     .arg(unnamed.size())
-                     .arg(unnamed.size() == 1 ? QString() : QStringLiteral("s"))
-                     .arg(processes)
-                     .arg(processes == 1 ? QString() : QStringLiteral("es"));
-        for (int i = 0; i < unnamed.size() && i < kNamed; ++i) {
-            out() << QStringLiteral("    %1  %2\n")
-                         .arg(unnamed.at(i).pidCount, 5)
-                         .arg(unnamed.at(i).unit);
-        }
-        if (unnamed.size() > kNamed) {
-            out() << QStringLiteral("    … and %1 more (--json lists them all)\n")
-                         .arg(unnamed.size() - kNamed);
-        }
+    out() << QStringLiteral("  %1 process%2 in session.slice omahouse can neither count "
+                            "nor close:\n")
+                 .arg(sessionProcesses)
+                 .arg(sessionProcesses == 1 ? QString() : QStringLiteral("es"));
+    for (int i = 0; i < session.size() && i < kListed; ++i) {
+        out() << QStringLiteral("    %1  %2\n")
+                     .arg(session.at(i).pidCount, 5)
+                     .arg(session.at(i).unit);
     }
-    if (!session.isEmpty()) {
-        out() << QStringLiteral("  %1 process%2 in session.slice omahouse can neither count "
-                                "nor close:\n")
-                     .arg(sessionProcesses)
-                     .arg(sessionProcesses == 1 ? QString() : QStringLiteral("es"));
-        for (int i = 0; i < session.size() && i < kNamed; ++i) {
-            out() << QStringLiteral("    %1  %2\n")
-                         .arg(session.at(i).pidCount, 5)
-                         .arg(session.at(i).unit);
-        }
-        if (session.size() > kNamed) {
-            out() << QStringLiteral("    … and %1 more (--json lists them all)\n")
-                         .arg(session.size() - kNamed);
-        }
+    if (session.size() > kListed) {
+        out() << QStringLiteral("    … and %1 more (--json lists them all)\n")
+                     .arg(session.size() - kListed);
     }
     out() << "  An app started outside `uwsm app` — a raw `exec` in a keybinding, or\n"
              "  something opened from a terminal — lands in the compositor's own unit.\n"
@@ -561,7 +591,7 @@ void printWhatIsInside(const QVector<Inside> &found)
     if (found.isEmpty())
         return;
 
-    // As many as the out of reach block names, and for the same reason: a screen
+    // About as many as the blocks below name, and for the same reason: a screen
     // that is twenty lines of executable path is a screen nobody reads, and
     // --json carries all of them.
     constexpr int kNamed = 6;
@@ -781,7 +811,8 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
     }
 
     printWhatIsInside(whatIsInside(named));
-    printOutOfReach(unnamed, sessionUnits, sessionProcesses);
+    printCountedNotNamed(unnamed, profile);
+    printOutOfReach(sessionUnits, sessionProcesses);
     return kOk;
 }
 
@@ -1823,12 +1854,22 @@ QString whatHappened(const Watched &watched)
     if (!watched.session)
         return QStringLiteral("not logged in; nothing to count");
 
-    const QString apps = watched.apps.isEmpty()
-        ? QStringLiteral("no apps")
+    // The scopes with no id are said out loud rather than left out of the count.
+    // They are what the session budget is being spent on when a person has been
+    // in a terminal all afternoon, and a line reading `no apps` over a ledger
+    // that gained an hour is the journal contradicting the accounting.
+    const QString named = watched.apps.isEmpty()
+        ? QStringLiteral("no named apps")
         : QStringLiteral("%1 app%2 (%3)")
               .arg(watched.apps.size())
               .arg(watched.apps.size() == 1 ? QString() : QStringLiteral("s"),
                    watched.apps.join(QStringLiteral(", ")));
+    const QString apps = watched.unnamedScopes == 0
+        ? (watched.apps.isEmpty() ? QStringLiteral("no apps") : named)
+        : QStringLiteral("%1 and %2 scope%3 it cannot name")
+              .arg(named)
+              .arg(watched.unnamedScopes)
+              .arg(watched.unnamedScopes == 1 ? QString() : QStringLiteral("s"));
     const QString clock = watched.debited.isEmpty()
         ? QStringLiteral("nothing on the clock")
         : QStringLiteral("counting %1").arg(watched.debited.join(QStringLiteral(", ")));
@@ -1960,6 +2001,9 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
             {QStringLiteral("enabled"), watched.enabled},
             {QStringLiteral("session"), watched.session},
             {QStringLiteral("apps"), QJsonArray::fromStringList(watched.apps)},
+            // Not in `apps`, and not left out either: a scope with no id has no
+            // word to go in that list and is counted like everything else.
+            {QStringLiteral("unnamedScopes"), watched.unnamedScopes},
             {QStringLiteral("debited"), QJsonArray::fromStringList(watched.debited)},
             {QStringLiteral("wrote"), watched.wrote},
             {QStringLiteral("said"), said},

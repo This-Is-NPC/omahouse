@@ -92,10 +92,17 @@ private slots:
         QVERIFY2(!error.isEmpty(), "it refused the unit without saying why");
     }
 
-    // The one shape that is not about the name: a scope whose last process has
-    // gone is not an app somebody is running, and `evaluate` leans on this to
-    // keep from billing a scope on its way out.
-    void countsAScopeAsLiveOnlyWithProcessesAndAnId()
+    // The one shape that is not about the name, and is not allowed to be about
+    // it: a scope whose last process has gone is not an app somebody is running,
+    // and `evaluate` leans on this to keep from billing a scope on its way out.
+    //
+    // A scope with no id is alive all the same. Requiring the name here was an
+    // accounting bug: it took 46 `tmux-spawn-<uuid>.scope` holding more than a
+    // hundred processes out of `evaluate` altogether, and an afternoon inside
+    // them debited the session nothing. Whether anything can be named is a
+    // question for `selectorMatches`, not for whether somebody is at the
+    // keyboard.
+    void countsAScopeAsLiveWheneverItHasProcesses()
     {
         AppScope running;
         running.id = QStringLiteral("chromium");
@@ -108,8 +115,13 @@ private slots:
         QVERIFY(!emptied.isLive());
 
         AppScope unnamed = running;
+        unnamed.unit = QStringLiteral("tmux-spawn-8d371e9b-645e-4030-a0d1-2243708321e2.scope");
         unnamed.id.clear();
-        QVERIFY(!unnamed.isLive());
+        QVERIFY2(unnamed.isLive(), "a scope full of processes was ignored for having no name");
+
+        AppScope unnamedAndEmpty = unnamed;
+        unnamedAndEmpty.pidCount = 0;
+        QVERIFY(!unnamedAndEmpty.isLive());
     }
 
     // The second signal, and the only thing that catches a launcher shim:

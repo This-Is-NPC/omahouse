@@ -194,11 +194,12 @@ private slots:
         QVERIFY(watched.wrote);
         QVERIFY(watched.error.isEmpty());
 
-        // The scope with no id is seen and not counted. It is the second blind
-        // spot of poc/findings.md round 4 -- omahouse can close one of these and
-        // cannot name it -- and the honest thing to do with a scope no rule can
-        // be written about is to leave it out of the accounting.
+        // The scope with no id is counted and has no name to be counted under.
+        // It stays out of `apps`, which is a list of words for a sentence, and
+        // it is reported as itself so that a journal line about a session spent
+        // entirely inside a terminal does not read `no apps`.
         QCOMPARE(watched.apps, QStringList({QStringLiteral("chromium"), QStringLiteral("code")}));
+        QCOMPARE(watched.unnamedScopes, 1);
 
         // Once per budget and never once per process: the nineteen processes of
         // one Chromium are one app, which is the whole reason the identity is
@@ -320,10 +321,12 @@ private slots:
         for (const Said &said : watched.said)
             QCOMPARE(said.decision.kind, Decision::Kind::Warn);
 
-        // Two apps refused and two budgets out, all of it said and none of it
-        // acted on.
-        QCOMPARE(watched.said.size(), 4);
-        QCOMPARE(recorder.notes.size(), 4);
+        // Two apps and one nameless scope refused, and two budgets out: all of
+        // it said and none of it acted on. The `tmux-spawn` scope is in the
+        // count because no rule can name it and the default is what is left,
+        // which under `deny` is a refusal like any other.
+        QCOMPARE(watched.said.size(), 5);
+        QCOMPARE(recorder.notes.size(), 5);
         QVERIFY(recorder.notes.first().summary.endsWith(QStringLiteral("is not allowed")));
 
         // And it is still counted: the seconds happened whatever the verdict

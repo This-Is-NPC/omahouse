@@ -117,9 +117,13 @@ bool onExhaustedFromName(const QString &name, OnExhausted *out)
 
 bool selectorMatches(const QString &selector, const QString &scopeId)
 {
-    if (scopeId.isEmpty())
-        return false;
-    return selector == kEverything || selector == scopeId;
+    // Everything is everything, and a scope nothing could name is still
+    // something. This is the whole of the id requirement: it lives here, on the
+    // half of the question that needs a name, and not on whether the scope is
+    // alive.
+    if (selector == kEverything)
+        return true;
+    return !scopeId.isEmpty() && selector == scopeId;
 }
 
 Verdict Profile::verdictFor(const QString &scopeId) const

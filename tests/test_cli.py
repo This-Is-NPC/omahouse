@@ -397,26 +397,63 @@ def check_status_scans_without_a_profile(box):
 
 
 def check_status_reports_what_it_cannot_see(box):
-    """spec.md §5, both halves of it.
+    """spec.md §5, and the two things it asks for are not the same thing.
 
-    A `tmux-spawn-<uuid>.scope` is seen and not named: omahouse knows it is there
-    and could close it, but has no id to match a rule against. The compositor's
-    processes are the real blind spot: an app started by a raw `exec` is in there
-    and cannot be told from Hyprland, so it is neither counted nor closable.
+    A `tmux-spawn-<uuid>.scope` is counted and not named: omahouse knows it is
+    there, spends the session on it, and could close it, and what it has no id
+    for is a limit of its own or a rule that lets it through by name. That is a
+    section of its own and not a blind spot. The compositor's processes are the
+    blind spot: an app started by a raw `exec` is in there and cannot be told
+    from Hyprland, so it is neither counted nor closable.
     """
     seen = box.run("status", USER)
-    assert "Out of reach" in seen.stdout
+
+    assert "Counted, not named" in seen.stdout
     assert "1 scope under app.slice omahouse could not name" in seen.stdout
     assert "tmux-spawn-8d371e9b-645e-4030-a0d1-2243708321e2.scope" in seen.stdout
+    # The new truth, in the words the screen uses: counted towards `*`, and
+    # without a name there is no limit of its own and no allowing it by name.
+    assert "These are in the total" in seen.stdout
+    assert "cannot be given a limit of their own" in seen.stdout
+    # It has no id, so no rule can reach it and the profile default is left.
+    # There is no profile in this case, and the line says exactly that.
+    assert "the verdict on them would be its default" in seen.stdout
+
+    assert "Out of reach" in seen.stdout
     assert "8 processes in session.slice" in seen.stdout
     assert "wayland-wm@hyprland.desktop.service" in seen.stdout
-    # Named, and not counted as an app: the tmux scope is not in the table.
+
+    # Counted, and still not an app with a name: the tmux scope is not a row of
+    # the table, because there is no id to put in the first column.
     assert row_for(seen.stdout, "tmux-spawn-8d371e9b-645e-4030-a0d1-2243708321e2.scope") \
         is None
     # Session plumbing is a unit somebody's package declared, and is not in the
     # count.
     assert "pipewire" not in seen.stdout
     assert "dbus-broker" not in seen.stdout
+
+
+def check_status_says_what_the_default_verdict_does_to_a_nameless_scope(box):
+    """The consequence of the rule, said on the screen that would have to
+    explain it.
+
+    A scope with no id cannot match a rule, so the profile's default is the whole
+    of its verdict. Under an allowlist with the teeth in, that closes it -- which
+    is coherent, and is exactly the sentence an operator needs to find before
+    they wonder why the terminal shut.
+    """
+    box.write_profiles(watching_profile(enforce=False, default="allow"))
+    allowed = box.run("status", USER)
+    assert "they take the default verdict, allow" in allowed.stdout
+
+    box.write_profiles(watching_profile(enforce=False, default="deny"))
+    observing = box.run("status", USER)
+    assert "they take the default verdict, deny" in observing.stdout
+    assert "only observing" in observing.stdout
+
+    box.write_profiles(watching_profile(enforce=True, default="deny"))
+    enforcing = box.run("status", USER)
+    assert "the teeth are in, so they are closed" in enforcing.stdout
 
 
 def check_status_says_what_a_scope_really_holds(box):
@@ -1152,11 +1189,57 @@ def check_watch_dry_run_counts_and_touches_nothing(box):
     watched = document["users"][0]
     assert watched["user"] == USER and watched["session"] and not watched["wrote"]
     assert watched["debited"] == ["chromium", "code", "session"]
-    # The scopes with no id are seen and not counted: this machine's twenty-three
-    # `tmux-spawn-<uuid>.scope` are the second blind spot of poc/findings.md
-    # round 4, and a scope no rule can name is not one to invent a name for.
+    # A scope with no id is counted and has no name to be counted under. It is
+    # not in `apps`, because there is no word to put there, and it is reported as
+    # itself rather than left out of the cycle altogether.
     assert "chromium" in watched["apps"]
     assert not any(app.startswith("tmux-spawn") for app in watched["apps"])
+    assert watched["unnamedScopes"] == 1
+
+
+def check_watch_counts_a_session_of_nothing_but_nameless_scopes(box):
+    """The bug this fixture was written after, end to end.
+
+    Measured on the development machine: 46 `tmux-spawn-<uuid>.scope` holding
+    more than a hundred processes, and an afternoon inside them debited the two
+    hour session zero seconds -- `howl: no apps, nothing on the clock`. For a
+    child's profile that is the obvious way out of the house. The session budget
+    is time on the machine, and a scope with processes in it is somebody using
+    the machine whether or not anything can name it.
+    """
+    # A session that is nothing but a terminal: two scopes the parser refuses,
+    # thirty-nine processes between them, and not one app with a name.
+    terminal = box.root / "terminal-cgroup"
+    manager = terminal / "user.slice" / f"user-{UID}.slice" / f"user@{UID}.service"
+    write_cgroup(manager / "app.slice" / "app-graphical.slice"
+                 / "tmux-spawn-8d371e9b-645e-4030-a0d1-2243708321e2.scope", 20, 4600)
+    write_cgroup(manager / "app.slice" / "app-graphical.slice"
+                 / "tmux-spawn-ef186a82-fc3d-4946-ab27-107f807a948c.scope", 19, 4700)
+
+    box.write_profiles(watching_profile(default="allow"))
+    ran = box.run("watch", "--once", "--dry-run",
+                  extra_env={"OMAHOUSE_CGROUP_ROOT": str(terminal)})
+    assert ran.returncode == 0, ran.stderr
+
+    # The two seconds are on the clock, and they are two and not four: the debit
+    # is once per budget, not once per scope and not once per process.
+    assert row_for(ran.stdout, "session", after="BUDGET")[:4] \
+        == ["session", "2h00m", "2s", "1h59m"]
+    # And the budget that names an app is not billed for a scope that is not that
+    # app: `*` counts everything alive, a name needs a name.
+    assert row_for(ran.stdout, "chromium", after="BUDGET")[:4] \
+        == ["chromium", "45m", "0m", "45m"]
+
+    # The journal used to read `no apps, nothing on the clock` over exactly this.
+    assert "no apps, nothing on the clock" not in ran.stdout
+    assert "no named apps and 2 scopes it cannot name, counting session" in ran.stdout
+
+    document = json.loads(box.run("watch", "--once", "--dry-run", "--json",
+                                  extra_env={"OMAHOUSE_CGROUP_ROOT": str(terminal)}).stdout)
+    watched = document["users"][0]
+    assert watched["apps"] == []
+    assert watched["unnamedScopes"] == 2
+    assert watched["debited"] == ["session"]
 
 
 def check_watch_debits_the_day_and_warns_once(box):
@@ -1300,6 +1383,7 @@ def main():
         check_help_and_refusals,
         check_status_scans_without_a_profile,
         check_status_reports_what_it_cannot_see,
+        check_status_says_what_the_default_verdict_does_to_a_nameless_scope,
         check_status_about_nobody_in_particular,
         check_status_refuses_an_account_that_is_not_there,
         check_status_of_a_user_who_is_not_logged_in,
@@ -1326,6 +1410,7 @@ def main():
         check_the_writing_verbs_want_a_profile_that_is_there,
         check_watch_says_when_there_is_nobody_to_watch,
         check_watch_dry_run_counts_and_touches_nothing,
+        check_watch_counts_a_session_of_nothing_but_nameless_scopes,
         check_watch_debits_the_day_and_warns_once,
         check_watch_carries_out_warnings_and_nothing_else,
         check_watch_refuses_what_it_does_not_do,

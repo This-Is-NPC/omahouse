@@ -69,9 +69,12 @@ public:
     /// `app.slice` when a `.desktop` did.
     ///
     /// A scope whose unit name the parser refuses comes back with an empty `id`
-    /// and its `pidCount` intact rather than being dropped. `Policy::evaluate`
-    /// ignores it -- `AppScope::isLive` is false without an id -- and `status`
-    /// reports it as something seen and not named, which is the same duty §5
+    /// and its `pidCount` intact rather than being dropped, and the count is the
+    /// point: `Policy::evaluate` bills it to every budget whose selector is `*`,
+    /// because a scope with processes in it is somebody at the keyboard whether
+    /// or not anything can name it. What the missing id costs it is a budget or
+    /// a rule of its own, so its verdict is the profile's default. `status`
+    /// reports it as something counted and not named, which is the same duty §5
     /// puts on the blind spot: say what cannot be accounted for.
     ///
     /// Ordered by cgroup path, so two runs over an unchanged tree print the same

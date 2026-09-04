@@ -27,6 +27,15 @@ bool onExhaustedFromName(const QString &name, OnExhausted *out);
 /// matched whole and case sensitively, because `org.freedesktop.Platform` and
 /// `org.freedesktop.platform` are two different flatpaks as far as flatpak is
 /// concerned.
+///
+/// An empty `scopeId` is a live scope the parser could not name, and `*` matches
+/// it like anything else: the session budget is time on the machine, and 46
+/// `tmux-spawn-<uuid>.scope` full of processes are somebody at the keyboard. A
+/// named selector never matches it -- there is no name to match -- so a budget
+/// about one app never bills it and a rule about one app never judges it, and
+/// what decides it is the profile's default verdict. Under `default: deny` that
+/// closes it, which is the honest reading: a thing nobody can even name is
+/// certainly not on the list of what was released.
 bool selectorMatches(const QString &selector, const QString &scopeId);
 
 struct Rule {

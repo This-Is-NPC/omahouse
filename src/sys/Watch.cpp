@@ -226,7 +226,11 @@ void Watch::observe(const Profile &profile, Watched *watched, const QDateTime &n
     const QVector<AppScope> scopes = m_proc->scopesFor(watched->uid);
     QStringList apps;
     for (const AppScope &scope : scopes) {
-        if (scope.isLive())
+        if (!scope.isLive())
+            continue;
+        if (scope.id.isEmpty())
+            ++watched->unnamedScopes;
+        else
             apps.append(scope.id);
     }
     watched->apps = sortedWithoutRepeats(apps);
@@ -308,6 +312,7 @@ bool Watch::worthSaying(const Watched &watched)
         watched.account ? QStringLiteral("account") : QStringLiteral("no account"),
         watched.session ? QStringLiteral("session") : QStringLiteral("no session"),
         watched.apps.join(QLatin1Char(',')),
+        QString::number(watched.unnamedScopes),
         watched.debited.join(QLatin1Char(',')),
         watched.error,
     };

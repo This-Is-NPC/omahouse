@@ -224,9 +224,12 @@ private slots:
         QCOMPARE(delegated->pidCount, 5);
     }
 
-    // Kept, not dropped. `Policy::evaluate` steps over it -- `isLive` is false
-    // without an id -- and `status` reports it as something seen and not named,
-    // which is what spec.md §5 asks of everything the model cannot account for.
+    // Kept, not dropped, and counted. `Policy::evaluate` bills it to every
+    // budget whose selector is `*` -- eighteen processes is somebody using the
+    // machine, name or no name -- and `status` reports it as something counted
+    // and not named, which is what spec.md §5 asks of everything the model
+    // cannot account for. What it cannot do is match a budget or a rule that
+    // names an app, so its verdict is the profile's default.
     void keepsAScopeItCannotName()
     {
         const Proc proc(m_tree.path());
@@ -236,7 +239,7 @@ private slots:
         QVERIFY(tmux);
         QVERIFY(tmux->id.isEmpty());
         QCOMPARE(tmux->pidCount, 18);
-        QVERIFY(!tmux->isLive());
+        QVERIFY(tmux->isLive());
     }
 
     // An empty scope is a unit systemd has not reaped yet, not an app running.

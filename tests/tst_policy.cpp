@@ -18,6 +18,18 @@ AppScope scope(const QString &id, int pidCount = 1)
     return entry;
 }
 
+// A scope the parser could not name, shaped like the ones this machine really
+// has: 46 of these under app.slice, holding more than a hundred processes, and
+// `Proc` hands them over with an empty id and the count intact.
+AppScope unnamedScope(const QString &uuid, int pidCount = 1)
+{
+    AppScope entry;
+    entry.unit = QStringLiteral("tmux-spawn-%1.scope").arg(uuid);
+    entry.cgroupPath = QStringLiteral("/app.slice/app-graphical.slice/") + entry.unit;
+    entry.pidCount = pidCount;
+    return entry;
+}
+
 // The clock the whole suite runs on. Nobody reads the real one: `now` is an
 // argument, so a budget that takes two hours to run out takes two lines.
 QDateTime at(int hour, int minute, int second = 0)
@@ -133,6 +145,116 @@ private slots:
         QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
         for (const Decision &decision : outcome.decisions)
             QCOMPARE(decision.scopeUnit, steam.unit);
+    }
+
+    // The session is time on the machine, and a scope nothing can name is
+    // somebody on the machine.
+    //
+    // Measured on the development machine: 46 `tmux-spawn-<uuid>.scope` holding
+    // more than a hundred processes, and an afternoon inside them debited the
+    // two hour session zero seconds, because `evaluate` was handed them and
+    // stepped over every one. For a child's profile that is the obvious way out
+    // of the house: open a terminal and the clock stops.
+    void billsTheSessionForAScopeItCannotName()
+    {
+        Profile profile = profileOf();
+        profile.budgets = {
+            budget(QStringLiteral("session"), QStringLiteral("*"), 120, OnExhausted::Logout),
+            budget(QStringLiteral("chromium"), QStringLiteral("chromium"), 60,
+                   OnExhausted::Close),
+        };
+
+        // Two scopes, thirty-nine processes, and not one of them with a name.
+        const QVector<AppScope> terminal {
+            unnamedScope(QStringLiteral("8d371e9b-645e-4030-a0d1-2243708321e2"), 20),
+            unnamedScope(QStringLiteral("ef186a82-fc3d-4946-ab27-107f807a948c"), 19),
+        };
+
+        const Outcome outcome = evaluate(profile, terminal, startOfDay(), at(19, 0), 2);
+
+        // One tick, once, for the budget whose selector is `*`.
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("session")), 2);
+        // And still once per budget rather than once per scope or per process:
+        // two scopes and thirty-nine processes are two seconds, not four and not
+        // seventy-eight.
+        const Outcome second = evaluate(profile, terminal, outcome.ledger, at(19, 0, 2), 2);
+        QCOMPARE(second.ledger.secondsFor(QStringLiteral("session")), 4);
+    }
+
+    // The other half of the same rule: `*` is not a wildcard for names, it is
+    // "anything alive". A budget that names an app needs the name, and a scope
+    // that has none is not that app.
+    void neverBillsANamedBudgetForAScopeItCannotName()
+    {
+        Profile profile = profileOf();
+        profile.budgets = {budget(QStringLiteral("chromium"), QStringLiteral("chromium"), 60,
+                                  OnExhausted::Close)};
+
+        const Outcome outcome =
+            evaluate(profile,
+                     {unnamedScope(QStringLiteral("8d371e9b-645e-4030-a0d1-2243708321e2"), 20)},
+                     startOfDay(), at(19, 0), 2);
+
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("chromium")), 0);
+        QVERIFY2(outcome.ledger.seconds.isEmpty(),
+                 "a budget about one app was billed for a scope that is not that app");
+    }
+
+    // With no id there is no rule to match, so the profile's default is the
+    // whole of the answer -- and it is the answer in both directions, because a
+    // policy that only ever lets these through also passes the allowlist test.
+    void sendsAScopeWithNoIdToTheDefaultVerdict()
+    {
+        const AppScope terminal =
+            unnamedScope(QStringLiteral("8d371e9b-645e-4030-a0d1-2243708321e2"), 20);
+
+        // A denylist. Nothing names it, so nothing refuses it, and the rule
+        // about `steam` is not a rule about a nameless scope.
+        Profile denylist = profileOf();
+        denylist.defaultVerdict = Verdict::Allow;
+        denylist.rules = {Rule{QStringLiteral("steam"), Verdict::Deny}};
+
+        const Outcome allowed = evaluate(denylist, {terminal}, startOfDay(), at(19, 0), 2);
+        QVERIFY2(allowed.decisions.isEmpty(),
+                 "a nameless scope was acted on under a default of allow");
+
+        // An allowlist, with the teeth in. The consequence is meant: a thing
+        // nobody can even name is certainly not on the list of what was
+        // released, and `chromium` being on that list does not cover it.
+        Profile allowlist = profileOf();
+        allowlist.defaultVerdict = Verdict::Deny;
+        allowlist.enforce = true;
+        allowlist.rules = {Rule{QStringLiteral("chromium"), Verdict::Allow}};
+
+        const Outcome denied = evaluate(allowlist, {terminal}, startOfDay(), at(19, 0), 2);
+        QCOMPARE(denied.decisions.size(), 2);
+        QCOMPARE(denied.decisions.at(0).kind, Decision::Kind::Warn);
+        QCOMPARE(denied.decisions.at(0).reason, Decision::Reason::Denied);
+        QCOMPARE(denied.decisions.at(0).scopeUnit, terminal.unit);
+        QCOMPARE(denied.decisions.at(1).kind, Decision::Kind::Close);
+        QCOMPARE(denied.decisions.at(1).scopeUnit, terminal.unit);
+    }
+
+    // And the calibration window holds for it like everything else. A profile
+    // that is only observing closes nothing, which is what makes `enforce:
+    // false` the default a new profile is born with: a day of the report before
+    // the teeth, and the terminal not shut in somebody's face on day one.
+    void holdsBackTheCloseOfANamelessScopeWithoutEnforce()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.enforce = false;
+
+        const Outcome outcome =
+            evaluate(profile,
+                     {unnamedScope(QStringLiteral("8d371e9b-645e-4030-a0d1-2243708321e2"), 20)},
+                     startOfDay(), at(19, 0), 2);
+
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 0);
+        // Said, though: the refusal is what turns a rule into something the
+        // operator can read on the report before switching the teeth on.
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Warn), 1);
+        QCOMPARE(outcome.decisions.at(0).reason, Decision::Reason::Denied);
     }
 
     // Two hours of session, proved without waiting two hours: the ledger is
