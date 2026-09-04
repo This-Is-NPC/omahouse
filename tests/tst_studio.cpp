@@ -26,20 +26,32 @@
 // with the command table cut to `open` and `back`, and a read-only window has no
 // parity to violate: there is no action for one door to have and the other to
 // lack. `theSubjectFaceHasNothingToPress` pins that shape from the other end.
+//
+// Two cases at the foot of the file do a second job with the same machinery:
+// `writesTheOperatorShots` and `writesTheSubjectShots` drive the window over
+// every screen it can draw and save each one into `$OMAHOUSE_SHOTS`, which is
+// how `docs/img` and `docs/screens.md` are made. They skip when nothing asked
+// for pictures, so the gate never writes any.
 
 #include "Admin.h"
 #include "Catalog.h"
 #include "House.h"
+#include "Ledger.h"
+#include "Profile.h"
 #include "Theme.h"
 #include "Paths.h"
 #include "Users.h"
 
+#include <QDate>
 #include <QDir>
 #include <QFile>
+#include <QGuiApplication>
+#include <QImage>
 #include <QQmlApplicationEngine>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QSignalSpy>
+#include <QStyleHints>
 #include <QTemporaryDir>
 #include <QtQml>
 #include <QtTest>
@@ -93,7 +105,30 @@ void makeProcess(const QString &procRoot, int pid, const QString &executable)
 {
     const QString directory = QStringLiteral("%1/%2").arg(procRoot).arg(pid);
     QVERIFY2(QDir().mkpath(directory), qPrintable(directory));
+    // A pid that already has one is left alone rather than failing: the two
+    // shot cases seed the same tree, and `QFile::link` will not write over an
+    // existing name.
+    if (QFile::exists(directory + QStringLiteral("/exe")))
+        return;
     QVERIFY2(QFile::link(executable, directory + QStringLiteral("/exe")), qPrintable(directory));
+}
+
+/// Whether there is anything drawn in that frame, as opposed to a flat colour.
+///
+/// The one question a picture can be asked without pinning a layout to a number.
+/// A window that renders nothing at all still answers every other case in this
+/// file correctly -- the keys work, the profile is written -- and leaves a black
+/// rectangle where the balance is; and a generator without this check fills
+/// docs/img with those and nobody notices, which is the specific way a picture
+/// in a document goes wrong.
+bool moreThanOneColour(const QImage &frame)
+{
+    QSet<QRgb> colours;
+    for (int y = 0; y < frame.height() && colours.size() < 8; y += 3) {
+        for (int x = 0; x < frame.width() && colours.size() < 8; x += 3)
+            colours.insert(frame.pixel(x, y));
+    }
+    return colours.size() > 4;
 }
 
 } // namespace
@@ -116,6 +151,8 @@ private slots:
     void saysWhatIsReallyInsideAShim();
     void drawsItself();
     void theSubjectFaceHasNothingToPress();
+    void writesTheOperatorShots();
+    void writesTheSubjectShots();
 
 private:
     QQuickWindow *window() const;
@@ -131,6 +168,10 @@ private:
     QQuickItem *awaitRow(const QString &listName, int index, int milliseconds = 4000);
     bool waitForWrite();
     void emptyTheHouse();
+    QString shotsDir() const;
+    void shoot(const QString &name);
+    void seedTheExampleHousehold();
+    void seedTheExampleSession(uid_t uid);
     QVariantList people() const;
     QVariantMap personNamed(const QString &user) const;
     QVariantList programsOf(const QString &user) const;
@@ -161,6 +202,13 @@ void TestStudio::initTestCase()
 {
     QVERIFY(m_tree.isValid());
     const QString root = m_tree.path();
+
+    // The text caret stops blinking. Zero is Qt's own word for "does not flash",
+    // and without it a field is on screen for half a second out of every one --
+    // so two grabs of a window nothing is happening in differ, and the pictures
+    // in docs/img would carry a caret or not depending on when the machine got
+    // round to them.
+    QGuiApplication::styleHints()->setCursorFlashTime(0);
 
     // Both roots somewhere of this suite's own. Not a convenience: it is the
     // seam Paths.h documents -- a run pointed at a tree of its own is writing
@@ -897,14 +945,13 @@ void TestStudio::saysWhatIsReallyInsideAShim()
 // Everything else in this file asks the state what happened, which a window that
 // draws nothing at all would answer correctly -- the keys would work, the
 // profile would be written, and there would be a black rectangle where the
-// balance is. So this one looks at the pixels, and asks the one question a
-// picture can be asked without pinning a layout to a number: is there more than
-// one colour in it.
+// balance is. So this one looks at the pixels, and asks `moreThanOneColour`.
 //
-// With OMAHOUSE_SHOTS naming a directory it writes the frames there as well, so
-// a keyboard-driven window can be looked at without a screen, a session or a
-// compositor. Off by default: the suite is about behaviour, and nobody wants a
-// test that writes pictures every time it runs.
+// The pictures themselves are not written here. `writesTheOperatorShots` and
+// `writesTheSubjectShots` at the foot of this file do that, over every screen
+// rather than four of them, and they run the same check on every frame before
+// saving it -- which is the whole reason the check is a function and not four
+// lines in this case.
 void TestStudio::drawsItself()
 {
     if (!root()->property("operating").toBool())
@@ -935,7 +982,6 @@ void TestStudio::drawsItself()
                   QStringLiteral("10m")});
     QVERIFY(waitForWrite());
 
-    const QString shots = qEnvironmentVariable("OMAHOUSE_SHOTS");
     const QStringList frames{QStringLiteral("people"), QStringLiteral("programs"),
                              QStringLiteral("today"), QStringLiteral("keys")};
     for (int i = 0; i < frames.size(); ++i) {
@@ -950,19 +996,8 @@ void TestStudio::drawsItself()
 
         const QImage frame = window()->grabWindow();
         QVERIFY2(!frame.isNull(), qPrintable(frames.at(i)));
-        QSet<QRgb> colours;
-        for (int y = 0; y < frame.height() && colours.size() < 8; y += 3) {
-            for (int x = 0; x < frame.width() && colours.size() < 8; x += 3)
-                colours.insert(frame.pixel(x, y));
-        }
-        QVERIFY2(colours.size() > 4,
+        QVERIFY2(moreThanOneColour(frame),
                  qPrintable(QStringLiteral("%1 is a flat rectangle").arg(frames.at(i))));
-
-        if (!shots.isEmpty()) {
-            QDir().mkpath(shots);
-            QVERIFY(frame.save(shots + QLatin1Char('/') + frames.at(i)
-                               + QStringLiteral(".png")));
-        }
     }
     key(Qt::Key_Escape);
 }
@@ -984,6 +1019,347 @@ void TestStudio::theSubjectFaceHasNothingToPress()
         QCOMPARE(commands.size(), 2);
     else
         QVERIFY(commands.size() > 2);
+}
+
+// ---------------------------------------------------------------------------
+// The inventory of screens, written into docs/img.
+//
+// `.scripts/shots.sh` runs the two cases below, and `docs/screens.md` is the
+// catalogue of what came out. A screenshot pasted in by hand goes stale the
+// first time a column moves and nobody notices until somebody reads the page,
+// so these are regenerated the way docs/cli.md is and checked the same way:
+// `.scripts/shots-check.sh` writes them into a scratch directory and compares.
+//
+// Two cases and not one because the two faces cannot be reached from one
+// account. `$OMAHOUSE_AS` moves what the window reads -- see `readingAs` in
+// House.cpp -- and the script runs this binary twice, once as `root` and once
+// as `nobody`, which is also what makes the bytes the same on any machine: the
+// operator's own name is printed across the header of every frame.
+//
+// Everything drawn here is a fixture. The profile is written by the shipped
+// verbs against a temporary tree, the session is a cgroup tree of this suite's
+// own, and the day's ledger is written with the clock spelled out rather than
+// taken from `QTime::currentTime` -- a picture with `now` in it is a picture
+// whose bytes change every run, and `shots-check` would then refuse a commit
+// for a reason that has nothing to do with the commit.
+//
+// What is *not* here: the notification, the greeter refusing a login, and the
+// lock screen. Those are not things this window draws at all, and there is no
+// honest way to make it draw them; they come from `vm/shots/`, and
+// docs/screens.md says of every picture which of the two it is.
+
+QString TestStudio::shotsDir() const
+{
+    return qEnvironmentVariable("OMAHOUSE_SHOTS");
+}
+
+/// Save the window under that name, once it has stopped moving, and refuse a
+/// flat rectangle.
+///
+/// Grabbed until two grabs in a row agree, with a real wait and a real frame
+/// between them. Both halves matter. Every chip in this window fades its fill,
+/// its border and its label over 90 milliseconds when the view changes, and
+/// those are driven by the animation clock, which advances when time passes and
+/// a frame is rendered -- so a `processEvents` that returns the moment the queue
+/// is empty advances nothing, and two grabs taken through one agree with each
+/// other about a window frozen half way through a transition. The first run of
+/// this wrote the people chip still lit on the programs view, and it looked
+/// exactly like a broken binding.
+void TestStudio::shoot(const QString &name)
+{
+    const QString directory = shotsDir();
+    QVERIFY(!directory.isEmpty());
+    QVERIFY2(QDir().mkpath(directory), qPrintable(directory));
+
+    QImage frame = window()->grabWindow();
+    QDeadlineTimer deadline(8000);
+    forever {
+        QTest::qWait(50);
+        const QImage again = window()->grabWindow();
+        if (again == frame)
+            break;
+        frame = again;
+        if (deadline.hasExpired()) {
+            QTest::qFail(qPrintable(QStringLiteral("%1 will not stop moving").arg(name)),
+                         __FILE__, __LINE__);
+            return;
+        }
+    }
+
+    QVERIFY2(!frame.isNull(), qPrintable(name));
+    // The same question `drawsItself` asks, asked of every picture instead of
+    // four of them. An inventory that fills up with empty frames is worse than
+    // no inventory: the blank ones look like screens that exist.
+    QVERIFY2(moreThanOneColour(frame),
+             qPrintable(QStringLiteral("%1 is a flat rectangle").arg(name)));
+    QVERIFY2(frame.save(directory + QLatin1Char('/') + name + QStringLiteral(".png")),
+             qPrintable(name));
+}
+
+/// The one example household every picture is about.
+///
+/// `nobody` because it is a real account on every machine and is never in wheel,
+/// so `profile add` accepts it and the row does not carry "no such account on
+/// this machine" across every frame. The display name carries the person.
+void TestStudio::seedTheExampleHousehold()
+{
+    uid_t uid = 0;
+    QVERIFY2(uidForUser(QStringLiteral("nobody"), &uid),
+             "docs/img is drawn about `nobody`, which every machine has and none has "
+             "in wheel — and this one has no such account");
+
+    emptyTheHouse();
+
+    // Written by the shipped verbs and not by hand: the pictures are of a
+    // profile the CLI would have produced, which is the only kind anybody will
+    // ever be looking at.
+    const QVector<QStringList> verbs{
+        {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("nobody"),
+         QStringLiteral("--name"), QStringLiteral("Júlia")},
+        {QStringLiteral("profile"), QStringLiteral("default"), QStringLiteral("nobody"),
+         QStringLiteral("--deny")},
+        {QStringLiteral("profile"), QStringLiteral("enforce"), QStringLiteral("nobody"),
+         QStringLiteral("--on")},
+        {QStringLiteral("limit"), QStringLiteral("nobody"), QStringLiteral("--session"),
+         QStringLiteral("2h")},
+        {QStringLiteral("allow"), QStringLiteral("nobody"), QStringLiteral("code"),
+         QStringLiteral("--limit"), QStringLiteral("45m")},
+        {QStringLiteral("allow"), QStringLiteral("nobody"), QStringLiteral("firefox"),
+         QStringLiteral("--limit"), QStringLiteral("1h")},
+        // Released with no clock of its own, and a shim: the picker and the
+        // programs list both have to say what is really inside it.
+        {QStringLiteral("allow"), QStringLiteral("nobody"), QStringLiteral("gtk-launch")},
+        // Named and refused, so the list has a row that is not released.
+        {QStringLiteral("deny"), QStringLiteral("nobody"), QStringLiteral("steam")},
+    };
+    for (const QStringList &verb : verbs) {
+        m_admin->run(QStringLiteral("fixture"), verb);
+        QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    }
+
+    seedTheExampleSession(uid);
+    if (QTest::currentTestFailed())
+        return;
+
+    // The day, with the clock written down.
+    QVector<Profile> profiles;
+    QString error;
+    QVERIFY2(readProfiles(paths::profilesFile(), &profiles, &error), qPrintable(error));
+    QCOMPARE(profiles.size(), 1);
+    QString session, code, firefox;
+    for (const Budget &budget : profiles.first().budgets) {
+        if (budget.match == QLatin1String("*"))
+            session = budget.id;
+        else if (budget.match == QLatin1String("code"))
+            code = budget.id;
+        else if (budget.match == QLatin1String("firefox"))
+            firefox = budget.id;
+    }
+    QVERIFY2(!session.isEmpty() && !code.isEmpty() && !firefox.isEmpty(),
+             "the verbs above did not write the three budgets the day is drawn from");
+
+    const QDate today = QDate::currentDate();
+    const auto at = [today](int hour, int minute) {
+        return QDateTime(today, QTime(hour, minute));
+    };
+
+    Ledger ledger;
+    ledger.user = QStringLiteral("nobody");
+    ledger.date = today;
+    ledger.seconds.insert(session, 70 * 60);
+    ledger.seconds.insert(code, 25 * 60);
+    // Exactly its limit, so one row is drawn in the colour of a budget that has
+    // run out. Nothing else in this window looks like that.
+    ledger.seconds.insert(firefox, 60 * 60);
+    ledger.grants.append({at(9, 12), QStringLiteral("root"), session, 10});
+    ledger.events.append({at(9, 40), EventKind::Warn, firefox, QString(), 5});
+    ledger.events.append({at(9, 45), EventKind::Exhausted, firefox, QString(), -1});
+    ledger.events.append({at(9, 50), EventKind::Denied, QString(),
+                          QStringLiteral("app-Hyprland-steam-2f4c.scope"), -1});
+    QVERIFY(QDir().mkpath(paths::userStateDir(QStringLiteral("nobody"))));
+    QVERIFY2(writeLedger(paths::ledgerFile(QStringLiteral("nobody"), today), ledger, &error),
+             qPrintable(error));
+
+    // The seeding said things on the status bar. None of them belong in a
+    // picture of the window at rest.
+    m_admin->clear();
+    m_house->reload();
+    settle();
+}
+
+/// A session for that account: three app scopes and the compositor's own unit.
+///
+/// One scope agrees with its id, one is a launcher shim holding something else
+/// entirely -- spec.md §5, the reason this window exists rather than a form --
+/// and one is a `tmux-spawn` scope the parser cannot name at all.
+void TestStudio::seedTheExampleSession(uid_t uid)
+{
+    const QString user = QStringLiteral("%1/cgroup/user.slice/user-%2.slice/user@%2.service")
+                             .arg(m_tree.path())
+                             .arg(uid);
+    // Whatever an earlier case hung here, gone: two fixtures in one tree draw
+    // one picture between them.
+    QDir(user).removeRecursively();
+
+    const QString apps = user + QStringLiteral("/app.slice/app-graphical.slice");
+    makeCgroup(apps + QStringLiteral("/app-Hyprland-code-1a2b.scope"), {8101, 8102});
+    makeCgroup(apps + QStringLiteral("/app-Hyprland-gtk\\x2dlaunch-91ab.scope"),
+               {8201, 8202, 8203});
+    makeCgroup(apps + QStringLiteral("/tmux-spawn-8d371e9b-645e-4030-a0d1-2243708321e2.scope"),
+               {8301, 8302, 8303, 8304});
+    makeCgroup(user + QStringLiteral("/session.slice/wayland-wm@hyprland.desktop.service"),
+               {8401, 8402, 8403, 8404, 8405, 8406, 8407});
+
+    const QString procRoot = m_tree.path() + QStringLiteral("/proc");
+    for (int pid : {8101, 8102, 8201, 8202, 8203})
+        makeProcess(procRoot, pid, QStringLiteral("/usr/share/code/code"));
+}
+
+void TestStudio::writesTheOperatorShots()
+{
+    if (shotsDir().isEmpty())
+        QSKIP("nothing asked for pictures: this suite is about behaviour");
+    QVERIFY2(root()->property("operating").toBool(),
+             "the operator half of docs/img needs the operator face — run this under "
+             "OMAHOUSE_AS=root, which is what .scripts/shots.sh does");
+
+    seedTheExampleHousehold();
+    if (QTest::currentTestFailed())
+        return;
+
+    // The three views.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    shoot(QStringLiteral("01-operator-people"));
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
+    shoot(QStringLiteral("02-operator-programs"));
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(3)));
+    shoot(QStringLiteral("03-operator-today"));
+
+    // The window's own three sheets.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
+    key('?');
+    shoot(QStringLiteral("04-operator-keys"));
+    key(Qt::Key_Escape);
+
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    key(':');
+    shoot(QStringLiteral("05-operator-commands"));
+    key(Qt::Key_Escape);
+
+    // Filtered on `o`, which is a needle that also matches the profile's own
+    // name -- and it has to be, which is worth knowing before reading this
+    // picture. One `filter` is applied to all three lists at once, so a needle
+    // that misses the person under the cursor on the people list empties the
+    // people list, and then the programs list has nobody to be about and draws
+    // "nobody is under rules yet" over a household that is right there. The key
+    // sheet says `/ filter this list`; this is not that.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
+    key('/');
+    typeInto(QStringLiteral("filterField"), QStringLiteral("o"));
+    shoot(QStringLiteral("06-operator-filter"));
+    key(Qt::Key_Escape);
+
+    // Every question the window asks.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    key('n');
+    shoot(QStringLiteral("07-operator-new-profile"));
+    key(Qt::Key_Escape);
+
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
+    key('a');
+    shoot(QStringLiteral("08-operator-choose-program"));
+    typeInto(QStringLiteral("pickerQuery"), QStringLiteral("fire"));
+    key(Qt::Key_Return);
+    shoot(QStringLiteral("09-operator-program-limit"));
+    key(Qt::Key_Escape);
+
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
+    key('m');
+    shoot(QStringLiteral("10-operator-minutes"));
+    key(Qt::Key_Escape);
+
+    key('+');
+    shoot(QStringLiteral("11-operator-more-today"));
+    key(Qt::Key_Escape);
+
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(3)));
+    key('s');
+    shoot(QStringLiteral("12-operator-day-total"));
+    key(Qt::Key_Escape);
+
+    // The two that cannot be undone by pressing the same key again.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    key('x');
+    shoot(QStringLiteral("13-operator-forget-profile"));
+    key(Qt::Key_Escape);
+
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
+    key('x');
+    shoot(QStringLiteral("14-operator-drop-program"));
+    key(Qt::Key_Escape);
+
+    // A refusal, out of the CLI and not made up here: `root` is in wheel on
+    // every machine, and a profile for one of them is the program's one hard
+    // refusal. It has to be a sentence on the status bar and not a silence.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    key('n');
+    typeInto(QStringLiteral("promptField"), QStringLiteral("root"));
+    key(Qt::Key_Return);
+    QVERIFY2(!waitForWrite(), "the CLI wrote a profile for root");
+    shoot(QStringLiteral("15-operator-refusal"));
+
+    // And the three ways this window can be empty, which are three different
+    // sentences and not one.
+    m_admin->clear();
+    emptyTheHouse();
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    shoot(QStringLiteral("16-operator-people-empty"));
+
+    m_admin->run(QStringLiteral("fixture"),
+                 {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("nobody"),
+                  QStringLiteral("--name"), QStringLiteral("Júlia")});
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    m_admin->clear();
+    settle();
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
+    shoot(QStringLiteral("17-operator-programs-empty"));
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(3)));
+    shoot(QStringLiteral("18-operator-today-empty"));
+}
+
+void TestStudio::writesTheSubjectShots()
+{
+    if (shotsDir().isEmpty())
+        QSKIP("nothing asked for pictures: this suite is about behaviour");
+    QVERIFY2(!root()->property("operating").toBool(),
+             "the subject half of docs/img needs the read-only face — run this under "
+             "OMAHOUSE_AS=nobody, which is what .scripts/shots.sh does");
+
+    seedTheExampleHousehold();
+    if (QTest::currentTestFailed())
+        return;
+
+    // The same three views, the same household, and nothing to press.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    shoot(QStringLiteral("19-subject-people"));
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
+    shoot(QStringLiteral("20-subject-programs"));
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(3)));
+    shoot(QStringLiteral("21-subject-today"));
+
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
+    key('?');
+    shoot(QStringLiteral("22-subject-keys"));
+    key(Qt::Key_Escape);
+
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    key(':');
+    shoot(QStringLiteral("23-subject-commands"));
+    key(Qt::Key_Escape);
+
+    emptyTheHouse();
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    shoot(QStringLiteral("24-subject-nothing"));
 }
 
 QTEST_MAIN(TestStudio)

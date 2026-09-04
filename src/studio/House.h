@@ -42,7 +42,10 @@ class House : public QObject
     QML_ELEMENT
     QML_SINGLETON
 
-    /// Whoever opened the window, by real uid.
+    /// Whoever opened the window, by real uid -- or the account `$OMAHOUSE_AS`
+    /// names, which is how the documentation generator draws both faces from
+    /// one login. It moves what is *read* and never what may be *written*: see
+    /// `readingAs` in House.cpp.
     Q_PROPERTY(QString user READ user CONSTANT)
     /// `operator` or `subject`. Nobody chooses it: see `face()`.
     Q_PROPERTY(QString face READ face NOTIFY changed)

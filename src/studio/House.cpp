@@ -324,11 +324,36 @@ QVariantList catalogOf(const Profile &profile, const QVector<AppScope> &scopes,
     return rows;
 }
 
+/// Whose machine this window is reading: the account that ran it, or the one
+/// `$OMAHOUSE_AS` names.
+///
+/// The door exists for the pictures in docs/img. Two of the things this window
+/// draws cannot be reached from one account: the subject face is what somebody
+/// who is not in wheel sees, and the operator's own name is printed across the
+/// header of every frame -- so a generator without this would need a second
+/// account to run as, and would still write a different file on every machine
+/// because the header says `howl` on one and `ana` on the next. `mise run shots`
+/// reads as `root` for the operator face and as `nobody` for the subject one,
+/// and gets the same bytes anywhere.
+///
+/// It grants nothing, and cannot. `House` only reads, and everything it reads is
+/// world readable by design -- profiles.json is 0644 and the cgroup tree is
+/// public, which is the whole reason the read path does not go through pkexec.
+/// The write path never asks it who anybody is: `Admin` runs `pkexec omahouse`,
+/// under the real uid, and polkit and the CLI's own refusals decide. So the most
+/// this can do is draw a window with chips on it whose every press is refused,
+/// which is a worse window and not a bigger privilege.
+QString readingAs()
+{
+    const QString named = qEnvironmentVariable("OMAHOUSE_AS");
+    return named.isEmpty() ? currentUser() : named;
+}
+
 } // namespace
 
 House::House(QObject *parent)
     : QObject(parent)
-    , m_user(currentUser())
+    , m_user(readingAs())
 {
     refresh();
 

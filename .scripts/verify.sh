@@ -14,6 +14,11 @@
 # by keyboard and then by mouse with no screen involved. A step that runs before
 # there is anything for it to look at is a green light nobody earned, which is
 # why neither was here before there was a window.
+#
+# `shots-check.sh` is the third, and it is here for the same reason
+# `usage-check.sh` is: a document generated from the program is only worth
+# reading if something refuses a commit where the two have come apart. It says
+# in its own head what it costs and the one thing it cannot pin.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,4 +27,5 @@ cd "$root"
 "$root/.scripts/usage-check.sh"
 "$root/.scripts/test.sh"
 "$root/.scripts/qml-check.sh"
-exec "$root/.scripts/studio-check.sh"
+"$root/.scripts/studio-check.sh"
+exec "$root/.scripts/shots-check.sh"

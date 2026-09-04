@@ -33,6 +33,14 @@ run = ".scripts/qml-check.sh"
 description = "Installs versioned git hooks that exec .scripts/verify.sh"
 run = ".scripts/install-hooks.sh"
 
+[tasks.shots]
+description = "Regenerates docs/img from the studio itself, offscreen"
+run = ".scripts/shots.sh"
+
+[tasks."shots:check"]
+description = "Checks that docs/img is what the studio draws today"
+run = ".scripts/shots-check.sh"
+
 [tasks."usage:gen"]
 description = "Regenerates docs/cli.md from omahouse.usage.kdl"
 run = ".scripts/usage-gen.sh"
