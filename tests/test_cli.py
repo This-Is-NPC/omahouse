@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 """The CLI contract, end to end, as an ordinary user with nothing installed.
 
-Every root the binary reads moves by variable -- the cgroup tree, /etc/omahouse
-and /var/lib/omahouse -- so the whole of stage 4 can be driven without root, and
-without a graphical session with a Chromium open in it. The fake cgroup tree is
-built out of unit names that were measured: poc/findings.md for the flatpak scope
-and the escaped one, the development machine for the rest.
+Every root the binary reads and writes moves by variable -- the cgroup tree, the
+process table, /etc/omahouse and /var/lib/omahouse -- so a profile is created,
+edited and read back here without root and without a graphical session with a
+Chromium open in it. The fake cgroup tree is built out of unit names that were
+measured: poc/findings.md for the flatpak scope, the escaped one and the shim of
+round 4, the development machine for the rest.
+
+Two things this suite must never do to the machine it runs on: create an account
+and write under /etc. The first goes through an injected `useradd` that records
+the call, and the second is asserted by being refused.
 
 A verb that parses and does nothing is indistinguishable from one that works
 until somebody depends on it."""
 
+import grp
 import json
 import os
 import pwd
@@ -172,7 +178,22 @@ class Box:
         (directory / f"{day.isoformat()}.json").write_text(
             json.dumps(ledger_document(day, seconds)))
 
-    def run(self, *args, extra_env=None):
+    def fake_useradd(self):
+        """A useradd that records the call and creates nothing.
+
+        plan.md says it in as many words: `useradd` is irreversible enough never
+        to be exercised outside the VM, so stage 5 writes the verb and stage 7 is
+        what runs it in the box. What is asserted here is that the right command
+        is built -- the real one is never on the other end of it, and no account
+        appears on the machine that runs this suite.
+        """
+        recorded = self.root / "useradd.log"
+        script = self.root / "useradd"
+        script.write_text(f'#!/bin/sh\necho "$@" >> {recorded}\n')
+        script.chmod(0o755)
+        return script, recorded
+
+    def run(self, *args, extra_env=None, system_roots=False):
         env = {
             **os.environ,
             "OMAHOUSE_CGROUP_ROOT": str(self.cgroup),
@@ -181,6 +202,11 @@ class Box:
             "OMAHOUSE_STATE_DIR": str(self.state),
         }
         env.pop("OMAHOUSE_JSON", None)
+        # The roots put back where the machine keeps them, which is how the
+        # refusal to write without privilege is exercised.
+        if system_roots:
+            env.pop("OMAHOUSE_CONFIG_DIR")
+            env.pop("OMAHOUSE_STATE_DIR")
         if extra_env:
             env.update(extra_env)
         return subprocess.run(
@@ -266,12 +292,21 @@ def check_help_and_refusals(box):
     assert "unknown command" in unknown.stderr
     assert unknown.stdout == ""
 
-    # The verbs of spec.md §7 that later stages build are named rather than
-    # called typos.
-    for verb, stage in (("watch", "stage 6"), ("allow", "stage 5"), ("grant", "stage 5")):
-        later = box.run(verb, USER)
-        assert later.returncode == 1, verb
-        assert stage in later.stderr, later.stderr
+    # The writing verbs of spec.md §7 are on the screen too, now that they do
+    # something.
+    for verb in ("allow", "deny", "limit", "grant", "profile add"):
+        assert verb in helped.stdout, verb
+
+    # The one verb a later stage still builds is named rather than called a typo.
+    later = box.run("watch")
+    assert later.returncode == 1
+    assert "stage 6" in later.stderr, later.stderr
+
+    # An option that belongs to another verb is refused rather than dropped: a
+    # limit somebody asked for and did not get is worse than a usage error.
+    stray = box.run("deny", USER, "code", "--limit", "45m")
+    assert stray.returncode == 1
+    assert "deny takes no --limit" in stray.stderr, stray.stderr
 
 
 # -- status -------------------------------------------------------------------
@@ -627,19 +662,362 @@ def check_profile_refuses_what_it_does_not_do(box):
     assert unknown.returncode == 1
     assert "unknown subcommand" in unknown.stderr
 
-    writing = box.run("profile", "add", "julia")
-    assert writing.returncode == 1
-    assert "stage 5" in writing.stderr
-
     extra = box.run("profile", "list", USER)
     assert extra.returncode == 1
     assert "profile show" in extra.stderr
 
 
+# -- writing ------------------------------------------------------------------
+
+def a_wheel_user():
+    """Somebody on this machine who administers it, or None.
+
+    Read from the machine rather than invented, because the refusal is about
+    what NSS says and not about a name. `root` is asserted separately and is
+    always there; a wheel member is what the rule of spec.md §1 is actually
+    about, and a machine without one is a machine where that half is skipped
+    out loud.
+    """
+    try:
+        wheel = grp.getgrnam("wheel")
+    except KeyError:
+        return None
+    if wheel.gr_mem:
+        return wheel.gr_mem[0]
+    for entry in pwd.getpwall():
+        if entry.pw_gid == wheel.gr_gid:
+            return entry.pw_name
+    return None
+
+
+def check_a_profile_from_nothing_to_read_back(box):
+    """Create, edit and read one profile end to end, as an ordinary user.
+
+    No root anywhere in here: every root the binary writes to has been moved to
+    a directory of its own, which is the same door stage 4 read through. What
+    lands on disk is asserted against spec.md §4 field by field, because a verb
+    that writes a file only this program can read is a verb that has quietly
+    invented its own format.
+    """
+    made = box.run("profile", "add", "julia", "--name", "Júlia")
+    assert made.returncode == 0, made.stderr
+    assert str(box.config / "profiles.json") in made.stdout
+    # A new profile observes, and it allows -- spec.md §5 and §4. Somebody who
+    # gets this far and stops has a profile that counts and reports and cannot
+    # lock anybody out of their own machine.
+    assert "observing" in made.stdout
+    # And the account it names does not exist yet, which is said rather than
+    # refused: a profile can be written before its account and outlive it.
+    assert "no account named julia" in made.stderr
+
+    written = json.loads((box.config / "profiles.json").read_text())
+    assert written["schemaVersion"] == 1
+    assert written["profiles"][0] == {
+        "user": "julia", "displayName": "Júlia", "enabled": True, "enforce": False,
+        "default": "allow", "warnAt": [10, 5, 1], "grace": 20,
+        "rules": [], "budgets": [],
+    }
+
+    # The four editing verbs of spec.md §7, in the order somebody configuring
+    # would reach for them.
+    assert box.run("profile", "default", "julia", "--deny").returncode == 0
+    assert box.run("allow", "julia", "chromium", "--limit", "45m").returncode == 0
+    assert box.run("allow", "julia", "code").returncode == 0
+    assert box.run("deny", "julia", "steam").returncode == 0
+    assert box.run("limit", "julia", "--session", "2h").returncode == 0
+    assert box.run("limit", "julia", "--budget", "code=1h30m").returncode == 0
+    assert box.run("profile", "enforce", "julia", "--on").returncode == 0
+
+    profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    assert profile["default"] == "deny"
+    assert profile["enforce"] is True
+    # In the order they were written, because the first rule that names an app is
+    # the one that wins and an operator points at the line they typed.
+    assert profile["rules"] == [
+        {"match": "chromium", "verdict": "allow"},
+        {"match": "code", "verdict": "allow"},
+        {"match": "steam", "verdict": "deny"},
+    ]
+    # `allow --limit` is sugar for the rule and the budget at once, spec.md §7.
+    # The session is the budget whose selector is `*` and nothing else, §2.
+    assert profile["budgets"] == [
+        {"id": "chromium", "match": "chromium", "dailyMinutes": 45, "onExhausted": "close"},
+        {"id": "session", "match": "*", "dailyMinutes": 120, "onExhausted": "logout"},
+        {"id": "code", "match": "code", "dailyMinutes": 90, "onExhausted": "close"},
+    ]
+
+    # And it reads back through the verbs that were written before it existed.
+    shown = box.run("profile", "show", "julia")
+    assert shown.returncode == 0, shown.stderr
+    assert row_for(shown.stdout, "session") == ["session", "*", "2h00m", "logs out"]
+    assert row_for(shown.stdout, "chromium") == ["chromium", "chromium", "45m", "closes"]
+    assert json.loads(box.run("--json", "profile", "show", "julia").stdout) == profile
+    assert row_for(box.run("profile", "list").stdout, "julia")[:5] == \
+        ["julia", "Júlia", "yes", "yes", "deny"]
+
+    # Editing a rule that is already there changes it in place. Two lines about
+    # one app would leave the second dead.
+    assert box.run("deny", "julia", "chromium").returncode == 0
+    edited = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    assert edited["rules"][0] == {"match": "chromium", "verdict": "deny"}
+    assert len(edited["rules"]) == 3
+    # And a new limit on a budget that exists is only the number: what it does
+    # when it runs out was decided once.
+    assert box.run("limit", "julia", "--budget", "chromium=30m").returncode == 0
+    edited = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    assert edited["budgets"][0] == {"id": "chromium", "match": "chromium",
+                                    "dailyMinutes": 30, "onExhausted": "close"}
+
+    # Taken off the books again, and what was counted is left where it is.
+    removed = box.run("profile", "remove", "julia", "--keep-account")
+    assert removed.returncode == 0, removed.stderr
+    assert json.loads((box.config / "profiles.json").read_text())["profiles"] == []
+    assert box.run("profile", "show", "julia").returncode == 2
+
+
+def check_grant_writes_the_days_ledger(box):
+    """The verb spec.md §7 says is the difference between an operator and a form.
+
+    Ten minutes, with the app open, without restarting anything. It lands in the
+    day's own file, so it expires when the file does.
+    """
+    box.run("profile", "add", "julia")
+    box.run("limit", "julia", "--session", "2h")
+
+    given = box.run("grant", "julia", "--session", "10m")
+    assert given.returncode == 0, given.stderr
+    assert "+10m" in given.stdout
+    assert "2h10m left today" in given.stdout
+
+    ledger = json.loads((box.state / "julia" / f"{TODAY.isoformat()}.json").read_text())
+    assert ledger["schemaVersion"] == 1
+    assert ledger["user"] == "julia"
+    assert ledger["date"] == TODAY.isoformat()
+    assert len(ledger["grants"]) == 1
+    grant = ledger["grants"][0]
+    assert grant["budget"] == "session"
+    assert grant["minutes"] == 10
+    assert grant["by"] == USER
+    assert grant["at"].startswith(TODAY.isoformat())
+
+    # A second one adds to the first rather than replacing it.
+    assert box.run("grant", "julia", "--budget", "session=5m").returncode == 0
+    ledger = json.loads((box.state / "julia" / f"{TODAY.isoformat()}.json").read_text())
+    assert [g["minutes"] for g in ledger["grants"]] == [10, 5]
+
+    # And the report reads it back.
+    reported = box.run("report", "julia")
+    assert "GRANTS" in reported.stdout
+    assert "+10m" in reported.stdout
+
+    document = json.loads(box.run("--json", "grant", "julia", "--session", "5m").stdout)
+    assert document["budget"] == "session"
+    assert document["minutes"] == 5
+    assert document["limitSeconds"] == 120 * 60 + 20 * 60
+
+    # A budget nobody wrote is refused rather than invented: time added to a
+    # counter the daemon never looks at would read on the report as though it had
+    # been given.
+    nowhere = box.run("grant", "julia", "--budget", "minecraft=15m")
+    assert nowhere.returncode == 2, nowhere.stderr
+    assert "no budget called minecraft" in nowhere.stderr
+
+
+def check_allow_warns_about_what_is_really_inside(box):
+    """poc/findings.md round 4, at the moment it matters most.
+
+    Allowing `gtk-launch` is allowing whatever gtk-launch launches next. The CLI
+    says what is in there and writes the rule anyway: it may be exactly what
+    somebody meant, and the same reading calls a flatpak a shim.
+    """
+    # Written by hand rather than by `profile add`, because the scopes in the
+    # fake tree belong to whoever runs the suite and that account is usually in
+    # wheel -- which `profile add` refuses, and rightly. The warning is about
+    # what is open in a session, so it has to be that account's session.
+    box.write_profiles({"schemaVersion": 1, "profiles": [{"user": USER}]})
+
+    warned = box.run("allow", USER, "gtk-launch")
+    assert warned.returncode == 0, warned.stderr
+    assert "gtk-launch" in warned.stdout
+    assert "is not the name of one program" in warned.stderr
+    # It says what is inside, which is the whole point of warning.
+    assert "/usr/share/code/code" in warned.stderr
+    assert "7 of 7 processes in 1 scope" in warned.stderr
+    assert f"omahouse deny {USER} gtk-launch" in warned.stderr
+    # Warned, not refused: the rule is on disk.
+    profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    assert {"match": "gtk-launch", "verdict": "allow"} in profile["rules"]
+
+    # An id that names its own program says nothing at all.
+    quiet = box.run("allow", USER, "chromium")
+    assert quiet.returncode == 0, quiet.stderr
+    assert quiet.stderr == "", quiet.stderr
+
+    # Neither does an id with nothing open under it: with no session there is no
+    # evidence, and with no evidence there is nothing to say.
+    unopened = box.run("allow", USER, "minecraft-launcher")
+    assert unopened.stderr == "", unopened.stderr
+
+    # And `deny` never warns: taking something off the list needs no second
+    # thoughts about what it contains.
+    assert box.run("deny", USER, "gtk-launch").stderr == ""
+
+
+def check_it_refuses_a_profile_for_an_administrator(box):
+    """spec.md §1: the operator is whoever is in wheel.
+
+    A profile for one of them is somebody fiscalising themselves by accident,
+    and the person who could undo it is the person it would be imposed on.
+    """
+    refused = box.run("profile", "add", "root")
+    assert refused.returncode == 1, refused.stderr
+    assert "root is root" in refused.stderr
+    assert "does not fiscalise themselves" in refused.stderr
+    assert not (box.config / "profiles.json").exists()
+
+    administrator = a_wheel_user()
+    if administrator is None:
+        print("test_cli.py: no wheel group on this machine, so only root was asserted")
+        return
+    in_wheel = box.run("profile", "add", administrator)
+    assert in_wheel.returncode == 1, in_wheel.stderr
+    assert "wheel" in in_wheel.stderr
+    assert not (box.config / "profiles.json").exists()
+
+
+def check_it_refuses_to_write_without_privilege(box):
+    """/etc/omahouse belongs to root, and the refusal says so and says what to do.
+
+    Never a stack trace and never a bare `Permission denied`: the first names
+    nothing and the second names the thing that failed rather than the thing to
+    do about it.
+    """
+    if os.geteuid() == 0:
+        print("test_cli.py: running as root, so the refusal to write could not be asserted")
+        return
+
+    for args in (("profile", "add", "julia"), ("allow", "julia", "code"),
+                 ("limit", "julia", "--session", "2h"),
+                 ("grant", "julia", "--session", "10m")):
+        refused = box.run(*args, system_roots=True)
+        assert refused.returncode == 1, (args, refused.returncode)
+        assert refused.stdout == "", args
+        assert "needs root" in refused.stderr, args
+        assert "pkexec omahouse" in refused.stderr, args
+        # The line it suggests is the line that was typed.
+        assert " ".join(args) in refused.stderr, args
+    # Moving one root does not excuse the other: a ledger in $TMPDIR is not a
+    # licence to write /etc.
+    half = box.run("profile", "add", "julia", system_roots=True,
+                   extra_env={"OMAHOUSE_STATE_DIR": str(box.state)})
+    assert half.returncode == 1, half.stderr
+    assert "needs root" in half.stderr
+
+    # Reading is free, and stays free.
+    assert box.run("profile", "list", system_roots=True).returncode == 0
+
+
+def check_create_user_is_built_but_never_run_here(box):
+    """plan.md: `useradd` is never exercised outside the VM.
+
+    So the program it runs comes in by variable, and what is asserted is the
+    command that would be run. Stage 7 is what puts the real one on the other
+    end of it, in the nspawn box of testing.md.
+    """
+    script, recorded = box.fake_useradd()
+    made = box.run("profile", "add", "julia", "--create-user",
+                   extra_env={"OMAHOUSE_USERADD": str(script)})
+    assert made.returncode == 0, made.stderr
+    assert recorded.read_text().split() == ["-m", "julia"]
+    assert str(script) in made.stderr
+    assert json.loads((box.config / "profiles.json").read_text())["profiles"][0]["user"] \
+        == "julia"
+
+    # And no account was created on the machine that ran the suite, which is the
+    # thing the injection exists to guarantee.
+    try:
+        pwd.getpwnam("julia")
+        raise AssertionError("the suite created a real account")
+    except KeyError:
+        pass
+
+    # A useradd that fails is the profile not being written.
+    failing = box.root / "useradd-that-fails"
+    failing.write_text("#!/bin/sh\necho 'useradd: user julia already exists' >&2\nexit 9\n")
+    failing.chmod(0o755)
+    box.run("profile", "remove", "julia", "--keep-account")
+    refused = box.run("profile", "add", "otavio", "--create-user",
+                      extra_env={"OMAHOUSE_USERADD": str(failing)})
+    assert refused.returncode == 1, refused.stderr
+    assert "failed (9)" in refused.stderr
+    assert "already exists" in refused.stderr
+    assert [p["user"] for p in
+            json.loads((box.config / "profiles.json").read_text())["profiles"]] == []
+
+
+def check_a_length_of_time_is_refused_rather_than_guessed(box):
+    """`--limit 2h` read as two minutes is a session that closes at nine a.m.
+
+    Refusing costs one retyped word, and the message says which word.
+    """
+    box.run("profile", "add", "julia")
+    written = {"2h": 120, "45m": 45, "90": 90, "1h30m": 90}
+    for text, minutes in written.items():
+        assert box.run("limit", "julia", "--budget", f"code={text}").returncode == 0
+        budget = json.loads((box.config / "profiles.json").read_text())["profiles"][0]["budgets"]
+        assert budget[0]["dailyMinutes"] == minutes, text
+
+    for bad in ("forever", "1h30", "30s", "1.5h", "0m", "25h", "-45m", "3d"):
+        refused = box.run("limit", "julia", "--budget", f"code={bad}")
+        assert refused.returncode == 1, (bad, refused.returncode)
+        assert refused.stdout == "", bad
+        assert "not a length of time" in refused.stderr, (bad, refused.stderr)
+    # The budget is what it was before any of that.
+    budget = json.loads((box.config / "profiles.json").read_text())["profiles"][0]["budgets"]
+    assert budget[0]["dailyMinutes"] == 90
+
+    # And an option with no value at all says what it wanted.
+    empty = box.run("limit", "julia", "--session")
+    assert empty.returncode == 1
+    assert "--session wants a length of time" in empty.stderr
+
+
+def check_the_writing_verbs_want_a_profile_that_is_there(box):
+    """2 and not 1: a script has to tell `no such profile` from `bad command`."""
+    for args in (("allow", "julia", "code"), ("deny", "julia", "code"),
+                 ("limit", "julia", "--session", "2h"),
+                 ("grant", "julia", "--session", "10m"),
+                 ("profile", "enforce", "julia", "--on"),
+                 ("profile", "default", "julia", "--deny")):
+        missing = box.run(*args)
+        assert missing.returncode == 2, (args, missing.returncode)
+        assert "no profile" in missing.stderr, args
+        assert "profile add julia" in missing.stderr, args
+
+    gone = box.run("profile", "remove", "julia")
+    assert gone.returncode == 2
+    assert "no profile for julia" in gone.stderr
+
+    # Two profiles for one account is a profile nobody could point at.
+    box.run("profile", "add", "julia")
+    twice = box.run("profile", "add", "julia")
+    assert twice.returncode == 1
+    assert "already has a profile" in twice.stderr
+    assert len(json.loads((box.config / "profiles.json").read_text())["profiles"]) == 1
+
+    # A switch verb wants to be told which way.
+    for args in (("profile", "enforce", "julia"), ("profile", "enforce", "julia", "--on", "--off"),
+                 ("profile", "default", "julia"),
+                 ("profile", "default", "julia", "--allow", "--deny")):
+        vague = box.run(*args)
+        assert vague.returncode == 1, args
+        assert "one of them" in vague.stderr, args
+
+
 # -- the promise of the stage -------------------------------------------------
 
-def check_nothing_was_written(box):
-    """Stage 4 reads. Nothing in it writes to /etc or /var.
+def check_the_reading_verbs_write_nothing(box):
+    """`status`, `report` and `profile show` read. None of them touches a file.
 
     Asserted by fingerprint rather than by reading the code: every file under
     both roots, its size and its mtime, before and after a run of every verb.
@@ -682,7 +1060,15 @@ def main():
         check_profile_list,
         check_profile_show,
         check_profile_refuses_what_it_does_not_do,
-        check_nothing_was_written,
+        check_a_profile_from_nothing_to_read_back,
+        check_grant_writes_the_days_ledger,
+        check_allow_warns_about_what_is_really_inside,
+        check_it_refuses_a_profile_for_an_administrator,
+        check_it_refuses_to_write_without_privilege,
+        check_create_user_is_built_but_never_run_here,
+        check_a_length_of_time_is_refused_rather_than_guessed,
+        check_the_writing_verbs_want_a_profile_that_is_there,
+        check_the_reading_verbs_write_nothing,
     ]
     for case in cases:
         # A machine of its own per case: a profiles.json one case wrote is a

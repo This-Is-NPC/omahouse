@@ -4,11 +4,13 @@
 
 House rules for the accounts on an Omarchy machine: which programs each profile may open, and for how long.
 
-This build reads. `status`, `report` and `profile` need no privilege at all -- the fiscalised user runs `omahouse status` and sees what is left of their own day. The verbs that write a profile arrive with stage 5 of `plan.md`, and `watch`, the daemon that counts and closes, with stage 6; both are named here when typed, rather than answered with `unknown command`, because they are not typos.
+Reading needs no privilege at all: `status`, `report` and `profile list|show` are for anybody, and the fiscalised user runs `omahouse status` to see what is left of their own day. Writing needs root, because /etc/omahouse/profiles.json is the file a root daemon reads; the studio of stage 8 gets there through `pkexec`, and a run without the privilege says so and prints the line to try. `watch`, the daemon that counts and closes, arrives with stage 6 of `plan.md` and is named here when typed, rather than answered with `unknown command`, because it is not a typo.
+
+An app is named by the id of its scope -- `chromium`, `org.freedesktop.Platform` -- and `omahouse status` is what lists the ones that are open. A length of time is `45m`, `2h`, `1h30m`, or a bare `90` for the minutes everything is counted in; anything else is refused rather than taken for minutes, because `--limit 2h` read as two minutes is a session that closes at nine in the morning and refusing costs one retyped word.
 
 Exit codes: 0, the run answered; 1, a usage error or a file that is there and would not parse; 2, something it was asked about is not there -- no such account, no such profile. The split matters to a script: a profiles.json full of half-written JSON must not read as `julia has no profile`.
 
-Three files, and every one of them can be moved by a variable, which is what lets the end to end suite run as an ordinary user with nothing installed:
+Four roots, and every one of them can be moved by a variable, which is what lets the end to end suite create, edit and read a profile as an ordinary user with nothing installed:
 
 - `/etc/omahouse/profiles.json`, or `$OMAHOUSE_CONFIG_DIR/profiles.json` -- who is under rules. Root writes it and everyone reads it. Its absence is not an error: it is the state of every machine before the first profile is written, and `status` says so and goes on scanning.
 - `/var/lib/omahouse/<user>/<AAAA-MM-DD>.json`, or the same under `$OMAHOUSE_STATE_DIR` -- one ledger per day. A day with no file is a day nobody spent, and it is left out of a report rather than printed as a row of zeroes.
@@ -31,6 +33,8 @@ The identity of a running app is its systemd scope and not the path of its execu
   - `report` -- `user`, `since`, `until`, `days` and `totals`. A day is the ledger of `spec.md` §4 without its `schemaVersion` and `user`, both of which would be the same words on every day of the range.
   - `profile list` -- an array of `user`, `displayName`, `enabled`, `enforce`, `default`, and the counts of `rules` and `budgets`.
   - `profile show` -- the profile as `/etc/omahouse/profiles.json` holds it.
+  - every verb that writes a profile -- `profile add`, `profile remove`, `profile enforce`, `profile default`, `allow`, `deny`, `limit` -- prints the profile it wrote, or for `remove` the one it took out. So a script can write and read in one call, and the answer is the same shape `profile show` gives.
+  - `grant` -- `user`, `budget`, `minutes`, `by`, `at`, and the day's `usedSeconds`, `grantedSeconds`, `limitSeconds` and `leftSeconds` for that budget.
 
   A budget with no limit has `limitSeconds` and `leftSeconds` null rather than zero: zero left is a budget that has run out, and the two must never read the same.
 
@@ -81,7 +85,82 @@ This verb does not ask whether the account exists. A profile, and the days it ac
 
 - **Usage:** `omahouse profile <SUBCOMMAND>`
 
-Read the profiles
+The profiles: who is under rules, and what the rules are
+
+## `omahouse profile add`
+
+- **Usage:** `omahouse profile add [--name <name>] [--create-user] <user>`
+
+Put an account under rules.
+
+The profile is born observing and allowing: `enforce: false`, `default: allow`, the warn marks of `spec.md` §4 at ten, five and one minute, and twenty seconds of grace. Both defaults are the same choice, and `spec.md` gives the reason twice. A profile that counts without biting is one somebody can look at for a day and then switch on -- which is what the lan house always did -- and a profile written by halves that denies everything locks somebody out of their own machine. It is the reasoning of `onerr=succeed` on the PAM line of §2: the failure that leaves the rules soft is recoverable, and the one that leaves them hard is not.
+
+An account in `wheel` is refused, and this is the one place this build refuses rather than warns. `spec.md` §1 makes the operator whoever is in wheel, so a profile for one of them is somebody fiscalising themselves by accident, and the person who could undo it is the person it would be imposed on.
+
+An account the machine does not have yet is not refused. The profile is written and the missing account is said out loud, because a profile can be written before its account and can outlive it -- which is also why `report` never asks either.
+
+Only one profile per account: two would be two sets of rules nobody could point at.
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--name <name>`** — What to call them on screen, like "Júlia"
+- **`--create-user`** — Create the account first, with `useradd -m`, and nothing else -- `spec.md` §7.
+
+  The program it runs is `/usr/sbin/useradd`, or `$OMAHOUSE_USERADD`. The variable is not a convenience: `plan.md` puts `useradd` among the things irreversible enough never to be exercised outside the VM, so the end to end suite points it at a script that records the call and creates nothing, and the real one is exercised in the nspawn box of `testing.md`.
+
+  An account that is already there is left alone and said so; a useradd that fails is the profile not being written.
+
+## `omahouse profile remove`
+
+- **Usage:** `omahouse profile remove [--keep-account] <user>`
+
+Take an account off the books.
+
+The profile is removed from `/etc/omahouse/profiles.json` and nothing else moves. The days already counted stay where they are under `/var/lib/omahouse/<user>/`, because a report is evidence and it outlives the rules it was collected under.
+
+The account itself is never touched. `--keep-account` reads as though leaving it out would delete it; this build does not run `userdel` either way, and the flag says out loud what happens in both cases. Deleting somebody's account and their home directory because their screen time was taken off the books is a loss nothing here can undo, and `--create-user` is already the one verb `plan.md` says may not be exercised outside the VM.
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--keep-account`** — Say out loud that the account is left alone, which it is either way
+
+## `omahouse profile enforce`
+
+- **Usage:** `omahouse profile enforce [--on] [--off] <user>`
+
+Switch the teeth on or off.
+
+`--off` is observation: the budgets are counted and the report is written, and nothing is closed and nobody is logged out. It is what a new profile is born as, and what a day of `omahouse report` is read from before `--on`.
+
+`--on` is the same rules with the actions of `spec.md` §5 behind them. Nothing about the rules or the budgets changes: this is one field.
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--on`** — Close and log out when a budget runs out
+- **`--off`** — Count and report, and close nothing
+
+## `omahouse profile default`
+
+- **Usage:** `omahouse profile default [--allow] [--deny] <user>`
+
+What happens to an app no rule names.
+
+`--deny` makes the rules a list of what is allowed, and `--allow` makes them a list of what is not. It is the same engine either way -- `spec.md` §2 -- and it is the field a profile is most likely to be wrong about, which is why the answer is printed as a sentence about programs rather than as the word that was written.
+
+A profile is born `--allow`, and `--deny` is the switch that turns a written allowlist into an allowlist that bites.
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--allow`** — Everything runs except what is denied
+- **`--deny`** — Only what is allowed runs
 
 ## `omahouse profile list`
 
@@ -103,3 +182,78 @@ The settings, the rules in the order they are read -- the first that names an ap
 
 ### Arguments
 - **`<user>`**
+
+## `omahouse allow`
+
+- **Usage:** `omahouse allow [--limit <duration>] <user> <app>`
+
+Let an app run, and put it on the clock.
+
+The app is named by the id of its scope, which is what `omahouse status` lists. A rule that is already there is changed in place rather than appended to: the first rule that names an app is the one that wins, so a second line about it would be a line that never fires.
+
+`--limit` is sugar, and `spec.md` §7 says why: the rule and the budget are one thought at the moment somebody is configuring, and making them two commands is making the second easy to forget. The budget it writes closes that app when it runs out; the one that ends the session is the session's, and `omahouse limit --session` writes that one.
+
+An app allowed without a limit of its own spends the session's budget and nothing else.
+
+It warns, and does not refuse, when the id does not name one program. An app launched through a shim takes the shim's name -- `poc/findings.md` round 4 found seven `gtk-launch` scopes on the development machine with VS Code inside every one of them -- so allowing that id is allowing whatever it launches next. The warning prints what is running inside the scopes that are open under it, and the rule is written anyway: it may be exactly what was meant, and a flatpak reads the same way for the opposite reason, since every flatpak on a machine runs `/usr/bin/bwrap`. With nothing open under that id there is no evidence, and with no evidence there is nothing said.
+
+### Arguments
+- **`<user>`**
+- **`<app>`** — The id of the app's scope, as `omahouse status` lists it
+
+### Flags
+- **`--limit <duration>`** — And no more than this a day: 45m, 2h, 1h30m
+
+## `omahouse deny`
+
+- **Usage:** `omahouse deny <user> <app>`
+
+Do not let an app run.
+
+The mirror of `allow`, and the way to take back a rule that was written by mistake. It changes an existing rule in place, and it says nothing about what is inside the scope: taking something off the list needs no second thoughts about what it contains.
+
+A budget written for that app is left where it is. The rule and the clock are two facts, and a program that is denied today may be allowed again tomorrow with the same limit it had.
+
+### Arguments
+- **`<user>`**
+- **`<app>`**
+
+## `omahouse limit`
+
+- **Usage:** `omahouse limit [--session <duration>] [--budget <id>=<duration>] <user>`
+
+How long a day, for the session or for one app.
+
+`--session` is the budget whose selector is `*`, which is the whole of what makes the session an ordinary budget -- `spec.md` §2, and the reason there is no branch for `the user's time` anywhere in the core. It logs the session out when it runs out. `--budget <id>=<duration>` is one app's, and it closes that app.
+
+A budget that is already there gets the new number and keeps everything else: what a budget does when it runs out is a decision somebody made once, and a new limit is not a reason to take it back.
+
+A budget can be written for an app no rule names. That is a program somebody wants a number for at the end of the day, and it is a legitimate thing to ask for.
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--session <duration>`** — The whole session: 2h
+- **`--budget <id>=<duration>`** — One budget by id: minecraft=45m
+
+## `omahouse grant`
+
+- **Usage:** `omahouse grant [--session <duration>] [--budget <id>=<duration>] <user>`
+
+Hand over more time today, with the app still open.
+
+The verb that is the difference between an operator and a form. `spec.md` §7 marks it as the one thing beyond the four items of the agreed scope, and keeps it because an operator who cannot hand over ten minutes with the game running is not an operator.
+
+The minutes go into the day's own ledger, `/var/lib/omahouse/<user>/<AAAA-MM-DD>.json`, and so they expire when the file does: the balance resets at the local turn of the date, and a grant that survived it would be tomorrow's time given away today. It adds to the limit rather than replacing it, and two grants add up.
+
+Signed with the name of whoever asked. Under `pkexec` that is the person polkit authenticated and not root, because `root gave julia ten minutes` is not the line an operator wants to read back in a month.
+
+A budget the profile does not have is refused: time added to a counter the daemon never looks at would read on the report as though it had been given.
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--session <duration>`** — More of the session: 10m
+- **`--budget <id>=<duration>`** — More of one budget: minecraft=15m

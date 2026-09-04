@@ -7,6 +7,9 @@ namespace paths {
 
 namespace {
 
+const char *const kSystemConfigDir = "/etc/omahouse";
+const char *const kSystemStateDir = "/var/lib/omahouse";
+
 QString fromEnvironmentOr(const char *variable, const char *fallback)
 {
     const QByteArray value = qgetenv(variable);
@@ -19,12 +22,27 @@ QString fromEnvironmentOr(const char *variable, const char *fallback)
 
 QString configDir()
 {
-    return fromEnvironmentOr("OMAHOUSE_CONFIG_DIR", "/etc/omahouse");
+    return fromEnvironmentOr("OMAHOUSE_CONFIG_DIR", kSystemConfigDir);
 }
 
 QString stateDir()
 {
-    return fromEnvironmentOr("OMAHOUSE_STATE_DIR", "/var/lib/omahouse");
+    return fromEnvironmentOr("OMAHOUSE_STATE_DIR", kSystemStateDir);
+}
+
+// Compared by value rather than by whether the variable is set, so that pointing
+// a variable back at /etc/omahouse is the same thing as not setting it. The two
+// spellings of one path have to mean one thing, or the check is a check somebody
+// can talk their way out of.
+
+bool configDirIsTheSystems()
+{
+    return configDir() == QString::fromLatin1(kSystemConfigDir);
+}
+
+bool stateDirIsTheSystems()
+{
+    return stateDir() == QString::fromLatin1(kSystemStateDir);
 }
 
 QString profilesFile()

@@ -47,6 +47,28 @@ private slots:
                  QStringLiteral("/tmp/omahouse-state/julia/2026-12-31.json"));
     }
 
+    // Which root a write is going to, which is what tells "this needs root" from
+    // "this needs whatever the filesystem says". One question per root: moving
+    // the ledger out of /var must not quietly excuse a write to /etc.
+    void knowsWhichRootIsTheMachinesOwn()
+    {
+        QVERIFY(paths::configDirIsTheSystems());
+        QVERIFY(paths::stateDirIsTheSystems());
+
+        qputenv("OMAHOUSE_STATE_DIR", "/tmp/omahouse-state");
+        QVERIFY(paths::configDirIsTheSystems());
+        QVERIFY(!paths::stateDirIsTheSystems());
+
+        qputenv("OMAHOUSE_CONFIG_DIR", "/tmp/omahouse-config");
+        QVERIFY(!paths::configDirIsTheSystems());
+
+        // Pointed back at the machine's own path by hand, which has to mean the
+        // same thing as not having been pointed anywhere: a check somebody can
+        // talk their way out of is not a check.
+        qputenv("OMAHOUSE_CONFIG_DIR", "/etc/omahouse");
+        QVERIFY(paths::configDirIsTheSystems());
+    }
+
     // Zero padded, and the same string the writer of that day will build. A
     // ledger written to `2026-9-3.json` and looked for at `2026-09-03.json` is a
     // day that silently starts over.

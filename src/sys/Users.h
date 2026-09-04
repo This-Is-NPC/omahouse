@@ -26,4 +26,41 @@ QString userForUid(uid_t uid);
 /// variable a shell sets and an `su` does not always update.
 QString currentUser();
 
+/// Whoever asked for this, which is not always whoever is running it. Under
+/// `pkexec` the process is root and the person is not, and polkit says who they
+/// were in `$PKEXEC_UID`. That is the name a grant is signed with, because "root
+/// gave julia ten minutes" is not the line an operator wants to read back in a
+/// month.
+QString operatorUser();
+
+/// Whether this process can write /etc and /var, which is the euid and not the
+/// uid: `pkexec` hands over an effective root and nothing else.
+bool runningAsRoot();
+
+/// Whether `user` administers this machine, and in `why` the reason in words --
+/// `is root`, `is in wheel`.
+///
+/// spec.md §1 makes the operator "whoever is in wheel", so a profile for one of
+/// them is a person fiscalising themselves by accident, which `profile add`
+/// refuses. Both halves of the group are looked at: the primary gid and the
+/// member list, because `usermod -aG wheel` and a fresh account with wheel as
+/// its own group are the same fact written two ways.
+bool isAdministrator(const QString &user, QString *why = nullptr);
+
+/// The program `createAccount` runs: `/usr/sbin/useradd`, or
+/// `$OMAHOUSE_USERADD`.
+///
+/// The variable is the whole reason the account can be created by a verb that is
+/// never allowed to create one here. plan.md says it in as many words:
+/// `useradd` is irreversible enough never to be exercised outside the VM, so
+/// stage 5 writes the verb and stage 7 is what runs it in the box. The suite
+/// points the variable at a script that records the call, which asserts that the
+/// right command is built without a new account appearing on the machine that
+/// built it.
+QString useraddProgram();
+
+/// `useradd -m <user>`, and nothing else -- spec.md §7. False with the sentence
+/// the command printed, or with why it could not be started.
+bool createAccount(const QString &user, QString *error);
+
 } // namespace omahouse

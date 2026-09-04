@@ -1,8 +1,11 @@
 #include "Users.h"
 
 #include <QByteArray>
+#include <QProcess>
 #include <QVarLengthArray>
+#include <QVector>
 
+#include <grp.h>
 #include <pwd.h>
 #include <unistd.h>
 
@@ -83,6 +86,152 @@ QString userForUid(uid_t uid)
 QString currentUser()
 {
     return userForUid(::getuid());
+}
+
+QString operatorUser()
+{
+    const QByteArray asked = qgetenv("PKEXEC_UID");
+    bool ok = false;
+    const uint uid = asked.toUInt(&ok);
+    if (ok) {
+        const QString name = userForUid(static_cast<uid_t>(uid));
+        if (!name.isEmpty())
+            return name;
+    }
+    return currentUser();
+}
+
+bool runningAsRoot()
+{
+    return ::geteuid() == 0;
+}
+
+bool isAdministrator(const QString &user, QString *why)
+{
+    if (why)
+        why->clear();
+    uid_t uid = 0;
+    gid_t primary = 0;
+    if (!lookup(
+            [&](passwd *entry, char *buffer, size_t size, passwd **found) {
+                const QByteArray name = user.toLocal8Bit();
+                return ::getpwnam_r(name.constData(), entry, buffer, size, found);
+            },
+            [&](const passwd *found) {
+                uid = found->pw_uid;
+                primary = found->pw_gid;
+            })) {
+        // No such account is nobody, and nobody administers anything. It is
+        // also the ordinary case for `profile add --create-user`, where the
+        // question is asked before the account exists.
+        return false;
+    }
+
+    if (uid == 0) {
+        if (why)
+            *why = QStringLiteral("is root");
+        return true;
+    }
+
+    // The group by name, because the gid of `wheel` is 998 here and 10 on the
+    // next machine.
+    gid_t wheel = 0;
+    bool haveWheel = false;
+    {
+        QVarLengthArray<char, 1024> buffer;
+        group entry {};
+        group *found = nullptr;
+        for (long size = 1024; size <= 64 * 1024; size *= 2) {
+            buffer.resize(static_cast<int>(size));
+            const int status =
+                ::getgrnam_r("wheel", &entry, buffer.data(), static_cast<size_t>(size), &found);
+            if (status == ERANGE)
+                continue;
+            if (status == 0 && found != nullptr) {
+                wheel = found->gr_gid;
+                haveWheel = true;
+            }
+            break;
+        }
+    }
+    // A machine with no wheel group at all is a machine where nobody is in it.
+    // Not an error: `sudo` on a Debian is a different group, and answering "I
+    // do not know, so nobody" here would be answering a question about a machine
+    // this code is not on. spec.md §1 says wheel, so wheel is what is asked.
+    if (!haveWheel)
+        return false;
+
+    if (primary == wheel) {
+        if (why)
+            *why = QStringLiteral("has wheel as its own group");
+        return true;
+    }
+
+    // Every group the account is in, primary included. getgrouplist over the
+    // member list of wheel alone, because a name can be in the list of one and
+    // reached through the other.
+    int count = 32;
+    QVector<gid_t> groups(count);
+    const QByteArray name = user.toLocal8Bit();
+    if (::getgrouplist(name.constData(), primary, groups.data(), &count) < 0) {
+        groups.resize(count > 0 ? count : 0);
+        if (count <= 0 || ::getgrouplist(name.constData(), primary, groups.data(), &count) < 0)
+            return false;
+    }
+    groups.resize(count);
+    for (gid_t gid : groups) {
+        if (gid == wheel) {
+            if (why)
+                *why = QStringLiteral("is in wheel");
+            return true;
+        }
+    }
+    return false;
+}
+
+QString useraddProgram()
+{
+    const QByteArray fromEnvironment = qgetenv("OMAHOUSE_USERADD");
+    if (!fromEnvironment.isEmpty())
+        return QString::fromLocal8Bit(fromEnvironment);
+    return QStringLiteral("/usr/sbin/useradd");
+}
+
+bool createAccount(const QString &user, QString *error)
+{
+    QProcess useradd;
+    useradd.setProgram(useraddProgram());
+    useradd.setArguments({QStringLiteral("-m"), user});
+    useradd.setProcessChannelMode(QProcess::MergedChannels);
+    useradd.start();
+    if (!useradd.waitForStarted()) {
+        if (error) {
+            *error = QStringLiteral("cannot run %1: %2")
+                         .arg(useraddProgram(), useradd.errorString());
+        }
+        return false;
+    }
+    // A minute, and not forever: useradd on a machine with a directory service
+    // can take seconds, and a CLI that hangs on it with nothing on the screen is
+    // a CLI somebody kills halfway through an account being created.
+    if (!useradd.waitForFinished(60 * 1000)) {
+        useradd.kill();
+        useradd.waitForFinished();
+        if (error)
+            *error = QStringLiteral("%1 did not finish in a minute").arg(useraddProgram());
+        return false;
+    }
+    if (useradd.exitStatus() != QProcess::NormalExit || useradd.exitCode() != 0) {
+        if (error) {
+            const QString said = QString::fromLocal8Bit(useradd.readAll()).trimmed();
+            *error = QStringLiteral("%1 -m %2 failed (%3)%4")
+                         .arg(useraddProgram(), user)
+                         .arg(useradd.exitCode())
+                         .arg(said.isEmpty() ? QString() : QStringLiteral(": %1").arg(said));
+        }
+        return false;
+    }
+    return true;
 }
 
 } // namespace omahouse

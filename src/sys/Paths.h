@@ -30,6 +30,20 @@ QString userStateDir(const QString &user);
 /// `<stateDir>/<user>/<AAAA-MM-DD>.json` -- one ledger per day.
 QString ledgerFile(const QString &user, const QDate &date);
 
+/// Whether that root is still the machine's own.
+///
+/// This is what tells "writing needs root" from "writing needs whatever the
+/// filesystem says". A run pointed at a tree of its own -- the end to end suite,
+/// somebody trying a profile out in $TMPDIR -- is writing where it was told to
+/// write, and demanding root for that would be demanding root to write in
+/// somebody's home directory. A run pointed at /etc/omahouse is writing the file
+/// the daemon reads, and that one is root's.
+///
+/// One question per root and not one for both together: moving the ledger out
+/// of /var must not quietly excuse a write to /etc.
+bool configDirIsTheSystems();
+bool stateDirIsTheSystems();
+
 } // namespace paths
 
 } // namespace omahouse

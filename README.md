@@ -14,14 +14,29 @@ check.
 
 ## Using it
 
-Today the CLI reads. Acting on a decision arrives with stage 7 of `plan.md`.
+Today the CLI reads and configures. The daemon that counts arrives with stage 6
+of `plan.md`, and acting on a decision with stage 7.
 
 ```bash
 omahouse status [user]     # live app scopes, what they are, and what is left
 omahouse report <user>     # the day's ledger, or --since a day
 omahouse profile list
 omahouse profile show <user>
+
+sudo omahouse profile add julia --name "Júlia"
+sudo omahouse profile default julia --deny     # only what is allowed runs
+sudo omahouse allow julia minecraft-launcher --limit 45m
+sudo omahouse limit julia --session 2h
+sudo omahouse grant julia --session 10m        # with the game still open
+sudo omahouse profile enforce julia --on       # after a day of the report
 ```
+
+Reading needs no privilege — the fiscalised user runs `omahouse status` and sees
+what is left of their own day. Writing needs root, and the studio of stage 8 will
+get there through `pkexec`. A new profile is born observing and allowing
+everything: it counts and reports and closes nothing, which is a day of evidence
+before the teeth go on. An account in `wheel` is refused a profile, because an
+administrator does not fiscalise themselves by accident.
 
 `docs/cli.md` is the whole of it, generated from `omahouse.usage.kdl`. Every
 root moves by variable, which is how the end to end suite runs as an ordinary
@@ -32,6 +47,8 @@ user with nothing installed:
 | `OMAHOUSE_CONFIG_DIR` | `/etc/omahouse` | `profiles.json`, who is under rules |
 | `OMAHOUSE_STATE_DIR` | `/var/lib/omahouse` | `<user>/<AAAA-MM-DD>.json`, the day |
 | `OMAHOUSE_CGROUP_ROOT` | `/sys/fs/cgroup` | where the app scopes are read from |
+| `OMAHOUSE_PROC_ROOT` | `/proc` | what the processes in a scope are running |
+| `OMAHOUSE_USERADD` | `/usr/sbin/useradd` | what `--create-user` runs |
 | `OMAHOUSE_JSON` | unset | same as `--json` |
 
 `status` also reports what it cannot see: a scope under `app.slice` whose name
@@ -39,6 +56,22 @@ it could not read, and the processes in `session.slice` it can neither count nor
 close. That second number is never zero on a live session — an app started
 outside `uwsm app` lands in the compositor's own cgroup, and `spec.md` §5 asks
 for that to be said rather than hidden.
+
+And it reports what a scope holds when that is not what its name says. An app
+launched through a shim takes the shim's name: this machine has seven scopes
+called `gtk-launch` with VS Code inside them, so allowing `gtk-launch` allows
+whatever it launches next. `status` prints what is really running under each id,
+and `allow` says it again at the moment somebody writes the rule. It warns and
+does not refuse — the same reading calls a flatpak a shim, because every flatpak
+runs `/usr/bin/bwrap` — and the rule goes on matching the id, which is the only
+thing the model decides by.
+
+**It is not a security boundary.** A program started from inside a terminal
+inherits the terminal's scope, so a profile with a terminal on its allowlist is
+a profile that allows everything — and all of it counts as terminal time. Do not
+allow a terminal in a profile that is meant to hold. What the model does hold,
+because none of it depends on the goodwill of the session, is the clock, the
+`loginctl` logout, the counting and the daemon — `spec.md` §10.
 
 ## Build
 
