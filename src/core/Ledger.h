@@ -57,11 +57,28 @@ struct Ledger {
     /// every couple of seconds and read by people, and a hash would reorder the
     /// keys between two writes that mean the same thing.
     QMap<QString, int> seconds;
+    /// Seconds of the day spent in each state of presence, by the reason's name.
+    ///
+    /// Beside the budgets and never inside them. What omahouse bills an app is
+    /// its running time -- docs/design.md §5, decided and published -- and this
+    /// does not touch it: a day with two hours of `screen-off` in it has the same
+    /// `seconds` it would have had if nobody had ever measured presence. It is
+    /// here to be read, by `status` and by whatever counts time per site later,
+    /// and the names are `src/sys`'s: this side of the line does not know what a
+    /// screen is.
+    ///
+    /// A QMap for the same reason `seconds` is one: the file is written every
+    /// couple of seconds and read by people, and a hash would shuffle the keys
+    /// between two writes that mean the same thing.
+    QMap<QString, int> presence;
     QVector<Grant> grants;
     QVector<Event> events;
 
     int secondsFor(const QString &budgetId) const;
     void addSeconds(const QString &budgetId, int amount);
+
+    int presenceSecondsFor(const QString &reason) const;
+    void addPresenceSeconds(const QString &reason, int amount);
 
     /// Minutes an operator added today, as seconds, for one budget. Grants are
     /// in the day's own file, so they expire by the file expiring.

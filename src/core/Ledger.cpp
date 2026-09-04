@@ -105,6 +105,18 @@ void Ledger::addSeconds(const QString &budgetId, int amount)
     seconds[budgetId] = secondsFor(budgetId) + amount;
 }
 
+int Ledger::presenceSecondsFor(const QString &reason) const
+{
+    return presence.value(reason, 0);
+}
+
+void Ledger::addPresenceSeconds(const QString &reason, int amount)
+{
+    if (reason.isEmpty() || amount == 0)
+        return;
+    presence[reason] = presenceSecondsFor(reason) + amount;
+}
+
 int Ledger::grantedSeconds(const QString &budgetId) const
 {
     int total = 0;
@@ -173,7 +185,7 @@ QJsonObject Ledger::toJson() const
         eventArray.append(object);
     }
 
-    return QJsonObject{
+    QJsonObject document{
         {QStringLiteral("schemaVersion"), kSchemaVersion},
         {QStringLiteral("user"), user},
         {QStringLiteral("date"), date.toString(Qt::ISODate)},
@@ -181,6 +193,18 @@ QJsonObject Ledger::toJson() const
         {QStringLiteral("grants"), grantArray},
         {QStringLiteral("events"), eventArray},
     };
+
+    // Written only once there is something to say, so a machine that has never
+    // measured presence keeps writing the file it has always written. An empty
+    // object here would rewrite every ledger on disk on the first tick after an
+    // upgrade to say nothing.
+    if (!presence.isEmpty()) {
+        QJsonObject presenceObject;
+        for (auto it = presence.constBegin(); it != presence.constEnd(); ++it)
+            presenceObject.insert(it.key(), it.value());
+        document.insert(QStringLiteral("presence"), presenceObject);
+    }
+    return document;
 }
 
 bool Ledger::fromJson(const QJsonObject &object, Ledger *out, QString *error)
@@ -219,6 +243,28 @@ bool Ledger::fromJson(const QJsonObject &object, Ledger *out, QString *error)
             return false;
         }
         ledger.seconds.insert(it.key(), it.value().toInt());
+    }
+
+    // Absent in every ledger written before presence was measured, which is
+    // every ledger already on the machines this ships to. Absent is empty and
+    // never an error.
+    const QJsonValue presenceValue = object.value(QStringLiteral("presence"));
+    if (!presenceValue.isUndefined() && !presenceValue.isObject()) {
+        if (error)
+            *error = QStringLiteral("a ledger has a presence field that is not an object");
+        return false;
+    }
+    const QJsonObject presenceObject = presenceValue.toObject();
+    for (auto it = presenceObject.constBegin(); it != presenceObject.constEnd(); ++it) {
+        if (!it.value().isDouble()) {
+            if (error) {
+                *error = QStringLiteral("the ledger of %1 has a non-numeric presence count "
+                                        "for %2")
+                             .arg(ledger.user, it.key());
+            }
+            return false;
+        }
+        ledger.presence.insert(it.key(), it.value().toInt());
     }
 
     const QJsonValue grantsValue = object.value(QStringLiteral("grants"));
