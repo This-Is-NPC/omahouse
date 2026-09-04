@@ -11,8 +11,10 @@ TARGET    = omahouse
 
 DESTDIR = $$OUT_PWD/../../bin
 
-INCLUDEPATH += $$PWD/../core
+INCLUDEPATH += $$PWD/../core $$PWD/../sys
 SOURCES     += main.cpp
 
-LIBS           += -L$$OUT_PWD/../core -lomahousecore
-PRE_TARGETDEPS += $$OUT_PWD/../core/libomahousecore.a
+# sys before core on the line: sys calls into core -- `scopeIdFromUnit` -- and a
+# static archive only satisfies symbols the archives to its left still want.
+LIBS           += -L$$OUT_PWD/../sys -lomahousesys -L$$OUT_PWD/../core -lomahousecore
+PRE_TARGETDEPS += $$OUT_PWD/../sys/libomahousesys.a $$OUT_PWD/../core/libomahousecore.a

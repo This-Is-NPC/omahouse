@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Build and run the unit tests. Idempotent.
+# Build and run the unit tests and the CLI end to end. Idempotent.
 #
 # The build comes first because the suite links build/src/core/libomahousecore.a
-# rather than compiling the core's sources a second time.
+# and build/src/sys/libomahousesys.a rather than compiling their sources a second
+# time.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,3 +25,8 @@ run_suite() {
 }
 
 run_suite tests.pro tst_omahouse core
+
+# The e2e drives the built binary rather than the library, with every root it
+# reads pointed at a temporary tree: no /etc, no /var, no session, no root.
+export OMAHOUSE_CLI="$root/build/bin/omahouse"
+python3 "$root/tests/test_cli.py"

@@ -25,17 +25,29 @@ long suggestedBuffer()
     return suggested > 0 ? suggested : kFirstBuffer;
 }
 
-template <typename Lookup>
-bool lookup(Lookup query, passwd *entry, passwd **found)
+/// Runs one getpw*_r and hands the entry to `take` while the buffer is still
+/// alive.
+///
+/// The two halves have to happen inside the one function. Every string in a
+/// `struct passwd` -- `pw_name` among them -- points into the caller's scratch
+/// buffer, so returning the entry and reading it afterwards is reading freed
+/// memory, and it does not look like it: the first version of this file returned
+/// the whole line of /etc/passwd as a user name instead of crashing.
+template <typename Query, typename Take>
+bool lookup(Query query, Take take)
 {
     QVarLengthArray<char, 1024> buffer;
+    passwd entry {};
+    passwd *found = nullptr;
     for (long size = suggestedBuffer(); size <= kLargestBuffer; size *= 2) {
         buffer.resize(static_cast<int>(size));
-        const int status = query(entry, buffer.data(), static_cast<size_t>(size), found);
-        if (status == 0)
-            return *found != nullptr;
-        if (status != ERANGE)
+        const int status = query(&entry, buffer.data(), static_cast<size_t>(size), &found);
+        if (status == ERANGE)
+            continue;
+        if (status != 0 || found == nullptr)
             return false;
+        take(found);
+        return true;
     }
     return false;
 }
@@ -47,32 +59,25 @@ bool uidForUser(const QString &user, uid_t *uid)
     if (user.isEmpty())
         return false;
     const QByteArray name = user.toLocal8Bit();
-    passwd entry {};
-    passwd *found = nullptr;
-    const bool ok = lookup(
+    return lookup(
         [&name](passwd *entry, char *buffer, size_t size, passwd **found) {
             return ::getpwnam_r(name.constData(), entry, buffer, size, found);
         },
-        &entry, &found);
-    if (!ok)
-        return false;
-    if (uid)
-        *uid = found->pw_uid;
-    return true;
+        [uid](const passwd *found) {
+            if (uid)
+                *uid = found->pw_uid;
+        });
 }
 
 QString userForUid(uid_t uid)
 {
-    passwd entry {};
-    passwd *found = nullptr;
-    const bool ok = lookup(
+    QString name;
+    lookup(
         [uid](passwd *entry, char *buffer, size_t size, passwd **found) {
             return ::getpwuid_r(uid, entry, buffer, size, found);
         },
-        &entry, &found);
-    if (!ok)
-        return {};
-    return QString::fromLocal8Bit(found->pw_name);
+        [&name](const passwd *found) { name = QString::fromLocal8Bit(found->pw_name); });
+    return name;
 }
 
 QString currentUser()

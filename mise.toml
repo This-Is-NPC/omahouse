@@ -1,3 +1,6 @@
+[tools]
+usage = "6.6.0"
+
 [tasks.deps]
 description = "Checks the system Qt/qmake toolchain"
 run = ".scripts/deps.sh"
@@ -7,11 +10,11 @@ description = "Builds the CLI"
 run = ".scripts/build.sh"
 
 [tasks.test]
-description = "Builds and runs the unit tests"
+description = "Builds and runs the unit tests and the CLI e2e"
 run = ".scripts/test.sh"
 
 [tasks.verify]
-description = "Runs the local gate (today: the tests)"
+description = "Runs the local gate (docs current, then the tests)"
 run = ".scripts/verify.sh"
 
 [tasks.lint]
@@ -21,3 +24,11 @@ run = ".scripts/qml-check.sh"
 [tasks."hooks:install"]
 description = "Installs versioned git hooks that exec .scripts/verify.sh"
 run = ".scripts/install-hooks.sh"
+
+[tasks."usage:gen"]
+description = "Regenerates docs/cli.md from omahouse.usage.kdl"
+run = ".scripts/usage-gen.sh"
+
+[tasks."usage:check"]
+description = "Checks that docs/cli.md is what omahouse.usage.kdl generates"
+run = ".scripts/usage-check.sh"
