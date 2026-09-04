@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Commit gate — installed by `mise run hooks:install`.
+# Execs `.scripts/verify.sh` unchanged. Bypass: `git commit --no-verify`.
+set -uo pipefail
+
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root" || exit 1
+
+if [ ! -x ".scripts/verify.sh" ]; then
+  echo "pre-commit: .scripts/verify.sh is missing or not executable — cannot run the gate." >&2
+  exit 1
+fi
+
+exec .scripts/verify.sh

@@ -1,0 +1,12 @@
+build/
+build-tests/
+*.o
+*.a
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+Makefile
+.qmake.stash
+__pycache__/
+*.pyc
+.temp/

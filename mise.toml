@@ -1,0 +1,23 @@
+[tasks.deps]
+description = "Checks the system Qt/qmake toolchain"
+run = ".scripts/deps.sh"
+
+[tasks.build]
+description = "Builds the CLI"
+run = ".scripts/build.sh"
+
+[tasks.test]
+description = "Builds and runs the unit tests"
+run = ".scripts/test.sh"
+
+[tasks.verify]
+description = "Runs the local gate (today: the tests)"
+run = ".scripts/verify.sh"
+
+[tasks.lint]
+description = "Lints the QML with every warning fatal"
+run = ".scripts/qml-check.sh"
+
+[tasks."hooks:install"]
+description = "Installs versioned git hooks that exec .scripts/verify.sh"
+run = ".scripts/install-hooks.sh"
