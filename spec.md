@@ -170,6 +170,16 @@ Dois arquivos, os dois JSON, os dois lidos e escritos pelo `core`.
 - `enforce: false` — **modo observação**: conta e relata, não fecha nem desloga.
 - `warnAt` — minutos restantes em que o usuário é avisado.
 - `grace` — segundos entre o aviso final e o `SIGKILL`.
+- `default` ausente vale `allow`, não `deny`. Um perfil escrito pela metade que
+  conta sem morder é recuperável; um que nega tudo tranca alguém para fora da
+  própria máquina. É a mesma escolha do `onerr=succeed` do §2.
+- `user` é o único campo obrigatório.
+
+Os `events` do ledger não são só registro: são a **memória** do que já foi dito.
+`warn` carrega a marca de `warnAt` que disparou (`minutes`), e é o que impede o
+mesmo aviso de sair a cada dois segundos; `exhausted` carrega o instante que
+abre a janela de `grace`, medido do disco e não de um contador em memória, para
+que um daemon reiniciado no meio da janela a retome em vez de reabri-la.
 
 O mesmo esquema, com `default: "allow"` e uma regra `deny` para cada distração,
 é um perfil de foco para um adulto. Nada muda no motor.
@@ -186,7 +196,9 @@ O mesmo esquema, com `default: "allow"` e uma regra `deny` para cada distração
     { "at": "2026-09-03T19:12:04-03:00", "by": "howl", "budget": "session", "minutes": 10 }
   ],
   "events": [
-    { "at": "2026-09-03T19:30:11-03:00", "kind": "exhausted", "budget": "minecraft" }
+    { "at": "2026-09-03T19:25:11-03:00", "kind": "warn",      "budget": "minecraft", "minutes": 5 },
+    { "at": "2026-09-03T19:30:11-03:00", "kind": "exhausted", "budget": "minecraft" },
+    { "at": "2026-09-03T19:31:02-03:00", "kind": "denied",    "scope": "app-Hyprland-steam-9f2c11ab.scope" }
   ]
 }
 ```
