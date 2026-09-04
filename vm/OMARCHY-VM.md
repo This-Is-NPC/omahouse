@@ -1,5 +1,9 @@
 # A VM `omahouse-omarchy`
 
+> Este documento é para **usar** a VM. Quem precisa trabalhar nela — rodar os
+> casos automatizados, dirigir o desktop por `ydotool`, capturar telas ou
+> reconstruir a máquina — quer o [`docs/vm-runbook.md`](../docs/vm-runbook.md).
+
 Omarchy 4.0.2 de verdade — Hyprland sob `uwsm`, a barra do `quickshell`, o SDDM
 com o greeter do Omarchy — com o omahouse instalado por pacote e a `julia` já
 sob regras. É para abrir e usar com a mão, não para rodar teste.
