@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A house with a clock in it, which is the whole product in one shape: the roof
+  is the household and the hands are the budget of spec.md §2.
+
+  Monochrome, on `currentColor`, so it takes the theme rather than fighting it,
+  which is the same choice Theme.cpp makes when it reads the omarchy palette at
+  run time. No text: the name is beside the icon everywhere it is drawn, and a
+  word at 16px is a smudge.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"
+     fill="none" stroke="currentColor" stroke-width="3.4"
+     stroke-linecap="round" stroke-linejoin="round">
+
+  <!-- The roof, drawn over the walls so the eaves read as one line. -->
+  <path d="M6 28 32 7l26 21"/>
+
+  <!-- The walls, open at the roofline. -->
+  <path d="M12 26v30h40V26"/>
+
+  <!-- The door, because a house with no way in is a box. -->
+  <path d="M26 56V44h12v12"/>
+
+  <!-- The clock: the face, and the hands at a quarter to. -->
+  <circle cx="32" cy="34" r="8.5"/>
+  <path d="M32 29v5h-4"/>
+</svg>

@@ -1,0 +1,151 @@
+# omahouse — what a package cannot do from a file list.
+#
+# Four things: the two directories of spec.md §4, the service of §9, and the one
+# line of PAM that makes `logout` mean anything at all (§2). The last is the only
+# one that edits a file this package does not own, and it is the reason this
+# script is longer than it looks like it should be.
+#
+# Everything here is idempotent. It runs again on every upgrade, and a machine
+# that already has the line has to come out of it unchanged -- including one
+# where somebody moved the line by hand, which is theirs to have done.
+
+_pam_file=/etc/pam.d/system-login
+_pam_marker='pam_listfile.so.*file=/etc/omahouse/blocked'
+
+# The line poc/findings.md round 3 measured, and the only shape of it that is
+# ever written.
+#
+#   account required pam_listfile.so item=user sense=deny \
+#           file=/etc/omahouse/blocked onerr=succeed
+#
+# `onerr=succeed` is NOT OPTIONAL, and it is not a preference. It is what makes a
+# missing or unreadable /etc/omahouse/blocked let everybody in. Without it, a
+# file that is not there yet -- which is every machine between this scriptlet and
+# the first time somebody runs out of time -- would refuse every login on the
+# system, at the console, with no way in to fix it. The same reasoning runs
+# through the whole of omahouse: the failure that leaves the rules soft is
+# recoverable, and the one that leaves them hard is not. spec.md §2 and §4 both
+# say it, and this is the place where getting it wrong costs somebody their
+# machine rather than an afternoon.
+_pam_line='account    required   pam_listfile.so item=user sense=deny file=/etc/omahouse/blocked onerr=succeed'
+
+_install_pam_line() {
+    if [ ! -f "$_pam_file" ]; then
+        cat >&2 <<-MESSAGE
+		>>> omahouse: $_pam_file is not there, so the login block was not installed.
+		>>>           Budgets with onExhausted "logout" will end the session and not
+		>>>           stop the next login. Add this line to your PAM login stack:
+		>>>
+		>>>           $_pam_line
+		MESSAGE
+        return
+    fi
+
+    # Already there, however it got there. A second copy would refuse the same
+    # people twice and would be one more line for the next upgrade to remove.
+    if grep -Eq "^[^#]*$_pam_marker" "$_pam_file"; then
+        return
+    fi
+
+    # Before every other `account` line, so that a refusal happens before
+    # anything else in the stack has a chance to succeed.
+    local temporary
+    temporary="$(mktemp "${_pam_file}.omahouse.XXXXXX")" || return
+    awk -v line="$_pam_line" '
+        !done && /^[[:space:]]*account[[:space:]]/ { print line; done = 1 }
+        { print }
+        END { if (!done) print line }
+    ' "$_pam_file" > "$temporary" || { rm -f "$temporary"; return; }
+
+    # A truncated PAM file is a machine nobody can log into, so the new one is
+    # checked for the line it was supposed to gain and for the lines it was
+    # supposed to keep before it replaces anything.
+    if [ "$(wc -l < "$temporary")" -le "$(wc -l < "$_pam_file")" ] \
+        || ! grep -Eq "^[^#]*$_pam_marker" "$temporary"; then
+        rm -f "$temporary"
+        echo ">>> omahouse: could not edit $_pam_file; it was left alone." >&2
+        return
+    fi
+
+    chmod --reference="$_pam_file" "$temporary" 2>/dev/null || chmod 0644 "$temporary"
+    chown --reference="$_pam_file" "$temporary" 2>/dev/null || true
+    mv -f "$temporary" "$_pam_file"
+}
+
+_remove_pam_line() {
+    [ -f "$_pam_file" ] || return
+    grep -Eq "^[^#]*$_pam_marker" "$_pam_file" || return
+
+    local temporary
+    temporary="$(mktemp "${_pam_file}.omahouse.XXXXXX")" || return
+    grep -Ev "^[^#]*$_pam_marker" "$_pam_file" > "$temporary" || { rm -f "$temporary"; return; }
+    chmod --reference="$_pam_file" "$temporary" 2>/dev/null || chmod 0644 "$temporary"
+    chown --reference="$_pam_file" "$temporary" 2>/dev/null || true
+    mv -f "$temporary" "$_pam_file"
+}
+
+_directories() {
+    # 0644 files in 0755 directories -- spec.md §4. Root writes both and
+    # everybody reads them, which is what lets the fiscalised user run
+    # `omahouse status` and see what is left of their own day.
+    install -d -m 0755 /etc/omahouse
+    install -d -m 0755 /var/lib/omahouse
+}
+
+post_install() {
+    _directories
+    _install_pam_line
+
+    # Enabled, and not started. A daemon that begins counting inside a pacman
+    # transaction is a daemon nobody chose to run yet, and there are no profiles
+    # on a machine that has just installed this -- `watch` would find an empty
+    # list and say so. It starts at the next boot, or when somebody asks.
+    #
+    # Enabling at all is the deliberate part: spec.md §9. A stopped daemon is a
+    # rule switched off, and this package exists to be a rule.
+    systemctl enable omahouse.service >/dev/null 2>&1 || true
+
+    cat <<-MESSAGE
+	>>> omahouse: /etc/omahouse and /var/lib/omahouse are ready, and
+	>>>           omahouse.service is enabled for the next boot.
+	>>>
+	>>>           Nobody is under rules yet. Start with:
+	>>>             omahouse profile add <user> --name "Name"
+	>>>             omahouse status <user>
+	>>>
+	>>>           A new profile only counts and reports. Read a day of
+	>>>           `omahouse report <user>` before `omahouse profile enforce
+	>>>           <user> --on` puts the teeth in.
+	MESSAGE
+}
+
+post_upgrade() {
+    _directories
+    # Again on every upgrade, because a PAM file replaced by a .pacnew merge is a
+    # machine where the line quietly went away and nothing else would notice.
+    _install_pam_line
+}
+
+pre_remove() {
+    systemctl disable --now omahouse.service >/dev/null 2>&1 || true
+}
+
+post_remove() {
+    _remove_pam_line
+
+    # And the list itself, always, whatever else is kept.
+    #
+    # This is the one thing in this file that must not be left behind. A machine
+    # with a name still in /etc/omahouse/blocked and no omahouse installed is a
+    # machine where nothing can ever take that name back out -- the daemon that
+    # would have done it at the turn of the day is gone. Removing the package has
+    # to be a way out, not a way to make the lock permanent.
+    rm -f /etc/omahouse/blocked
+
+    cat <<-MESSAGE
+	>>> omahouse: the login block was removed and everybody can log in again.
+	>>>           The profiles in /etc/omahouse and the days already counted in
+	>>>           /var/lib/omahouse were left where they are -- a report is
+	>>>           evidence, and it outlives the rules it was collected under.
+	MESSAGE
+}

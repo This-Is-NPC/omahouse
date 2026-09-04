@@ -1,0 +1,53 @@
+# The daemon of spec.md §5, which is not a daemon: it is `omahouse watch`, a verb
+# of the same CLI everything else goes through. No second binary, no IPC, and no
+# second reader of /etc/omahouse/profiles.json.
+#
+# Why it is a system service and not something in the fiscalised session: spec.md
+# §1. Whatever runs as the fiscalised user is something that user can `pkill`,
+# and a rule that the person under it can switch off is not a rule. It is also
+# what makes the counting trustworthy -- the ledger under /var/lib is written by
+# root and readable by everybody, so `omahouse status` tells the truth to the
+# person it is about.
+
+[Unit]
+Description=omahouse session accounting
+Documentation=https://github.com/omarchy/omahouse
+# logind is what owns the sessions this counts and the one thing `terminate-user`
+# talks to. Ordering only, not a requirement: a boot where logind is late is a
+# boot where the first few cycles find nobody logged in, which is the truth.
+After=systemd-logind.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/omahouse watch
+# A stopped daemon is a rule switched off, and an account without privilege
+# cannot stop a system service -- so the only way this ends is a crash, and a
+# crash must not be how somebody gets their evening back. spec.md §9 puts it in
+# as many words.
+Restart=always
+RestartSec=2
+
+# It reads /sys/fs/cgroup and /proc, writes /var/lib/omahouse and
+# /etc/omahouse/blocked, signals processes in other users' app scopes, and asks
+# logind to end a session. That is the whole of it, and it is why there is no
+# ProtectSystem= here: two of those four are writes to /etc and /var that the
+# usual hardening would have to punch holes in one at a time, which is a longer
+# list of exceptions than of protections.
+#
+# What is worth having is the part that costs nothing to be sure of: it never
+# needs a network, and it never needs to make a file anybody can execute.
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=yes
+MemoryDenyWriteExecute=yes
+ProtectHostname=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+
+# Its own journal identity, because the one line that matters -- a session ended,
+# an app closed -- has to be findable by somebody who was not watching when it
+# happened: `journalctl -t omahouse`.
+SyslogIdentifier=omahouse
+
+[Install]
+WantedBy=multi-user.target

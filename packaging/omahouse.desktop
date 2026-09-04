@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=House Rules
+Name[pt_BR]=Regras da Casa
+GenericName=Screen time
+GenericName[pt_BR]=Tempo de tela
+Comment=Which programs each account may open, and for how long
+Comment[pt_BR]=Quais programas cada conta pode abrir, e por quanto tempo
+# The window of spec.md §8, and never the daemon. It opens as whoever launched
+# it and chooses its face from that -- the operator sees the profiles and the
+# balances, and somebody under a profile sees what is left of their own day.
+# Writing goes out through `pkexec omahouse`, so this line is never `pkexec`.
+Exec=omahouse-studio
+Icon=omahouse
+Terminal=false
+Categories=Settings;Security;
+Keywords=screen time;parental;limit;budget;allowlist;
+Keywords[pt_BR]=tempo de tela;limite;orçamento;pais;
+StartupNotify=true
+StartupWMClass=omahouse-studio
