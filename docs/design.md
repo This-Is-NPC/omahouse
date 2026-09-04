@@ -641,7 +641,8 @@ stale at once, and `mise run shots` is the answer.
 ### The VM suite
 
 ```bash
-mise run test:vm            # every case, then shut the machine down
+mise run test:vm            # every case, quick, then shut the machine down
+mise run test:vm:long       # the same cases with the long windows
 vm/run.sh --keep            # leave it running, for looking at
 vm/run.sh --case grace      # one case, by a piece of its name
 ```
@@ -660,7 +661,7 @@ commands rather than the one that was asked to start. A missing prerequisite is
 an explicit `blocked`, never a case quietly skipped.
 
 The case that justifies the whole suite is `session_slice_untouched.py`: a
-profile with `enforce: true` and an empty allowlist, asserting a minute later
+profile with `enforce: true` and an empty allowlist, asserting some minutes later
 that Hyprland, `pipewire` and `systemd --user` are alive and the session is
 still active in `loginctl`. §5 says that is structural; this is what proves the
 structure is that on a real seat.
@@ -669,6 +670,43 @@ The budgets in `vm/manifest.toml` are seconds, not hours, and the clock is the
 real one. The arithmetic of hours and of the turn of the day is proved by the
 unit suite with an injected `now`; what the VM proves is that the mechanism
 fires.
+
+#### The two regimes
+
+**Every duration this suite waits on is in `vm/manifest.toml`, under
+`[pace.quick]` or `[pace.long]`, and `--pace` is the only knob that picks
+between them.** Nothing in `vm/e2e.py` or `vm/cases/` holds a number of seconds
+of its own. That is the whole of the mechanism, and it is one thing rather than
+three so that the cost of a run can be read off one file.
+
+| | quick | long |
+|---|---|---|
+| what it is for | iterating: the smallest window that still proves each case | publishing: the windows that catch what only shows with time |
+| how to run it | `mise run test:vm` — the default | `mise run test:vm:long` — explicit, always |
+| an app's budget | 8s, `grace` 3s | 45s, `grace` 20s — the one the demonstration VM is really provisioned with |
+| the session's | 20s | 90s |
+| the allowlist held | 20s | 3 minutes |
+| the login refused for | 12s | 60s |
+| a site in the browser | 10s each | 45s each |
+| the screen going dark | by an explicit `dpms` dispatch | by the real idle cycle, 7 minutes of it |
+
+**Which to run when.** Quick after every change, and it is what the default
+gives you because it is the one somebody types forty times in an afternoon. Long
+before publishing, and before believing a green quick run about anything to do
+with the browser: the extension's service worker, the keepalive on the native
+port, and Omarchy's own idle cycle are all things that only misbehave after
+minutes, and a ten second window cannot tell a worker that lives from one that
+was restarted between two ticks.
+
+**One window buys its speed by giving up reach, and it is named rather than
+hidden.** `session_slice_untouched.py` asks whether an empty allowlist
+*eventually* reaches something it must not, and "eventually" is the question. At
+20 seconds it is ten cycles of the daemon refusing every app scope, which is
+enough to catch a rule that reaches the wrong tree at once; it is not enough to
+catch one that only reaches it on the hundredth cycle. Nothing else here shrinks
+in a way that changes what it proves — a budget of eight seconds and a budget of
+forty-five prove the same mechanism firing, and the arithmetic that would differ
+between them is the unit suite's job.
 
 **No case runs against the developer's machine.** omahouse closes processes and
 ends sessions; a run that confused the host with the guest would not be a red

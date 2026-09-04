@@ -7,7 +7,15 @@
 # does not arrive once an hour. It is manual and nightly, which is what
 # `docs/design.md` says of it under "Tests and the gate".
 #
-#     vm/run.sh                 every case, then shut the machine down
+# Every duration it waits on lives in `vm/manifest.toml`, under one of two
+# regimes, and `--pace` is the only knob that picks between them. `quick` is the
+# default and holds the smallest window that still proves each case; `long` holds
+# the windows that catch what only shows with time -- a browser's service worker
+# over minutes of silence, a real idle cycle, a grace window a household would
+# actually set. docs/design.md, "The two regimes", says which to run when.
+#
+#     vm/run.sh                 every case, quick, then shut the machine down
+#     vm/run.sh --pace long     the same cases with the long windows
 #     vm/run.sh --keep          leave it running, for looking at
 #     vm/run.sh --case grace    one case, by a piece of its name
 set -euo pipefail

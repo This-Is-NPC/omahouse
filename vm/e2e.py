@@ -22,7 +22,13 @@ The binary under test is built from the working tree every run and installed on
 the guest. It is the artefact being tested; a copy frozen into the image would
 be testing last week.
 
-    python3 vm/e2e.py                 every case, then shut the machine down
+Every duration this suite waits on comes out of `vm/manifest.toml`, under one of
+two regimes. `quick` is the default and is what somebody types forty times in an
+afternoon; `long` is explicit and holds the windows that catch what only shows
+with time. There is one knob and it is `--pace`.
+
+    python3 vm/e2e.py                 every case, quick, then shut the machine down
+    python3 vm/e2e.py --pace long     the same cases with the long windows
     python3 vm/e2e.py --keep          leave it running, for looking at
     python3 vm/e2e.py --case grace    one case, by a piece of its name
 """
@@ -75,8 +81,12 @@ class VM:
     Failed = Failed
     Blocked = Blocked
 
-    def __init__(self, manifest):
+    def __init__(self, manifest, pace):
         self.manifest = manifest
+        # Every second this run is willing to wait, and every second of budget it
+        # will seed. One dictionary, chosen once by `--pace`, and no case holds a
+        # duration of its own.
+        self.pace = pace
         self.domain = manifest["domain"]["name"]
         self.uri = manifest["domain"]["uri"]
         self.hostname = manifest["domain"]["hostname"]
@@ -117,7 +127,8 @@ class VM:
         if not Path(self.key).exists():
             raise Blocked(f"there is no ssh key at {self.key}")
 
-    def start(self, timeout=180):
+    def start(self, timeout=None):
+        timeout = timeout or self.pace["boot_seconds"]
         if "running" not in self.virsh("domstate", self.domain):
             say(f"  starting {self.domain}")
             self.virsh("start", self.domain)
@@ -163,7 +174,10 @@ class VM:
     def shutdown(self):
         say(f"  shutting {self.domain} down")
         self.virsh("shutdown", self.domain, check=False)
-        deadline = time.time() + 90
+        # Not a window this suite is about -- nothing is being proved while a
+        # machine powers off -- so it takes the regime's ordinary patience and
+        # pulls the plug after it.
+        deadline = time.time() + self.pace["patience_seconds"]
         while time.time() < deadline:
             if "shut off" in self.virsh("domstate", self.domain, check=False):
                 return True
@@ -316,7 +330,7 @@ class VM:
         self.julia(
             f"setsid --fork sh -c 'cd /tmp && exec uwsm app -- /usr/local/bin/{app} {args}' "
             "</dev/null >/dev/null 2>&1", check=False)
-        for _ in range(20):
+        for _ in range(self.pace["patience_seconds"] * 2):
             time.sleep(0.5)
             new = set(self.scopes()) - before
             if new:
@@ -342,7 +356,8 @@ class VM:
         self.root(f"pkill -9 -u {self.subject} -f 'uwsm app|/usr/local/bin/omahouse-' "
                   "|| true", check=False)
         self.root(f"pkill -9 -u {self.subject} -x sleep || true", check=False)
-        self.wait_for(lambda: not self.scopes(), 20, "the app scopes to go")
+        self.wait_for(lambda: not self.scopes(), self.pace["patience_seconds"],
+                      "the app scopes to go")
         # And a session again. `logout_blocks_the_way_back` ends the one that
         # was there and the tty1 autologin brings up a new one, which takes the
         # notification daemon with it -- so every case starts from a session that
@@ -384,13 +399,29 @@ class VM:
                     "open(p,'w').write(json.dumps(d, indent=2))\n"))
         self.root(f"omahouse profile enforce {self.subject} --on")
 
+    def whole_minutes(self, seconds):
+        """The smallest whole-minute limit that can leave `seconds` on the clock.
+
+        /etc/omahouse/profiles.json holds whole minutes -- docs/design.md §4 --
+        and the regimes of `vm/manifest.toml` are counted in seconds. These two
+        methods are where they meet, and they are here rather than in each case
+        so that a regime asking for more than a minute cannot quietly produce a
+        negative amount already spent.
+        """
+        return max(1, -(-seconds // 60))
+
+    def already_spent(self, seconds):
+        """What today has to have on it for `seconds` to be left of that limit."""
+        return self.whole_minutes(seconds) * 60 - seconds
+
     def seed_ledger(self, spent):
         """A day that has already been going on for a while.
 
         The limits in profiles.json are whole minutes, and the cases want
-        budgets of forty and fifteen seconds. This is how the two meet: a one
-        minute budget with twenty seconds already on it has forty seconds left,
-        and it is the same shape as a machine that has been on since lunch.
+        budgets of seconds. `whole_minutes` and `already_spent` above are how the
+        two meet: a one minute budget with fifty-two seconds already on it has
+        eight seconds left, and it is the same shape as a machine that has been
+        on since lunch.
         """
         day = self.today()
         document = json.dumps({
@@ -468,7 +499,7 @@ def deploy(vm):
     vm.root("bash -c '. /tmp/omahouse.install; post_install'")
 
 
-def wait_for_the_session(vm, timeout=180):
+def wait_for_the_session(vm, timeout=None):
     """Hyprland up, and the notification daemon with it.
 
     `sudo modprobe vkms` after every boot: it is the virtual GPU Hyprland draws
@@ -476,7 +507,7 @@ def wait_for_the_session(vm, timeout=180):
     every run and not only the first, because it is a module and a boot forgets.
     """
     vm.root("modprobe vkms", check=False)
-    deadline = time.time() + timeout
+    deadline = time.time() + (timeout or vm.pace["boot_seconds"])
     while time.time() < deadline:
         if vm.pid_of("Hyprland"):
             break
@@ -530,19 +561,28 @@ def main():
     parser.add_argument("--keep", action="store_true",
                         help="leave the machine running afterwards")
     parser.add_argument("--case", default=None, help="run the cases whose name holds this")
+    # The one knob. Every second this run waits on and every second of budget it
+    # seeds comes out of the regime this picks, and out of nowhere else -- a case
+    # with a number of its own would be a case nobody could cost from the
+    # manifest.
+    parser.add_argument("--pace", default="quick", choices=("quick", "long"),
+                        help="quick (the default, for iterating) or long (for publishing)")
     options = parser.parse_args()
 
     with open(HERE / "manifest.toml", "rb") as file:
         manifest = tomllib.load(file)
 
-    os.environ.setdefault("LIBVIRT_DEFAULT_URI", manifest["domain"]["uri"])
-    vm = VM(manifest)
+    pace = manifest["pace"][options.pace]
 
-    say(f"omahouse — the VM suite, {manifest['domain']['name']}")
+    os.environ.setdefault("LIBVIRT_DEFAULT_URI", manifest["domain"]["uri"])
+    vm = VM(manifest, pace)
+
+    say(f"omahouse — the VM suite, {manifest['domain']['name']}, {pace['label']} pace")
     say()
 
     results = []
     started = False
+    began = time.time()
     try:
         vm.prove_it_is_the_right_machine()
         vm.start()
@@ -588,7 +628,11 @@ def main():
     for name, verdict, detail in results:
         say(f"  {verdict:8} {name}   {detail if verdict != 'PASS' else detail}")
     failures = [one for one in results if one[1] != "PASS"]
-    say(f"  {len(results) - len(failures)}/{len(results)} passed")
+    # The wall clock of the whole run, said out loud. It is the number the two
+    # regimes exist to trade against each other, and a regime whose cost nobody
+    # prints is a regime nobody chooses on purpose.
+    say(f"  {len(results) - len(failures)}/{len(results)} passed, "
+        f"{pace['label']} pace, {time.time() - began:.0f}s in all")
     return 1 if failures else 0
 
 

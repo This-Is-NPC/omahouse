@@ -1,4 +1,4 @@
-# The one machine this suite is allowed to touch.
+# The one machine this suite is allowed to touch, and how long it is given.
 #
 # No case runs against the developer's machine. omahouse closes
 # processes and ends sessions, and a run that confused the host with the guest
@@ -29,17 +29,80 @@ operator = "arch"
 user = "julia"
 uid = 1001
 
-[budgets]
-# The budgets are small and the clock is real. Nobody waits two
-# hours to prove a two hour limit, and moving the clock of a machine running
-# systemd is how a suite becomes flaky. The arithmetic of hours and of the turn
-# of the day is proved by the unit suite with an injected `now`; what is proved here is
-# that the mechanism fires.
+# -- the two regimes ----------------------------------------------------------
 #
-# The limits themselves are whole minutes, because that is what
+# Every duration in this suite is here, and there is exactly one knob that picks
+# between them: `vm/run.sh --pace quick|long`, quick by default. Nothing in
+# `vm/e2e.py` or `vm/cases/` writes a number of seconds of its own -- a case that
+# wanted a window nobody could see from this file would be a case whose cost
+# nobody could weigh.
+#
+# **Quick is for iterating.** The smallest window that still proves each case,
+# and nothing more. It is what `mise run test:vm` runs and what somebody types
+# forty times in an afternoon.
+#
+# **Long is for publishing.** The windows that catch what only shows with time:
+# a browser's service worker that has to survive minutes of nobody touching
+# anything, a real idle cycle ending in a screen that goes dark on its own, a
+# scope that ignores its SIGTERM for a grace window somebody would really
+# configure. It is `mise run test:vm:long`, and it is explicit on purpose.
+#
+# The budget limits themselves are whole minutes, because that is what
 # /etc/omahouse/profiles.json holds -- so the seconds below are made by seeding
 # the day's ledger with what has already been spent, which is the same thing a
-# machine that has been on since lunch looks like.
-session_seconds = 40
-app_seconds = 15
+# machine that has been on since lunch looks like. The clock is the real one:
+# the arithmetic of hours and of the turn of the day is proved by the unit suite
+# with an injected `now`, and what is proved here is that the mechanism fires.
+
+[pace.quick]
+label = "quick"
+# What is left of the session budget when the logout case starts counting.
+session_seconds = 20
+# What is left of an app's budget when the close and grace cases start.
+app_seconds = 8
+# The profile's `grace`: the window between the last warning and `cgroup.kill`,
+# and the window a SIGTERMed scope is given before the write.
 grace_seconds = 3
+# How long `session_slice_untouched` keeps an empty allowlist in force while
+# asserting the compositor never notices. This is the one window that cannot
+# shrink to nothing and still mean anything -- see docs/design.md, "The two
+# regimes".
+hold_seconds = 20
+# How long `logout_blocks_the_way_back` demands the session stay down. The tty1
+# autologin retries every few seconds, so this has to span more than one retry
+# or the case proves only that nothing tried.
+stay_down_seconds = 12
+# The ceiling on any single wait for something that should already be
+# happening -- a scope closing, a notification arriving, systemd putting a
+# daemon back. Never a duration a case is about: always the patience for one.
+patience_seconds = 45
+# Waiting for the domain to take an address, answer ssh, and come up with a
+# graphical session on it.
+boot_seconds = 180
+# How long the browser case sits on each site before moving to the next.
+site_seconds = 10
+# How long it then sits with nobody touching anything, waiting for the screen to
+# go dark on its own. Zero means the case does not wait for the idle cycle and
+# turns the screen off with an explicit dispatch instead, which proves the same
+# crossing in seconds rather than in minutes.
+screen_off_seconds = 0
+
+[pace.long]
+label = "long"
+session_seconds = 90
+app_seconds = 45
+# Twenty seconds is the `grace` the demonstration VM is really provisioned with
+# (vm/provision-omarchy.sh), so this is the window a household would actually
+# see.
+grace_seconds = 20
+hold_seconds = 180
+stay_down_seconds = 60
+patience_seconds = 150
+boot_seconds = 300
+site_seconds = 45
+# Seven minutes of nobody touching anything. `.temp/spike-extension.md` §5
+# measured this machine's screen going into DPMS off about five minutes into a
+# silence, with `chrome.idle` still answering `active` for the twenty-five
+# minutes after it. This is the window that catches it, and it is why there is a
+# long regime at all.
+screen_off_seconds = 420

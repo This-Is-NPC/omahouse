@@ -13,8 +13,11 @@ ignores it, which is what makes the write necessary rather than decorative -- an
 the first run of this suite is what found that out, because with only the polite
 one the journal never said `cgroup.kill` at all.
 
-The limit is one minute with forty-five seconds already spent, which is the
-fifteen seconds the fixture wants. The clock is the real one.
+The limit is one minute with the pace's `app_seconds` left on it, which is what
+the fixture wants. The clock is the real one, and how much of it this case is
+given comes out of `vm/manifest.toml` -- eight seconds under the quick regime,
+forty-five under the long one, where a `grace` a household would really set has
+room to be seen.
 """
 
 import time
@@ -34,25 +37,28 @@ def run(vm):
         if not found:
             raise Failed(f"{unit} has no processes in it")
 
-    grace = vm.manifest["budgets"]["grace_seconds"]
-    spent = 60 - vm.manifest["budgets"]["app_seconds"]
+    grace = vm.pace["grace_seconds"]
+    limit = vm.whole_minutes(vm.pace["app_seconds"])
+    spent = vm.already_spent(vm.pace["app_seconds"])
     vm.make_profile(
-        budgets={"session": 600, "omahouse-polite": 1, "omahouse-stubborn": 1},
+        budgets={"session": 600, "omahouse-polite": limit, "omahouse-stubborn": limit},
         default="allow", rules=["omahouse-polite", "omahouse-stubborn"], grace=grace)
     vm.seed_ledger({"omahouse-polite": spent, "omahouse-stubborn": spent})
 
     began = time.time()
     vm.start_daemon()
 
-    # Fifteen seconds of budget, then three of grace, then the SIGTERM, then
-    # three more before `cgroup.kill`. Sixty is room for the two second tick to
-    # land where it lands.
-    vm.wait_for(lambda: polite not in vm.scopes(), 60, f"{polite} to be closed")
+    # The budget, then the grace window, then the SIGTERM, then another window
+    # before `cgroup.kill`. `patience_seconds` is the ceiling on the whole of it
+    # and is never the thing under test: it only has to be longer than the
+    # sequence the pace asked for.
+    patience = vm.pace["patience_seconds"]
+    vm.wait_for(lambda: polite not in vm.scopes(), patience, f"{polite} to be closed")
     polite_took = time.time() - began
-    vm.wait_for(lambda: stubborn not in vm.scopes(), 60, f"{stubborn} to be closed")
+    vm.wait_for(lambda: stubborn not in vm.scopes(), patience, f"{stubborn} to be closed")
     stubborn_took = time.time() - began
 
-    if polite_took < vm.manifest["budgets"]["app_seconds"]:
+    if polite_took < vm.pace["app_seconds"]:
         raise Failed(f"{polite} went in {polite_took:.0f}s, before its budget ran out")
     if stubborn_took < polite_took:
         raise Failed("the app that ignored its SIGTERM went first, so the polite half "

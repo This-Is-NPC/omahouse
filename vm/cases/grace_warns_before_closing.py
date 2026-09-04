@@ -24,10 +24,11 @@ def run(vm):
 
     app = "omahouse-polite"
     unit = vm.launch(app)
-    grace = vm.manifest["budgets"]["grace_seconds"]
-    vm.make_profile(budgets={"session": 600, app: 1}, default="allow", rules=[app],
-                    grace=grace, warn_at=(1,))
-    vm.seed_ledger({app: 60 - vm.manifest["budgets"]["app_seconds"]})
+    grace = vm.pace["grace_seconds"]
+    patience = vm.pace["patience_seconds"]
+    vm.make_profile(budgets={"session": 600, app: vm.whole_minutes(vm.pace["app_seconds"])},
+                    default="allow", rules=[app], grace=grace, warn_at=(1,))
+    vm.seed_ledger({app: vm.already_spent(vm.pace["app_seconds"])})
 
     vm.start_daemon()
 
@@ -36,7 +37,7 @@ def run(vm):
     def warned():
         return "left" in vm.julia("makoctl list", check=False)[1]
 
-    vm.wait_for(warned, 20, "the warning to reach the session")
+    vm.wait_for(warned, patience, "the warning to reach the session")
     listed = vm.julia("makoctl list", check=False)[1]
     if unit not in vm.scopes():
         raise Failed(f"{unit} was already closed when the warning arrived:\n{listed}")
@@ -47,13 +48,14 @@ def run(vm):
     def told_the_window():
         return "Time is up" in vm.julia("makoctl list", check=False)[1]
 
-    vm.wait_for(told_the_window, 30, "the grace window to be announced")
+    vm.wait_for(told_the_window, patience, "the grace window to be announced")
     announced = time.time()
     window = vm.julia("makoctl list", check=False)[1]
     if unit not in vm.scopes():
         raise Failed("the app was closed before it was told the window had opened")
 
-    vm.wait_for(lambda: unit not in vm.scopes(), 30, f"{unit} to close after the window")
+    vm.wait_for(lambda: unit not in vm.scopes(), patience,
+                f"{unit} to close after the window")
     waited = time.time() - announced
     if waited < grace:
         raise Failed(f"the app closed {waited:.1f}s after `time is up`, and the window "
