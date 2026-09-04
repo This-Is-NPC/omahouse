@@ -12,7 +12,11 @@ TARGET    = tst_omahouse
 INCLUDEPATH += $$PWD/../src/core
 
 SOURCES += \
-    tst_smoke.cpp
+    main.cpp \
+    tst_smoke.cpp \
+    tst_scopename.cpp \
+    tst_policy.cpp \
+    tst_ledger.cpp
 
 # The suite links the same archive the CLI links, rather than recompiling the
 # core's sources into itself: a test that builds its own copy of the library can

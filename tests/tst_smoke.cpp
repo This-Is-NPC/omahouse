@@ -4,9 +4,9 @@
 
 using namespace omahouse;
 
-// The harness itself, and the one thing there is to assert before the model
-// exists: that the suite is linked against the core archive the CLI links, and
-// that the version in it came from qmake/version.pri.
+// The harness itself, and the one thing that is not about the model: that the
+// suite is linked against the core archive the CLI links, and that the version
+// in it came from qmake/version.pri.
 class SmokeTest : public QObject {
     Q_OBJECT
 
@@ -21,5 +21,10 @@ void SmokeTest::reportsTheVersionFromTheBuild()
     QCOMPARE(version, QStringLiteral(OMAHOUSE_VERSION));
 }
 
-QTEST_MAIN(SmokeTest)
+int runSmokeTests(int argc, char **argv)
+{
+    SmokeTest test;
+    return QTest::qExec(&test, argc, argv);
+}
+
 #include "tst_smoke.moc"

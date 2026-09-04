@@ -1,5 +1,10 @@
-# The model, and nothing else. No window, no argument parsing, and -- once the
-# policy of stage 2 lands here -- no clock and no disk either.
+# The model, and nothing else. No window, no argument parsing, no reading of the
+# machine, no environment, and no clock: `evaluate` is handed `now`, which is
+# what lets a two hour budget be proved in microseconds and what keeps the hard
+# part testable without root. The one thing here that touches the disk is the
+# atomic write, and it is told where to write by its caller.
+#
+# Stage 3 adds Proc beside this, and that is where the cgroup tree is read.
 OMAHOUSE_PROJECT_DIR = $$PWD
 OMAHOUSE_SOURCE_ROOT = $$clean_path($$PWD/../..)
 include($$PWD/../../qmake/layout.pri)
@@ -12,7 +17,17 @@ TEMPLATE  = lib
 TARGET    = omahousecore
 
 HEADERS += \
+    AppScope.h \
+    Json.h \
+    Ledger.h \
+    Policy.h \
+    Profile.h \
     Version.h
 
 SOURCES += \
+    AppScope.cpp \
+    Json.cpp \
+    Ledger.cpp \
+    Policy.cpp \
+    Profile.cpp \
     Version.cpp

@@ -5,8 +5,12 @@ may open, and for how long. The model is a lan house counter — an operator add
 time, the machine counts it, warns before it runs out and ends the session when
 the credit does.
 
-This is a skeleton. It builds, it tests, and it has no domain logic yet: the
-CLI answers `--version` and `--help` and nothing else.
+The model lives in `src/core` and it is pure. `evaluate` is handed the app
+scopes that are running, the profile, the day's ledger and `now`, and gives back
+the new ledger and what to do about it; nothing in it reads the machine or the
+clock, which is how a two hour budget is proved in microseconds. Reading the
+real cgroup tree and acting on a decision arrive with stages 3 and 7 of
+`plan.md` -- for now the CLI answers `--version` and `--help` and nothing else.
 
 ## Build
 
