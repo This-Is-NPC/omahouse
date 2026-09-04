@@ -105,7 +105,12 @@ post_install() {
     # rule switched off, and this package exists to be a rule.
     systemctl enable omahouse.service >/dev/null 2>&1 || true
 
-    cat <<-MESSAGE
+    # Quoted delimiter. The text below names verbs in backticks, and an
+    # unquoted heredoc would run them: measured on a real Omarchy install, where
+    # `pacman -U` executed `omahouse profile enforce` out of its own welcome
+    # message and printed a parse error for the `<user>` it read as a redirect.
+    # Nothing here needs expansion, so nothing here gets it.
+    cat <<-'MESSAGE'
 	>>> omahouse: /etc/omahouse and /var/lib/omahouse are ready, and
 	>>>           omahouse.service is enabled for the next boot.
 	>>>
@@ -142,7 +147,7 @@ post_remove() {
     # to be a way out, not a way to make the lock permanent.
     rm -f /etc/omahouse/blocked
 
-    cat <<-MESSAGE
+    cat <<-'MESSAGE'
 	>>> omahouse: the login block was removed and everybody can log in again.
 	>>>           The profiles in /etc/omahouse and the days already counted in
 	>>>           /var/lib/omahouse were left where they are -- a report is

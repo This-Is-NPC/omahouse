@@ -1,0 +1,72 @@
+# omahouse — built from a working tree, packaged the way pacman would.
+#
+# spec.md §9 puts the real PKGBUILD in `omarchy-pkgs`, built from the tarball of
+# a tag. This one is its local twin: same file list, same `.install`, same
+# `pkgname`, and `source=()` because the tree is already on the machine. It
+# exists so the demo VM gets omahouse through `pacman -U` rather than through a
+# fistful of `install -Dm755` — which means the `.install` scriptlet of
+# `packaging/omahouse.install` runs the way it will run on somebody's laptop:
+# the two directories, the PAM line, and `systemctl enable`.
+#
+# Used by vm/provision.sh, which copies the tree to /home/howl/omahouse-src on
+# the guest and runs `makepkg -si` there.
+pkgname=omahouse
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='House rules: which programs each account may open, and for how long'
+arch=('x86_64')
+url='https://github.com/omarchy/omahouse'
+license=('MIT')
+# `libnotify` is not decoration and it is not implied. `src/sys/Notify.cpp`
+# shells out to `notify-send`, and a stock Omarchy 4.0.2 does not have it: the
+# distribution never installs libnotify and `omarchy-notification-send` calls
+# org.freedesktop.Notifications over busctl on purpose, with a comment saying
+# "never notify-send". Without this line every warning omahouse tries to say on
+# an Omarchy machine is a silent failure, and the first time anybody notices is
+# when a session ends with no warning before it.
+depends=('qt6-base' 'qt6-declarative' 'polkit' 'libnotify')
+makedepends=('qt6-base' 'qt6-declarative' 'qt6-tools' 'gcc' 'make')
+# `vm/omahouse.install` is a symlink to `packaging/omahouse.install`, so the
+# scriptlet pacman runs here is the very file the repo ships and not a copy that
+# could drift from it. makepkg reads it before `prepare()`, which is why it is a
+# symlink in the tree rather than something written at build time.
+install=omahouse.install
+source=()
+
+# The tree, handed in by the provisioner. Not a `source=()` entry, because there
+# is no tarball and no tag here -- this is the working copy under test.
+_tree="${OMAHOUSE_TREE:-$startdir/..}"
+
+prepare() {
+  rm -rf "$srcdir/tree"
+  cp -a "$_tree" "$srcdir/tree"
+  rm -rf "$srcdir/tree/build" "$srcdir/tree/build-tests"
+}
+
+build() {
+  cd "$srcdir/tree"
+  mkdir -p build
+  cd build
+  qmake6 ../omahouse.pro
+  make -j"$(nproc)"
+}
+
+package() {
+  cd "$srcdir/tree"
+
+  install -Dm755 build/bin/omahouse        "$pkgdir/usr/bin/omahouse"
+  install -Dm755 build/bin/omahouse-studio "$pkgdir/usr/bin/omahouse-studio"
+
+  install -Dm644 packaging/omahouse.service \
+    "$pkgdir/usr/lib/systemd/system/omahouse.service"
+  install -Dm644 packaging/org.omarchy.omahouse.policy \
+    "$pkgdir/usr/share/polkit-1/actions/org.omarchy.omahouse.policy"
+  install -Dm644 packaging/omahouse.desktop \
+    "$pkgdir/usr/share/applications/omahouse.desktop"
+  install -Dm644 packaging/omahouse.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/omahouse.svg"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 docs/cli.md "$pkgdir/usr/share/doc/$pkgname/cli.md"
+}
