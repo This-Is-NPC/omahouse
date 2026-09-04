@@ -1,3 +1,5 @@
+*In English: [`guide.md`](guide.md).*
+
 # Guia de uso do omahouse
 
 Este guia leva alguém que acabou de instalar o omahouse até um perfil em pé:
