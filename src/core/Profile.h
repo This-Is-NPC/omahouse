@@ -43,6 +43,49 @@ struct Rule {
     Verdict verdict = Verdict::Allow;
 };
 
+/// The web half of a profile -- docs/design.md §11.
+///
+/// Deliberately the same three parts the app half has: a default verdict, a
+/// list of `(selector, verdict)` rules, and nothing else. A site is named by its
+/// domain instead of by a scope id, and that is the whole of the difference. The
+/// engine that reads it is `chromiumPolicyFor` in WebPolicy.h, and it is as pure
+/// as `Policy::evaluate`.
+///
+/// `incognito` is the one field with no counterpart on the app side, and it is a
+/// three-state on purpose: said `allow`, said `deny`, or not said at all. Not
+/// said means omahouse asks the browser for nothing, which is not the same thing
+/// as asking it to keep incognito switched on -- writing
+/// `IncognitoModeAvailability: 0` would override whatever else on the machine
+/// had turned it off, and omahouse being *more* permissive than it was asked to
+/// be is the one direction this project never takes by default.
+struct Web {
+    /// What happens to a site no rule names. `deny` makes the rules the list of
+    /// what may be opened; `allow` makes them the list of what may not. Absent
+    /// is `allow`, for the reason docs/design.md §4 gives about the app default:
+    /// the half-written profile that does not bite is the recoverable one.
+    Verdict defaultVerdict = Verdict::Allow;
+    bool incognitoStated = false;
+    Verdict incognito = Verdict::Allow;
+    QVector<Rule> rules;
+
+    /// The first rule that names `domain` wins, and with none the default
+    /// decides -- the same order, and for the same reason, as `verdictFor`.
+    Verdict verdictFor(const QString &domain) const;
+
+    /// Whether this profile asks the machine for anything at all.
+    ///
+    /// A `web` with no rules, the default verdict it was born with and nothing
+    /// said about incognito is a profile that has never been given a web rule,
+    /// or one whose last rule was just taken away. Both have to read the same,
+    /// because that is what makes `omahouse web allow` of the last blocked site
+    /// take the policy file off the machine instead of leaving an empty one --
+    /// docs/design.md §11.
+    bool saysAnything() const
+    {
+        return !rules.isEmpty() || defaultVerdict == Verdict::Deny || incognitoStated;
+    }
+};
+
 struct Budget {
     QString id;
     QString match;
@@ -74,6 +117,10 @@ struct Profile {
     int graceSeconds = 0;
     QVector<Rule> rules;
     QVector<Budget> budgets;
+    /// The sites, docs/design.md §11. Written into the file only when it says
+    /// something, so a profile that was never given a web rule looks exactly
+    /// like one whose last web rule was taken back.
+    Web web;
 
     /// The first rule that names `scopeId` wins; with none, the profile default
     /// decides. First and not last because the rules are read in the order the

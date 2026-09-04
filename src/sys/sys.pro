@@ -31,6 +31,7 @@ INCLUDEPATH += $$PWD/../core
 
 HEADERS += \
     Blocked.h \
+    Chromium.h \
     Enforce.h \
     Notify.h \
     Paths.h \
@@ -40,6 +41,7 @@ HEADERS += \
 
 SOURCES += \
     Blocked.cpp \
+    Chromium.cpp \
     Enforce.cpp \
     Notify.cpp \
     Paths.cpp \

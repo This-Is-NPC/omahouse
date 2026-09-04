@@ -23,7 +23,8 @@ HEADERS += \
     Ledger.h \
     Policy.h \
     Profile.h \
-    Version.h
+    Version.h \
+    WebPolicy.h
 
 SOURCES += \
     AppScope.cpp \
@@ -32,4 +33,5 @@ SOURCES += \
     Ledger.cpp \
     Policy.cpp \
     Profile.cpp \
-    Version.cpp
+    Version.cpp \
+    WebPolicy.cpp

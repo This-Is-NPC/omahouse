@@ -9,6 +9,10 @@ namespace {
 
 const char *const kSystemConfigDir = "/etc/omahouse";
 const char *const kSystemStateDir = "/var/lib/omahouse";
+// A compile-time constant on the browser's side too -- `policy_paths.cc`, which
+// docs/proposal-browser.md §3.1 quotes -- so there is nothing to look up and
+// nothing that could differ per account.
+const char *const kSystemChromiumPolicyDir = "/etc/chromium/policies/managed";
 
 QString fromEnvironmentOr(const char *variable, const char *fallback)
 {
@@ -48,6 +52,21 @@ bool configDirIsTheSystems()
 bool stateDirIsTheSystems()
 {
     return stateDir() == QString::fromLatin1(kSystemStateDir);
+}
+
+QString chromiumPolicyDir()
+{
+    return fromEnvironmentOr("OMAHOUSE_CHROMIUM_POLICY_DIR", kSystemChromiumPolicyDir);
+}
+
+bool chromiumPolicyDirIsTheSystems()
+{
+    return chromiumPolicyDir() == QString::fromLatin1(kSystemChromiumPolicyDir);
+}
+
+QString chromiumPolicyFile()
+{
+    return chromiumPolicyDir() + QStringLiteral("/omahouse.json");
 }
 
 QString profilesFile()

@@ -37,6 +37,26 @@ QString profilesFile();
 /// module of ours. So this is the one file omahouse writes that it did not
 /// choose the format of.
 QString blockedFile();
+/// `/etc/chromium/policies/managed`, or `$OMAHOUSE_CHROMIUM_POLICY_DIR`.
+///
+/// A third root, and it gets a variable for the same reason the other two do:
+/// the end to end suite has to be able to prove that the file is written, with
+/// the right bytes in it, without a Chromium on the machine and without root --
+/// and, much more to the point, without changing the browser policy of whoever
+/// is running the suite. This is the one root omahouse writes that belongs to
+/// another program.
+QString chromiumPolicyDir();
+/// `<chromiumPolicyDir>/omahouse.json`.
+///
+/// Its own file, and never a shared one. Omarchy's `browser-policy.sh` owns
+/// `policies.json` in the same directory and purges what it does not recognise;
+/// Chromium merges every file it finds there. So omahouse writes a file with its
+/// own name, which is also what makes removing the package a matter of removing
+/// one path rather than editing somebody else's document.
+QString chromiumPolicyFile();
+/// Whether that root is still the machine's own.
+bool chromiumPolicyDirIsTheSystems();
+
 /// `<stateDir>/<user>` -- one directory per fiscalised account.
 QString userStateDir(const QString &user);
 /// `<stateDir>/<user>/<AAAA-MM-DD>.json` -- one ledger per day.

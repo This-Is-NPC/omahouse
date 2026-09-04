@@ -1,3 +1,4 @@
+#include "Chromium.h"
 #include "Duration.h"
 #include "Ledger.h"
 #include "Notify.h"
@@ -7,6 +8,7 @@
 #include "Users.h"
 #include "Version.h"
 #include "Watch.h"
+#include "WebPolicy.h"
 
 #include <QCoreApplication>
 #include <QDate>
@@ -85,6 +87,13 @@ struct Options {
     bool deny = false;
     bool once = false;
     bool dryRun = false;
+    /// `profile default` says `--allow | --deny` about programs. The web half
+    /// says the same thing about sites, and it says it in the words the studio
+    /// would use rather than in verdicts -- docs/design.md §8 -- because
+    /// "everything but the list" and "only the list" is how somebody thinks
+    /// about a browser.
+    bool allButListed = false;
+    bool onlyListed = false;
     QStringList given;
 };
 
@@ -158,6 +167,8 @@ bool parseOptions(const QStringList &args, Options *options, QStringList *positi
         {"--on", &Options::on},                  {"--off", &Options::off},
         {"--allow", &Options::allow},            {"--deny", &Options::deny},
         {"--once", &Options::once},              {"--dry-run", &Options::dryRun},
+        {"--all-but-listed", &Options::allButListed},
+        {"--only-listed", &Options::onlyListed},
     };
 
     for (int i = 0; i < args.size(); ++i) {
@@ -433,6 +444,91 @@ QJsonArray balancesToJson(const QVector<Balance> &balances)
     return array;
 }
 
+// -- the sites ---------------------------------------------------------------
+
+/// The reach of a browser policy, in three lines, written once.
+///
+/// Every place that owes this sentence prints these lines and does not compose
+/// its own, so the CLI cannot come to say it two different ways. It is said once
+/// per run and never per rule: docs/design.md §11 records that the trade-off was
+/// weighed and taken, and a tool that re-argues a settled decision every time it
+/// is used is a tool people stop reading.
+QStringList theReach()
+{
+    return {
+        QStringLiteral("the browser policy is one file for the whole machine. A site blocked "
+                       "here is"),
+        QStringLiteral("blocked for everyone who opens Chromium on it, including you. Chromium "
+                       "has no"),
+        QStringLiteral("per-account policy on Linux (docs/proposal-browser.md §3.1), and that "
+                       "was accepted."),
+    };
+}
+
+/// The web half of one profile, in the shape the app half is printed in.
+///
+/// Printed by `profile show` and by `status`, so the two cannot come to describe
+/// one profile differently. A profile with nothing to say about the web prints
+/// one line saying so, and not an empty table -- the same choice `No budgets`
+/// makes above.
+void printWebRules(const Profile &profile, const QVector<Profile> &profiles)
+{
+    out() << "\nSITES\n";
+    if (!profile.web.saysAnything()) {
+        out() << QStringLiteral("  %1 has no web rules: every site opens, and there is no "
+                                "browser policy on this machine because of them.\n")
+                     .arg(profile.user);
+        return;
+    }
+
+    out() << QStringLiteral("  %1\n")
+                 .arg(profile.web.defaultVerdict == Verdict::Deny
+                          ? QStringLiteral("only the listed sites open")
+                          : QStringLiteral("every site opens except the blocked ones"));
+    if (profile.web.incognitoStated) {
+        out() << QStringLiteral("  incognito: %1\n")
+                     .arg(profile.web.incognito == Verdict::Deny
+                              ? QStringLiteral("does not open")
+                              : QStringLiteral("opens — it hides which site, not the time"));
+    }
+    if (!profile.web.rules.isEmpty()) {
+        QVector<QStringList> rows;
+        for (const Rule &rule : profile.web.rules) {
+            rows.append({rule.verdict == Verdict::Deny ? QStringLiteral("block")
+                                                       : QStringLiteral("allow"),
+                         rule.match});
+        }
+        printTable({QStringLiteral("VERDICT"), QStringLiteral("SITE")}, rows, {false, false});
+    }
+
+    // What the machine really does, which is not always what this profile asked
+    // for -- WebPolicy.h, the most restrictive wins. Printed from the composed
+    // policy rather than from this profile, because the composed one is the
+    // thing the browser reads.
+    const ChromiumPolicy policy = chromiumPolicyFor(profiles);
+    if (!policy.needed()) {
+        out() << QStringLiteral("  no %1 on this machine: nothing above asks for one.\n")
+                     .arg(paths::chromiumPolicyFile());
+        return;
+    }
+    out() << QStringLiteral("  %1, from every profile at once:\n").arg(paths::chromiumPolicyFile());
+    if (!policy.blocklist.isEmpty()) {
+        out() << QStringLiteral("      blocked  %1\n")
+                     .arg(policy.blocklist.join(QStringLiteral(", ")));
+    }
+    if (!policy.allowlist.isEmpty()) {
+        out() << QStringLiteral("      allowed  %1%2\n")
+                     .arg(policy.allowlist.join(QStringLiteral(", ")),
+                          policy.blocklist.isEmpty()
+                              ? QStringLiteral("  (which blocks nothing on its own)")
+                              : QString());
+    }
+    if (policy.incognitoDenied)
+        out() << "      incognito does not open\n";
+    for (const QString &line : theReach())
+        out() << QStringLiteral("  %1\n").arg(line);
+}
+
 // -- status ------------------------------------------------------------------
 
 bool byProcessesThenName(const AppScope &a, const AppScope &b)
@@ -680,6 +776,8 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
         balances = balancesOf(*profile, ledger);
     }
 
+    const ChromiumPolicy webPolicy = chromiumPolicyFor(profiles.all);
+
     if (g.json) {
         QJsonArray scopesJson;
         for (const AppScope &scope : named) {
@@ -739,6 +837,17 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
              QJsonObject {{QStringLiteral("processes"), sessionProcesses},
                           {QStringLiteral("units"), sessionJson}}},
             {QStringLiteral("budgets"), balancesToJson(balances)},
+            // The composed policy, and not this profile's half of it: what a
+            // script wants to know is what the browser on this machine will do,
+            // and that is every profile's rules at once -- docs/design.md §11.
+            // The profile's own half is already under `profile`.
+            {QStringLiteral("webPolicy"),
+             QJsonObject {
+                 {QStringLiteral("path"), paths::chromiumPolicyFile()},
+                 {QStringLiteral("wholeMachine"), true},
+                 {QStringLiteral("contents"),
+                  webPolicy.needed() ? QJsonValue(webPolicy.toJson()) : QJsonValue()},
+             }},
         };
         if (profile)
             document.insert(QStringLiteral("ledgerWritten"), !ledgerMissing);
@@ -809,6 +918,9 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
             printBalances(balances);
         }
     }
+
+    if (profile)
+        printWebRules(*profile, profiles.all);
 
     printWhatIsInside(whatIsInside(named));
     printCountedNotNamed(unnamed, profile);
@@ -1113,6 +1225,8 @@ int cmdProfileShow(const Globals &g, const QStringList &positionals)
                     QStringLiteral("WHEN OUT")},
                    rows, {false, false, true, false});
     }
+
+    printWebRules(*profile, profiles.all);
     return kOk;
 }
 
@@ -1160,17 +1274,89 @@ bool mayWrite(const QString &verb, const QString &path, bool theSystems, const G
     return false;
 }
 
+/// Whether this run may touch the browser's managed policy directory.
+///
+/// The same shape of question `Enforce.h` asks before it signals a cgroup or
+/// ends a session, and it is here for a stronger reason than either: this is the
+/// developer's own machine and the developer's own Chromium. A run pointed at a
+/// configuration of its own -- the end to end suite, somebody trying a profile
+/// out in $TMPDIR -- has no business rewriting the browser policy of whoever
+/// started it, and a `$OMAHOUSE_CHROMIUM_POLICY_DIR` of its own is how such a
+/// run proves the file instead.
+///
+/// So: the machine's own policy directory is written only by a run that is also
+/// managing the machine's own /etc/omahouse. Anything else writes where it was
+/// pointed, and says nothing.
+bool mayTouchTheBrowserPolicy()
+{
+    return !paths::chromiumPolicyDirIsTheSystems() || paths::configDirIsTheSystems();
+}
+
+/// Makes `/etc/chromium/policies/managed/omahouse.json` say what the profiles
+/// say -- docs/design.md §11 -- and takes it away when they say nothing.
+///
+/// Called from `saveProfiles` and therefore from every verb that writes a
+/// profile, which is the whole of how this file stays true. Nothing has to
+/// remember: `omahouse web allow` of the last blocked site removes the file,
+/// `profile remove` of the last profile with web rules removes it, and
+/// `profile enforce --off` does not, because a disabled *profile* is the switch
+/// for that and `enabled` is what `chromiumPolicyFor` reads.
+///
+/// A failure here is said out loud and does not undo the profile that was just
+/// written. The profile is the record of what the operator decided; the policy
+/// file is a consequence of it, and the next successful write of any verb
+/// reconciles it. Rolling the decision back because a directory was not
+/// writable would lose the decision as well.
+void refreshWebPolicy(const QString &verb, const QVector<Profile> &profiles)
+{
+    const ChromiumPolicy policy = chromiumPolicyFor(profiles);
+    const QString path = paths::chromiumPolicyFile();
+    // An unchanged decision is not written again: this file is read by every
+    // Chromium that starts, and rewriting it for a verb that had nothing to do
+    // with the web would be a modification time that means nothing. Asked first,
+    // and not after the refusal below, so that `omahouse allow julia code` in a
+    // tree of its own is silent instead of explaining a browser it was never
+    // going to touch.
+    if (chromiumPolicyIsAlready(path, policy))
+        return;
+
+    if (!mayTouchTheBrowserPolicy()) {
+        note(QStringLiteral("omahouse: %1 is this machine's own, and this run's configuration "
+                            "is %2.")
+                 .arg(paths::chromiumPolicyDir(), paths::configDir()));
+        note(QStringLiteral("          The browser policy was left alone. Point "
+                            "$OMAHOUSE_CHROMIUM_POLICY_DIR somewhere of its own to write it."));
+        return;
+    }
+
+    QString error;
+    // Not emptied -- removed. The machine has to end up where it was before the
+    // first web rule was written, and an empty managed policy left behind is a
+    // machine that still looks managed.
+    const bool done = policy.needed() ? writeChromiumPolicy(path, policy, &error)
+                                      : removeChromiumPolicy(path, &error);
+    if (done)
+        return;
+    fail(QStringLiteral("%1: the profile was saved, and %2").arg(verb, error));
+    if (!runningAsRoot()) {
+        fail(QStringLiteral("%1  that directory belongs to root; try pkexec")
+                 .arg(QString(verb.size(), QLatin1Char(' '))));
+    }
+}
+
 bool saveProfiles(const QString &verb, const QVector<Profile> &profiles)
 {
     QString error;
-    if (writeProfiles(paths::profilesFile(), profiles, &error))
-        return true;
-    fail(QStringLiteral("%1: %2").arg(verb, error));
-    if (!runningAsRoot()) {
-        fail(QStringLiteral("%1  that file belongs to root; try pkexec")
-                 .arg(QString(verb.size(), QLatin1Char(' '))));
+    if (!writeProfiles(paths::profilesFile(), profiles, &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        if (!runningAsRoot()) {
+            fail(QStringLiteral("%1  that file belongs to root; try pkexec")
+                     .arg(QString(verb.size(), QLatin1Char(' '))));
+        }
+        return false;
     }
-    return false;
+    refreshWebPolicy(verb, profiles);
+    return true;
 }
 
 /// The profile of `user` to change, or a refusal that says how to make one.
@@ -1626,6 +1812,293 @@ int cmdRule(const Globals &g, const QString &verb, const QStringList &positional
                    .arg(user, id);
     }
     return wrote(g, *profile, line);
+}
+
+// -- web ---------------------------------------------------------------------
+//
+// docs/design.md §11. The same three parts the app half has -- a default
+// verdict, a list of rules, and the verbs to change them -- with a domain where
+// a scope id would be, and one extra switch that has no counterpart: incognito.
+//
+// The verbs are `block` and `allow` rather than `deny` and `allow` on purpose.
+// `omahouse deny julia chromium` and `omahouse web block julia youtube.com` are
+// different enough acts that they should not be one word: the first takes a
+// program off somebody's list, the second changes what every browser on the
+// machine will open.
+
+/// The lines of `theReach`, on stderr, under the program's name. Once per run,
+/// after the write, so that `--json` stays one document on stdout and a person
+/// still reads the sentence.
+void sayTheReach()
+{
+    const QStringList lines = theReach();
+    for (int i = 0; i < lines.size(); ++i) {
+        note(QStringLiteral("%1%2")
+                 .arg(i == 0 ? QStringLiteral("omahouse: ") : QStringLiteral("          "),
+                      lines.at(i)));
+    }
+}
+
+/// A domain as it will be written into the file, or a refusal saying what was
+/// wanted.
+///
+/// Lower cased, because a hostname is not case sensitive and `YouTube.com` and
+/// `youtube.com` are one site -- the opposite of the app half, where
+/// `org.freedesktop.Platform` and `org.freedesktop.platform` are two different
+/// flatpaks. Everything else is refused rather than repaired: a URL, a path, a
+/// scheme. Chromium's filter format would accept most of them and mean something
+/// slightly different by each, and an operator who typed a whole URL and got a
+/// rule about its host would not find out until the day it did not fire.
+bool domainFromWhatWasTyped(const QString &verb, const QString &typed, QString *out)
+{
+    const QString domain = typed.trimmed().toLower();
+    if (domain.isEmpty()) {
+        fail(QStringLiteral("%1: which site? (try omahouse --help)").arg(verb));
+        return false;
+    }
+    if (domain == QLatin1String("*")) {
+        fail(QStringLiteral("%1: `*` is every site, and it is spelled as a mode rather than as "
+                            "a rule.")
+                 .arg(verb));
+        fail(QStringLiteral("%1  omahouse web <user> --only-listed")
+                 .arg(QString(verb.size(), QLatin1Char(' '))));
+        return false;
+    }
+    if (domain.contains(QLatin1String("://")) || domain.contains(QLatin1Char('/'))
+        || domain.contains(QLatin1Char(' '))) {
+        fail(QStringLiteral("%1: '%2' is not a domain. Write the site's name on its own, like "
+                            "youtube.com,")
+                 .arg(verb, typed));
+        fail(QStringLiteral("%1  and not a whole address. A bare domain covers its subdomains "
+                            "too.")
+                 .arg(QString(verb.size(), QLatin1Char(' '))));
+        return false;
+    }
+    if (!domain.contains(QLatin1Char('.'))) {
+        fail(QStringLiteral("%1: '%2' has no dot in it, so it is not a domain. Did you mean "
+                            "%2.com?")
+                 .arg(verb, domain));
+        return false;
+    }
+    *out = domain;
+    return true;
+}
+
+/// The web rule about `domain`, made at the end of the list if there is none.
+/// Changed in place for the reason `ruleFor` is: the first rule that names a
+/// site wins, so a second line about it would be a line that never fires.
+Rule *webRuleFor(Profile *profile, const QString &domain)
+{
+    for (Rule &rule : profile->web.rules) {
+        if (rule.match == domain)
+            return &rule;
+    }
+    profile->web.rules.append(Rule {domain, Verdict::Allow});
+    return &profile->web.rules.last();
+}
+
+/// What the machine will really do about `domain` once every profile has had its
+/// say, printed when it is not what this one profile asked for.
+///
+/// This is the visible half of the composition rule of `WebPolicy.h`: the most
+/// restrictive wins, so an `allow` here can be overruled by a `block` elsewhere.
+/// Being overruled silently is the one thing that would make the rule dishonest,
+/// so the verb that was overruled says who by.
+void warnAboutTheOtherProfiles(const QVector<Profile> &profiles, const QString &user,
+                               const QString &domain, Verdict asked)
+{
+    QStringList disagreeing;
+    for (const Profile &profile : profiles) {
+        if (profile.user == user || !profile.enabled || !profile.web.saysAnything())
+            continue;
+        if (profile.web.verdictFor(domain) != asked)
+            disagreeing.append(profile.user);
+    }
+    if (disagreeing.isEmpty())
+        return;
+    note(QStringLiteral("omahouse: %1 %2 about %3, and the most restrictive of the two is what "
+                        "the machine")
+             .arg(disagreeing.join(QStringLiteral(", ")),
+                  disagreeing.size() == 1 ? QStringLiteral("disagrees")
+                                          : QStringLiteral("disagree"),
+                  domain));
+    note(QStringLiteral("          does — there is one policy file, and no precedence between "
+                        "profiles."));
+}
+
+int cmdWebRule(const Globals &g, const QString &verb, const QStringList &positionals,
+               Verdict verdict)
+{
+    if (positionals.size() != 2) {
+        fail(QStringLiteral("%1: which user, and which site? (try omahouse --help)").arg(verb));
+        return kUsage;
+    }
+    const QString user = positionals.at(0);
+    QString domain;
+    if (!domainFromWhatWasTyped(verb, positionals.at(1), &domain))
+        return kUsage;
+
+    if (!mayWrite(verb, paths::profilesFile(), paths::configDirIsTheSystems(), g))
+        return kUsage;
+
+    int status = kOk;
+    Profiles profiles;
+    if (!loadProfiles(&profiles, &status))
+        return status;
+    Profile *profile = profileToChange(verb, &profiles, user, &status);
+    if (!profile)
+        return status;
+
+    webRuleFor(profile, domain)->verdict = verdict;
+    if (!saveProfiles(verb, profiles.all))
+        return kUsage;
+
+    warnAboutTheOtherProfiles(profiles.all, user, domain, verdict);
+    sayTheReach();
+
+    QString line;
+    if (verdict == Verdict::Deny) {
+        line = QStringLiteral("%1: %2 is blocked, and so are its subdomains.").arg(user, domain);
+    } else if (chromiumPolicyFor(profiles.all).blocklist.isEmpty()) {
+        // The trap `.temp/spike-extension.md` §7 measured one policy over: an
+        // allowlist with no blocklist beside it lets everything through,
+        // including the thing it names. Saying "allowed" and stopping would read
+        // as a rule that is doing something.
+        line = QStringLiteral("%1: %2 is on the allowed list — which blocks nothing on its own, "
+                              "because nothing is blocked yet.")
+                   .arg(user, domain);
+    } else {
+        line = QStringLiteral("%1: %2 is allowed through what is blocked.").arg(user, domain);
+    }
+    return wrote(g, *profile, line);
+}
+
+int cmdWebDefault(const Globals &g, const QStringList &positionals, const Options &options)
+{
+    const QString verb = QStringLiteral("web");
+    if (positionals.size() != 1) {
+        fail(QStringLiteral("web: block, allow, incognito, or a user and "
+                            "--all-but-listed | --only-listed? (try omahouse --help)"));
+        return kUsage;
+    }
+    if (options.allButListed == options.onlyListed) {
+        fail(QStringLiteral("web: --all-but-listed or --only-listed, and one of them"));
+        return kUsage;
+    }
+    const QString user = positionals.first();
+    if (!mayWrite(verb, paths::profilesFile(), paths::configDirIsTheSystems(), g))
+        return kUsage;
+
+    int status = kOk;
+    Profiles profiles;
+    if (!loadProfiles(&profiles, &status))
+        return status;
+    Profile *profile = profileToChange(verb, &profiles, user, &status);
+    if (!profile)
+        return status;
+
+    profile->web.defaultVerdict = options.onlyListed ? Verdict::Deny : Verdict::Allow;
+    if (!saveProfiles(verb, profiles.all))
+        return kUsage;
+
+    int allowed = 0;
+    for (const Rule &rule : profile->web.rules) {
+        if (rule.verdict == Verdict::Allow)
+            ++allowed;
+    }
+    sayTheReach();
+    return wrote(g, *profile,
+                 options.onlyListed
+                     ? QStringLiteral("%1: only the listed sites open. %2 site%3 on the list.")
+                           .arg(user)
+                           .arg(allowed)
+                           .arg(allowed == 1 ? QString() : QStringLiteral("s"))
+                     : QStringLiteral("%1: every site opens except the blocked ones. %2 rule%3.")
+                           .arg(user)
+                           .arg(profile->web.rules.size())
+                           .arg(profile->web.rules.size() == 1 ? QString() : QStringLiteral("s")));
+}
+
+int cmdWebIncognito(const Globals &g, const QStringList &positionals, const Options &options)
+{
+    const QString verb = QStringLiteral("web incognito");
+    if (positionals.size() != 1) {
+        fail(QStringLiteral("%1: which user? (try omahouse --help)").arg(verb));
+        return kUsage;
+    }
+    if (options.allow == options.deny) {
+        fail(QStringLiteral("%1: --allow or --deny, and one of them").arg(verb));
+        return kUsage;
+    }
+    const QString user = positionals.first();
+    if (!mayWrite(verb, paths::profilesFile(), paths::configDirIsTheSystems(), g))
+        return kUsage;
+
+    int status = kOk;
+    Profiles profiles;
+    if (!loadProfiles(&profiles, &status))
+        return status;
+    Profile *profile = profileToChange(verb, &profiles, user, &status);
+    if (!profile)
+        return status;
+
+    profile->web.incognitoStated = true;
+    profile->web.incognito = options.deny ? Verdict::Deny : Verdict::Allow;
+    if (!saveProfiles(verb, profiles.all))
+        return kUsage;
+
+    if (options.deny)
+        sayTheReach();
+
+    // An incognito window is not extra screen time -- docs/proposal-browser.md
+    // §4.3. It is the same browser in the same scope under the same session
+    // budget, so what it buys is anonymity about which site and not a minute of
+    // anybody's day. Said here because it is the reason `--allow` is a
+    // defensible answer and not a hole somebody left open.
+    return wrote(g, *profile,
+                 options.deny
+                     ? QStringLiteral("%1: incognito windows do not open — for every account on "
+                                      "this machine.")
+                           .arg(user)
+                     : QStringLiteral("%1: incognito windows open. They hide which site, not the "
+                                      "time: the session budget counts them either way.")
+                           .arg(user));
+}
+
+int cmdWeb(const Globals &g, const QStringList &positionals, const Options &options)
+{
+    const QString subcommand = positionals.value(0);
+    if (subcommand.isEmpty()) {
+        fail(QStringLiteral("web: block, allow, incognito, or a user and "
+                            "--all-but-listed | --only-listed? (try omahouse --help)"));
+        return kUsage;
+    }
+    if (subcommand == QLatin1String("block")) {
+        if (!onlyTheseOptions(options, {}, QStringLiteral("web block")))
+            return kUsage;
+        return cmdWebRule(g, QStringLiteral("web block"), positionals.mid(1), Verdict::Deny);
+    }
+    if (subcommand == QLatin1String("allow")) {
+        if (!onlyTheseOptions(options, {}, QStringLiteral("web allow")))
+            return kUsage;
+        return cmdWebRule(g, QStringLiteral("web allow"), positionals.mid(1), Verdict::Allow);
+    }
+    if (subcommand == QLatin1String("incognito")) {
+        if (!onlyTheseOptions(options, {QStringLiteral("--allow"), QStringLiteral("--deny")},
+                              QStringLiteral("web incognito")))
+            return kUsage;
+        return cmdWebIncognito(g, positionals.mid(1), options);
+    }
+    // Not a subcommand, so it is a user -- `omahouse web julia --only-listed`.
+    // The three words above are reserved by being tried first, which is the
+    // whole of the ambiguity: an account really named `block` cannot be reached
+    // this way, and `profile default` is the shape that already had this
+    // problem and solved it by being one word longer.
+    if (!onlyTheseOptions(options,
+                          {QStringLiteral("--all-but-listed"), QStringLiteral("--only-listed")},
+                          QStringLiteral("web")))
+        return kUsage;
+    return cmdWebDefault(g, positionals, options);
 }
 
 int cmdLimit(const Globals &g, const QStringList &positionals, const Options &options)
@@ -2275,6 +2748,10 @@ Writing, and root needed — the studio gets there by pkexec:
   deny  <user> <app>                 do not let it run
   limit <user> --session 2h | --budget minecraft=45m
   grant <user> --session 10m | --budget minecraft=15m
+  web block <user> <domain>          do not let that site open
+  web allow <user> <domain>          let it open through what is blocked
+  web <user> --all-but-listed | --only-listed
+  web incognito <user> --allow | --deny
 
 The loop, which is the only verb that keeps running:
   watch [--interval 2] [--once] [--dry-run]
@@ -2289,6 +2766,12 @@ something other than what its name says.
 A length of time is 45m, 2h, 1h30m, or a bare 90 for minutes. Anything else is
 refused rather than taken for minutes.
 
+A site is named by its bare domain — `youtube.com` — and that covers its
+subdomains. The web rules of every profile are composed into one Chromium
+managed policy, so they hold for every account on this machine and not only for
+the one they were written for. The most restrictive profile wins, and there is
+no precedence between them. Taking the last web rule away takes the file away.
+
 Globals:
   --json, -j               one JSON document on stdout   (OMAHOUSE_JSON)
   --version, -V
@@ -2297,6 +2780,8 @@ Globals:
 Files:
   /etc/omahouse/profiles.json          who is under rules   (OMAHOUSE_CONFIG_DIR)
   /etc/omahouse/blocked                who may not log in   (OMAHOUSE_CONFIG_DIR)
+  /etc/chromium/policies/managed/omahouse.json
+                                       which sites open (OMAHOUSE_CHROMIUM_POLICY_DIR)
   /var/lib/omahouse/<user>/<date>.json the day's ledger     (OMAHOUSE_STATE_DIR)
   /sys/fs/cgroup                       the scopes           (OMAHOUSE_CGROUP_ROOT)
   /proc                                what a scope runs    (OMAHOUSE_PROC_ROOT)
@@ -2352,6 +2837,8 @@ int dispatch(const Globals &g, const QStringList &args)
             return kUsage;
         return cmdRule(g, verb, positionals, options, Verdict::Deny);
     }
+    if (verb == QLatin1String("web"))
+        return cmdWeb(g, positionals, options);
     if (verb == QLatin1String("limit")) {
         if (!onlyTheseOptions(options, {QStringLiteral("--session"), QStringLiteral("--budget")},
                               verb))

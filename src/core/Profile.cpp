@@ -50,6 +50,22 @@ bool wantsBool(const QJsonObject &object, const QString &key, const QString &wha
     return true;
 }
 
+// The rules of the app half and the rules of the web half are the same pair
+// written the same way, so they are read and written by one routine. Two copies
+// of this would be two chances for `verdict` to be spelled differently in the
+// two halves of one file.
+QJsonArray rulesToJson(const QVector<Rule> &rules)
+{
+    QJsonArray array;
+    for (const Rule &rule : rules) {
+        array.append(QJsonObject{
+            {QStringLiteral("match"), rule.match},
+            {QStringLiteral("verdict"), verdictName(rule.verdict)},
+        });
+    }
+    return array;
+}
+
 bool wantsInt(const QJsonObject &object, const QString &key, const QString &what, int *value,
               QString *error)
 {
@@ -62,6 +78,64 @@ bool wantsInt(const QJsonObject &object, const QString &key, const QString &what
         return false;
     }
     *value = found.toInt();
+    return true;
+}
+
+/// The `rules` list of either half of a profile. `what` names the half in the
+/// message, because "has a rule with an unknown verdict" is only useful to
+/// somebody who is told which list said it.
+bool rulesFromJson(const QJsonObject &object, const QString &named, const QString &what,
+                   QVector<Rule> *out, QString *error)
+{
+    const QJsonValue value = object.value(QStringLiteral("rules"));
+    if (!value.isUndefined() && !value.isNull() && !value.isArray()) {
+        if (error)
+            *error = QStringLiteral("%1 has a non-list %2").arg(named, what);
+        return false;
+    }
+    for (const QJsonValue &entry : value.toArray()) {
+        if (!entry.isObject()) {
+            if (error)
+                *error = QStringLiteral("%1 has a %2 entry that is not an object").arg(named, what);
+            return false;
+        }
+        const QJsonObject fields = entry.toObject();
+        Rule rule;
+        if (!wantsString(fields, QStringLiteral("match"), named, &rule.match, true, error))
+            return false;
+        QString verdictText;
+        if (!wantsString(fields, QStringLiteral("verdict"), named, &verdictText, true, error))
+            return false;
+        if (!verdictFromName(verdictText, &rule.verdict)) {
+            if (error) {
+                *error = QStringLiteral("%1 has a %2 entry with an unknown verdict %3")
+                             .arg(named, what, verdictText);
+            }
+            return false;
+        }
+        out->append(rule);
+    }
+    return true;
+}
+
+/// Reads a verdict field that is allowed to be missing. `stated` is what tells
+/// "said allow" from "said nothing", which for `incognito` are two different
+/// instructions -- see the note on `Web` in the header.
+bool wantsVerdict(const QJsonObject &object, const QString &key, const QString &named,
+                  Verdict *value, bool *stated, QString *error)
+{
+    QString text;
+    if (!wantsString(object, key, named, &text, false, error))
+        return false;
+    if (text.isEmpty())
+        return true;
+    if (!verdictFromName(text, value)) {
+        if (error)
+            *error = QStringLiteral("%1 has an unknown %2 verdict %3").arg(named, key, text);
+        return false;
+    }
+    if (stated)
+        *stated = true;
     return true;
 }
 
@@ -126,6 +200,15 @@ bool selectorMatches(const QString &selector, const QString &scopeId)
     return !scopeId.isEmpty() && selector == scopeId;
 }
 
+Verdict Web::verdictFor(const QString &domain) const
+{
+    for (const Rule &rule : rules) {
+        if (selectorMatches(rule.match, domain))
+            return rule.verdict;
+    }
+    return defaultVerdict;
+}
+
 Verdict Profile::verdictFor(const QString &scopeId) const
 {
     for (const Rule &rule : rules) {
@@ -141,13 +224,7 @@ QJsonObject Profile::toJson() const
     for (int mark : warnAt)
         warnArray.append(mark);
 
-    QJsonArray ruleArray;
-    for (const Rule &rule : rules) {
-        ruleArray.append(QJsonObject{
-            {QStringLiteral("match"), rule.match},
-            {QStringLiteral("verdict"), verdictName(rule.verdict)},
-        });
-    }
+    const QJsonArray ruleArray = rulesToJson(rules);
 
     QJsonArray budgetArray;
     for (const Budget &budget : budgets) {
@@ -164,7 +241,7 @@ QJsonObject Profile::toJson() const
         budgetArray.append(object);
     }
 
-    return QJsonObject{
+    QJsonObject object{
         {QStringLiteral("user"), user},
         {QStringLiteral("displayName"), displayName},
         {QStringLiteral("enabled"), enabled},
@@ -175,6 +252,21 @@ QJsonObject Profile::toJson() const
         {QStringLiteral("rules"), ruleArray},
         {QStringLiteral("budgets"), budgetArray},
     };
+
+    // Written only when it says something. A `"web": {}` on every profile ever
+    // created would make "this account has no web rules" and "this account had
+    // its web rules taken away" two different-looking files that mean the same
+    // thing, and docs/design.md §11 turns on those two being one state.
+    if (web.saysAnything()) {
+        QJsonObject webObject{
+            {QStringLiteral("default"), verdictName(web.defaultVerdict)},
+            {QStringLiteral("rules"), rulesToJson(web.rules)},
+        };
+        if (web.incognitoStated)
+            webObject.insert(QStringLiteral("incognito"), verdictName(web.incognito));
+        object.insert(QStringLiteral("web"), webObject);
+    }
+    return object;
 }
 
 bool Profile::fromJson(const QJsonObject &object, Profile *out, QString *error)
@@ -229,33 +321,30 @@ bool Profile::fromJson(const QJsonObject &object, Profile *out, QString *error)
         profile.warnAt.append(value.toInt());
     }
 
-    const QJsonValue rulesValue = object.value(QStringLiteral("rules"));
-    if (!rulesValue.isUndefined() && !rulesValue.isArray()) {
-        if (error)
-            *error = QStringLiteral("%1 has a non-list rules").arg(named);
+    if (!rulesFromJson(object, named, QStringLiteral("rules"), &profile.rules, error))
         return false;
-    }
-    for (const QJsonValue &value : rulesValue.toArray()) {
-        if (!value.isObject()) {
+
+    // The web half, docs/design.md §11. Absent is the ordinary state of every
+    // profile ever written before this existed, so it is not a failure and not
+    // a reason to guess: the profile simply asks the browser for nothing.
+    const QJsonValue webValue = object.value(QStringLiteral("web"));
+    if (!webValue.isUndefined() && !webValue.isNull()) {
+        if (!webValue.isObject()) {
             if (error)
-                *error = QStringLiteral("%1 has a rule that is not an object").arg(named);
+                *error = QStringLiteral("%1 has a web that is not an object").arg(named);
             return false;
         }
-        const QJsonObject entry = value.toObject();
-        Rule rule;
-        if (!wantsString(entry, QStringLiteral("match"), named, &rule.match, true, error))
+        const QJsonObject webObject = webValue.toObject();
+        const QString webNamed = QStringLiteral("the web rules of %1").arg(profile.user);
+        if (!wantsVerdict(webObject, QStringLiteral("default"), webNamed,
+                          &profile.web.defaultVerdict, nullptr, error))
             return false;
-        QString verdictText;
-        if (!wantsString(entry, QStringLiteral("verdict"), named, &verdictText, true, error))
+        if (!wantsVerdict(webObject, QStringLiteral("incognito"), webNamed,
+                          &profile.web.incognito, &profile.web.incognitoStated, error))
             return false;
-        if (!verdictFromName(verdictText, &rule.verdict)) {
-            if (error) {
-                *error = QStringLiteral("%1 has a rule with an unknown verdict %2")
-                             .arg(named, verdictText);
-            }
+        if (!rulesFromJson(webObject, webNamed, QStringLiteral("rules"), &profile.web.rules,
+                           error))
             return false;
-        }
-        profile.rules.append(rule);
     }
 
     const QJsonValue budgetsValue = object.value(QStringLiteral("budgets"));

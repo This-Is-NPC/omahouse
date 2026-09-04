@@ -8,6 +8,14 @@
 # Everything here is idempotent. It runs again on every upgrade, and a machine
 # that already has the line has to come out of it unchanged -- including one
 # where somebody moved the line by hand, which is theirs to have done.
+#
+# And removal is not an afterthought here, it is half the job. omahouse puts four
+# things on a machine that a file list cannot take back off it: the PAM line, the
+# `blocked` list that line reads, the browser policy of §11, and an enabled
+# service. Every one of them is a restriction, and a restriction that outlives
+# the program that made it is worse than one that never existed -- there is no
+# longer anything on the machine that knows how to lift it. `post_remove` below
+# takes all four, in that spirit, and says what it kept.
 
 _pam_file=/etc/pam.d/system-login
 _pam_marker='pam_listfile.so.*file=/etc/omahouse/blocked'
@@ -147,10 +155,35 @@ post_remove() {
     # to be a way out, not a way to make the lock permanent.
     rm -f /etc/omahouse/blocked
 
+    # The browser policy of docs/design.md §11, for exactly the same reason.
+    #
+    # A site blocked by omahouse is blocked by a file in another program's
+    # directory, and Chromium goes on reading that file whether or not omahouse
+    # is installed. Leaving it would be a machine where a site does not open, the
+    # browser says "managed by your organisation", and there is no longer any
+    # program on the disk that could explain it or undo it. Somebody would be
+    # editing JSON in /etc by hand to get YouTube back.
+    #
+    # Removed by name, and only by name. This directory belongs to the browser
+    # and Omarchy's own `browser-policy.sh` writes `policies.json` beside ours;
+    # anything not called omahouse.json is somebody else's and is left exactly
+    # where it is. The directory itself is not removed either -- it existed
+    # before this package and it is not ours to take.
+    rm -f /etc/chromium/policies/managed/omahouse.json
+
     cat <<-'MESSAGE'
-	>>> omahouse: the login block was removed and everybody can log in again.
-	>>>           The profiles in /etc/omahouse and the days already counted in
-	>>>           /var/lib/omahouse were left where they are -- a report is
-	>>>           evidence, and it outlives the rules it was collected under.
+	>>> omahouse: everything omahouse put on this machine is off it.
+	>>>
+	>>>           The login block is gone and everybody can log in again, the
+	>>>           browser policy in /etc/chromium/policies/managed/omahouse.json
+	>>>           is gone and every site opens again, and the service is stopped
+	>>>           and disabled. No rule omahouse wrote is still in force.
+	>>>
+	>>>           Two things were kept on purpose, and here is where they are:
+	>>>             /etc/omahouse/profiles.json   who was under rules
+	>>>             /var/lib/omahouse/            the days already counted
+	>>>           A report is evidence, and it outlives the rules it was
+	>>>           collected under. Neither of them does anything to the machine
+	>>>           now; `rm -rf` both if you want the account back to nothing.
 	MESSAGE
 }

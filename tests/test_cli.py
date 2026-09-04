@@ -169,6 +169,11 @@ class Box:
         self.state = self.root / "var"
         self.config.mkdir()
         self.state.mkdir()
+        # The third root, and the one this suite would do the most damage
+        # without: /etc/chromium/policies/managed is the browser policy of
+        # whoever is running the suite. Pointed somewhere of its own for every
+        # case, always, for the same reason `notify-send` is.
+        self.chromium = self.root / "chromium"
         self.notified = self.root / "notified.log"
         self.notify_send = self.root / "notify-send"
         # A tab between the summary and the body, because both of them are
@@ -176,6 +181,15 @@ class Box:
         self.notify_send.write_text(
             f'#!/bin/sh\n{{ printf "%s\\t" "$@"; printf "\\n"; }} >> {self.notified}\n')
         self.notify_send.chmod(0o755)
+
+    def policy(self):
+        """The managed policy on this box, or None when there is no file.
+
+        None is the answer the whole of docs/design.md §11 turns on: no rules
+        anywhere is no file, and not an empty one.
+        """
+        path = self.chromium / "omahouse.json"
+        return json.loads(path.read_text()) if path.exists() else None
 
     def said(self):
         """Every notification the binary handed to `notify-send`, as it built it.
@@ -248,6 +262,7 @@ class Box:
             # notification on somebody's screen is the kind of thing a suite gets
             # to do exactly once before nobody runs it again.
             "OMAHOUSE_NOTIFY_SEND": str(self.notify_send),
+            "OMAHOUSE_CHROMIUM_POLICY_DIR": str(self.chromium),
         }
         env.pop("OMAHOUSE_JSON", None)
         # The roots put back where the machine keeps them, which is how the
@@ -1107,6 +1122,253 @@ def check_the_writing_verbs_want_a_profile_that_is_there(box):
         assert "one of them" in vague.stderr, args
 
 
+# -- the sites ----------------------------------------------------------------
+#
+# docs/design.md §11. What the file holds is proved in microseconds by
+# tst_webpolicy.cpp, which needs no disk at all; what is proved here is the other
+# half -- that the verbs write it, that they take it away again, and that a run
+# pointed at a tree of its own never goes near the browser policy of the machine
+# it is running on.
+#
+# That last one is not a nicety. This suite runs on the developer's own laptop,
+# with the developer's own Chromium open, and a bug that wrote
+# /etc/chromium/policies/managed/omahouse.json from `mise run verify` would take
+# somebody's browser away in the middle of an afternoon.
+
+
+def check_web_writes_a_policy_and_takes_it_away_again(box):
+    """One site blocked is one file; the block taken back is no file.
+
+    The undoing path of docs/design.md §11 that does not need `pacman -R`: a
+    parental control that leaves a restriction behind after the rule is gone is
+    the failure this whole slice is written against, and the smallest version of
+    it is a managed policy left on the machine holding nothing.
+    """
+    assert box.run("profile", "add", "julia").returncode == 0
+    assert box.policy() is None, "a fresh profile asks the browser for nothing"
+
+    blocked = box.run("web", "block", "julia", "youtube.com")
+    assert blocked.returncode == 0, blocked.stderr
+    assert box.policy() == {"URLBlocklist": ["youtube.com"]}, box.policy()
+    assert "is blocked" in blocked.stdout
+
+    # Said once, and in the words docs/design.md §11 uses. The operator has to
+    # read this before they wonder why their own browser changed.
+    assert "one file for the whole machine" in blocked.stderr
+    assert "including you" in blocked.stderr
+
+    # And it is in the profile, in the shape the app half has.
+    written = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    assert written["web"] == {
+        "default": "allow",
+        "rules": [{"match": "youtube.com", "verdict": "deny"}],
+    }, written["web"]
+
+    # 0644: Chromium reads the managed policy as whoever started the browser,
+    # which is never root. A mode only root can read is a policy that does not
+    # apply.
+    assert oct((box.chromium / "omahouse.json").stat().st_mode)[-3:] == "644"
+
+    back = box.run("web", "allow", "julia", "youtube.com")
+    assert back.returncode == 0, back.stderr
+    assert box.policy() is None, "the last block taken back has to take the file with it"
+    # An allowlist with nothing blocked beside it is inert, and the line says so
+    # rather than reading as a rule that is doing something.
+    assert "blocks nothing on its own" in back.stdout
+
+    # The profile keeps the decision even though the machine has no file: what
+    # the operator said is a record, and the file is a consequence of it.
+    written = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    assert written["web"]["rules"] == [{"match": "youtube.com", "verdict": "allow"}]
+
+
+def check_web_only_listed_and_incognito(box):
+    """The two switches, and what each of them puts in the file."""
+    box.run("profile", "add", "julia")
+
+    closed = box.run("web", "julia", "--only-listed")
+    assert closed.returncode == 0, closed.stderr
+    assert "only the listed sites open" in closed.stdout
+    assert box.policy() == {"URLBlocklist": ["*"]}, box.policy()
+
+    box.run("web", "allow", "julia", "wikipedia.org")
+    assert box.policy() == {"URLBlocklist": ["*"], "URLAllowlist": ["wikipedia.org"]}
+
+    denied = box.run("web", "incognito", "julia", "--deny")
+    assert denied.returncode == 0, denied.stderr
+    assert box.policy()["IncognitoModeAvailability"] == 1
+
+    # `--allow` asks the browser for nothing rather than writing a 0: omahouse
+    # being more permissive than it was asked to be -- overriding somebody
+    # else's managed policy to turn incognito back on -- is a direction it never
+    # takes by itself.
+    allowed = box.run("web", "incognito", "julia", "--allow")
+    assert allowed.returncode == 0, allowed.stderr
+    assert "IncognitoModeAvailability" not in box.policy()
+    assert "hide which site, not the time" in allowed.stdout
+
+    # And the whole way back: every site opens, no rules left that block, no file.
+    box.run("web", "julia", "--all-but-listed")
+    assert box.policy() is None, box.policy()
+
+
+def check_web_composes_profiles_that_disagree(box):
+    """The most restrictive wins, and the verb says who else had a say.
+
+    tst_webpolicy.cpp proves the arithmetic. What is proved here is that two
+    profiles in one file really do land in one policy, and that the profile
+    which was overruled is told rather than left to find out.
+    """
+    box.write_profiles({
+        "schemaVersion": 1,
+        "profiles": [
+            {"user": "julia", "web": {"default": "allow",
+                                   "rules": [{"match": "youtube.com", "verdict": "allow"}]}},
+            {"user": "pedro", "web": {"default": "allow",
+                                      "rules": [{"match": "youtube.com", "verdict": "deny"}]}},
+        ],
+    })
+
+    overruled = box.run("web", "allow", "julia", "youtube.com")
+    assert overruled.returncode == 0, overruled.stderr
+    assert "pedro disagrees" in overruled.stderr, overruled.stderr
+    assert "no precedence" in overruled.stderr
+
+    # Blocked, and never also allowlisted: Chromium gives the allowlist the tie,
+    # so a domain in both lists is a domain that opens.
+    assert box.policy() == {"URLBlocklist": ["youtube.com"]}, box.policy()
+
+
+def check_removing_the_last_profile_removes_the_policy(box):
+    """`profile remove` is the other way the machine comes back to nothing."""
+    box.run("profile", "add", "julia")
+    box.run("web", "block", "julia", "youtube.com")
+    assert box.policy() is not None
+
+    gone = box.run("profile", "remove", "julia")
+    assert gone.returncode == 0, gone.stderr
+    assert box.policy() is None, "the last profile's web rules went with it"
+
+
+def check_web_refuses_what_it_does_not_do(box):
+    """A whole URL, a bare word, `*`, no switch, both switches, no profile."""
+    box.run("profile", "add", "julia")
+
+    for typed in ("https://youtube.com", "youtube.com/watch", "youtube com"):
+        refused = box.run("web", "block", "julia", typed)
+        assert refused.returncode == 1, typed
+        assert "is not a domain" in refused.stderr, typed
+        assert box.policy() is None, typed
+
+    dotless = box.run("web", "block", "julia", "youtube")
+    assert dotless.returncode == 1
+    assert "youtube.com?" in dotless.stderr
+
+    # `*` is a mode and not a rule, and there is one way to say it.
+    star = box.run("web", "block", "julia", "*")
+    assert star.returncode == 1
+    assert "--only-listed" in star.stderr
+
+    for args in (("web", "julia"), ("web", "julia", "--only-listed", "--all-but-listed"),
+                 ("web", "incognito", "julia"),
+                 ("web", "incognito", "julia", "--allow", "--deny")):
+        vague = box.run(*args)
+        assert vague.returncode == 1, args
+        assert "one of them" in vague.stderr or "which user" in vague.stderr, args
+
+    # An option that belongs to another verb is a usage error and not a word
+    # quietly dropped.
+    stray = box.run("web", "block", "julia", "youtube.com", "--limit", "45m")
+    assert stray.returncode == 1
+    assert "takes no --limit" in stray.stderr
+
+    for args in (("web", "block", "nobody", "youtube.com"),
+                 ("web", "allow", "nobody", "youtube.com"),
+                 ("web", "nobody", "--only-listed"),
+                 ("web", "incognito", "nobody", "--deny")):
+        missing = box.run(*args)
+        assert missing.returncode == 2, args
+        assert "no profile" in missing.stderr, args
+
+    assert box.policy() is None, "nothing that was refused reached the machine"
+
+
+def check_the_browser_policy_of_this_machine_is_never_touched(box):
+    """A run pointed at a configuration of its own leaves /etc/chromium alone.
+
+    The mirror of the two refusals docs/design.md §7 already has -- a `close`
+    that will not signal a cgroup tree that is not /sys/fs/cgroup, and a
+    `terminate-user` that will not run behind a configuration that is not
+    /etc/omahouse. This is the third, and it is the one that protects the
+    machine this suite runs on: the policy directory is only written by a run
+    that is also managing this machine's own /etc/omahouse.
+
+    Nothing is asserted about /etc/chromium itself, because the point of the
+    case is that nothing goes near it. What is asserted is the refusal, by name.
+    """
+    box.run("profile", "add", "julia")
+    left_alone = box.run("web", "block", "julia", "youtube.com",
+                         extra_env={"OMAHOUSE_CHROMIUM_POLICY_DIR":
+                                    "/etc/chromium/policies/managed"})
+
+    # The rule is still written -- the profile is the operator's decision, and
+    # this run simply is not the one that carries it out.
+    assert left_alone.returncode == 0, left_alone.stderr
+    assert "/etc/chromium/policies/managed" in left_alone.stderr
+    assert "was left alone" in left_alone.stderr
+    written = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    assert written["web"]["rules"] == [{"match": "youtube.com", "verdict": "deny"}]
+
+
+def check_status_says_the_policy_is_for_the_whole_machine(box):
+    """`status` prints the sites, and says the reach once and without hedging.
+
+    Over the account that ran the suite, because `status` resolves a name
+    through NSS and `julia` is not on this machine. The profile is written to
+    the file rather than through `profile add`, which refuses an account in
+    wheel.
+    """
+    box.write_profiles({
+        "schemaVersion": 1,
+        "profiles": [{
+            "user": USER, "enabled": True, "enforce": False, "default": "allow",
+            "rules": [], "budgets": [],
+            "web": {"default": "allow", "incognito": "deny",
+                    "rules": [{"match": "youtube.com", "verdict": "deny"}]},
+        }],
+    })
+
+    screen = box.run("status", USER)
+    assert screen.returncode == 0, screen.stderr
+    sites = below(screen.stdout, "SITES")
+    assert "every site opens except the blocked ones" in sites
+    assert "incognito: does not open" in sites
+    assert "youtube.com" in sites
+    assert "one file for the whole machine" in sites
+    # Once, and not once per rule.
+    assert screen.stdout.count("one file for the whole machine") == 1
+
+    # The composed policy is in the document a script reads, and it is the
+    # machine's and not this profile's half of it.
+    document = json.loads(box.run("status", USER, "--json").stdout)
+    assert document["webPolicy"]["wholeMachine"] is True
+    assert document["webPolicy"]["contents"] == {
+        "URLBlocklist": ["youtube.com"], "IncognitoModeAvailability": 1}
+    assert document["profile"]["web"]["rules"] == [
+        {"match": "youtube.com", "verdict": "deny"}]
+
+    # And a profile with nothing to say about the web says so in one line
+    # rather than printing an empty table, which is the same choice `No
+    # budgets` makes above it.
+    box.write_profiles({
+        "schemaVersion": 1,
+        "profiles": [{"user": USER, "rules": [], "budgets": []}],
+    })
+    quiet = box.run("profile", "show", USER)
+    assert "has no web rules" in below(quiet.stdout, "SITES")
+    assert json.loads(box.run("status", USER, "--json").stdout)["webPolicy"]["contents"] is None
+
+
 # -- watch --------------------------------------------------------------------
 #
 # The loop of docs/design.md §5, driven the same way everything else here is: the four
@@ -1482,6 +1744,13 @@ def main():
         check_create_user_is_built_but_never_run_here,
         check_a_length_of_time_is_refused_rather_than_guessed,
         check_the_writing_verbs_want_a_profile_that_is_there,
+        check_web_writes_a_policy_and_takes_it_away_again,
+        check_web_only_listed_and_incognito,
+        check_web_composes_profiles_that_disagree,
+        check_removing_the_last_profile_removes_the_policy,
+        check_web_refuses_what_it_does_not_do,
+        check_the_browser_policy_of_this_machine_is_never_touched,
+        check_status_says_the_policy_is_for_the_whole_machine,
         check_watch_says_when_there_is_nobody_to_watch,
         check_watch_dry_run_counts_and_touches_nothing,
         check_watch_counts_a_session_of_nothing_but_nameless_scopes,
