@@ -367,6 +367,94 @@ void printOutOfReach(const QVector<AppScope> &unnamed, const QVector<SessionUnit
              "  session with it. See spec.md §5.\n";
 }
 
+// The scopes whose id is not the name of what is running inside them.
+//
+// poc/findings.md round 4: seven `app-Hyprland-gtk\x2dlaunch-*.scope` on this
+// machine, all of them VS Code, and a terminal that calls itself
+// `xdg-terminal-exec`. The rule still matches the id -- that is the model, and
+// `Policy::evaluate` never sees any of this -- so the only thing to do about it
+// is to say it, which is the same duty spec.md §5 puts on the blind spot.
+
+/// One id and one thing found running under it, however many scopes that was.
+///
+/// Grouped, because the question this answers is about the id and not about the
+/// scope: this machine has seven `gtk-launch` scopes and a rule can only be
+/// written about the one word they share. Ungrouped it printed seven lines
+/// saying the same sentence.
+struct Inside {
+    QString id;
+    QString exe;
+    int processes = 0;
+    int readProcesses = 0;
+    int scopes = 0;
+};
+
+QVector<Inside> whatIsInside(const QVector<AppScope> &scopes)
+{
+    QVector<Inside> found;
+    for (const AppScope &scope : scopes) {
+        if (scope.id.isEmpty() || scope.dominantExe.isEmpty())
+            continue;
+        if (exeCorroboratesId(scope.id, scope.dominantExe))
+            continue;
+        Inside *group = nullptr;
+        for (Inside &candidate : found) {
+            if (candidate.id == scope.id && candidate.exe == scope.dominantExe) {
+                group = &candidate;
+                break;
+            }
+        }
+        if (!group) {
+            found.append(Inside {scope.id, scope.dominantExe, 0, 0, 0});
+            group = &found.last();
+        }
+        group->processes += scope.pidCount;
+        group->readProcesses += scope.dominantExeCount;
+        ++group->scopes;
+    }
+    std::sort(found.begin(), found.end(), [](const Inside &a, const Inside &b) {
+        if (a.readProcesses != b.readProcesses)
+            return a.readProcesses > b.readProcesses;
+        return a.id == b.id ? a.exe < b.exe : a.id < b.id;
+    });
+    return found;
+}
+
+void printWhatIsInside(const QVector<Inside> &found)
+{
+    if (found.isEmpty())
+        return;
+
+    // As many as the out of reach block names, and for the same reason: a screen
+    // that is twenty lines of executable path is a screen nobody reads, and
+    // --json carries all of them.
+    constexpr int kNamed = 6;
+
+    out() << "\nNot what the name says\n";
+    QVector<QStringList> rows;
+    for (int i = 0; i < found.size() && i < kNamed; ++i) {
+        const Inside &group = found.at(i);
+        rows.append({group.id, group.exe,
+                     // `7 of 8`, so that a claim made from one readable process
+                     // out of twenty looks like the thin claim it is.
+                     QStringLiteral("%1 of %2").arg(group.readProcesses).arg(group.processes),
+                     QString::number(group.scopes)});
+    }
+    printTable({QStringLiteral("APP"), QStringLiteral("IS RUNNING"), QStringLiteral("PROCESSES"),
+                QStringLiteral("SCOPES")},
+               rows, {false, false, true, true});
+    if (found.size() > kNamed) {
+        out() << QStringLiteral("  … and %1 more (--json lists them all)\n")
+                     .arg(found.size() - kNamed);
+    }
+    out() << "  An app launched through a shim takes the shim's name, so the id above is\n"
+             "  the launcher's and not the program's — poc/findings.md round 4 found seven\n"
+             "  `gtk-launch` scopes on this machine with VS Code inside them. Rules and\n"
+             "  budgets match the id, so a rule about one of these is a rule about whatever\n"
+             "  it launches next. A flatpak reads the same way and is not the same case:\n"
+             "  its processes really do all run /usr/bin/bwrap, and there the id is right.\n";
+}
+
 int cmdStatus(const Globals &g, const QStringList &positionals)
 {
     if (positionals.size() > 1) {
@@ -407,6 +495,10 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
     }
     std::sort(named.begin(), named.end(), byProcessesThenName);
     std::sort(unnamed.begin(), unnamed.end(), byProcessesThenName);
+    // What each scope is really running. One readlink per process, and only on
+    // the screen an operator reads; the tick of stage 6 has no use for it.
+    proc.resolveDominantExe(&named);
+    proc.resolveDominantExe(&unnamed);
     const QVector<SessionUnit> sessionUnits = proc.sessionSliceUnits(uid);
     int sessionProcesses = 0;
     for (const SessionUnit &unit : sessionUnits)
@@ -431,17 +523,35 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
                 {QStringLiteral("cgroup"), scope.cgroupPath},
                 {QStringLiteral("processes"), scope.pidCount},
             };
+            // Null and not an empty string: "nothing in there could be read" and
+            // "it is running the empty path" are different answers, and only one
+            // of them exists.
+            object.insert(QStringLiteral("exe"),
+                          scope.dominantExe.isEmpty() ? QJsonValue()
+                                                      : QJsonValue(scope.dominantExe));
+            object.insert(QStringLiteral("exeProcesses"), scope.dominantExeCount);
+            object.insert(QStringLiteral("exeAgrees"),
+                          scope.dominantExe.isEmpty()
+                              ? QJsonValue()
+                              : QJsonValue(exeCorroboratesId(scope.id, scope.dominantExe)));
             if (profile)
                 object.insert(QStringLiteral("verdict"), verdictName(profile->verdictFor(scope.id)));
             scopesJson.append(object);
         }
         QJsonArray unnamedJson;
         for (const AppScope &scope : unnamed) {
-            unnamedJson.append(QJsonObject {
+            QJsonObject object {
                 {QStringLiteral("unit"), scope.unit},
                 {QStringLiteral("cgroup"), scope.cgroupPath},
                 {QStringLiteral("processes"), scope.pidCount},
-            });
+            };
+            // No id to agree or disagree with, and the executable is the only
+            // thing anybody can say about it.
+            object.insert(QStringLiteral("exe"),
+                          scope.dominantExe.isEmpty() ? QJsonValue()
+                                                      : QJsonValue(scope.dominantExe));
+            object.insert(QStringLiteral("exeProcesses"), scope.dominantExeCount);
+            unnamedJson.append(object);
         }
         QJsonArray sessionJson;
         for (const SessionUnit &unit : sessionUnits) {
@@ -534,6 +644,7 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
         }
     }
 
+    printWhatIsInside(whatIsInside(named));
     printOutOfReach(unnamed, sessionUnits, sessionProcesses);
     return kOk;
 }

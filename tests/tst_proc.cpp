@@ -19,14 +19,29 @@ constexpr uid_t kUid = 1000;
 /// The pids are made up and never read; only the count is. Writing real ones
 /// would be writing numbers that mean something on the machine the suite happens
 /// to run on, which is the opposite of what a temporary tree is for.
-void makeCgroup(const QString &path, int pidCount)
+void makeCgroup(const QString &path, int pidCount, int firstPid = 4000)
 {
     QVERIFY2(QDir().mkpath(path), qPrintable(path));
     QFile file(path + QStringLiteral("/cgroup.procs"));
     QVERIFY2(file.open(QIODevice::WriteOnly | QIODevice::Text), qPrintable(path));
     for (int i = 0; i < pidCount; ++i)
-        file.write(QByteArray::number(4000 + i) + '\n');
+        file.write(QByteArray::number(firstPid + i) + '\n');
     file.close();
+}
+
+/// A process, as far as the executable of a scope is concerned: a directory
+/// named by its pid with an `exe` link in it.
+///
+/// The link dangles, and that is not a shortcut. The kernel's own one points at
+/// a file that may have been replaced by a package upgrade since, and the code
+/// under test reads the link rather than the file for exactly that reason -- so
+/// a link to a path that was never there exercises the same branch.
+void makeProcess(const QString &procRoot, int pid, const QString &executable)
+{
+    const QString directory = QStringLiteral("%1/%2").arg(procRoot).arg(pid);
+    QVERIFY2(QDir().mkpath(directory), qPrintable(directory));
+    QVERIFY2(QFile::link(executable, directory + QStringLiteral("/exe")),
+             qPrintable(directory));
 }
 
 QString appSlice(const QString &root)
@@ -37,6 +52,12 @@ QString appSlice(const QString &root)
 QString sessionSlice(const QString &root)
 {
     return root + QStringLiteral("/user.slice/user-1000.slice/user@1000.service/session.slice");
+}
+
+/// The process table of the machine in $TMPDIR, beside its cgroup tree.
+QString procRoot(const QString &root)
+{
+    return root + QStringLiteral("/proc");
 }
 
 const AppScope *find(const QVector<AppScope> &scopes, const QString &unit)
@@ -107,6 +128,28 @@ private slots:
         makeCgroup(delegated, 2);
         makeCgroup(delegated + QStringLiteral("/worker"), 3);
 
+        // Round 4 of poc/findings.md, which is what the executable of a scope
+        // exists for: seven scopes of this name on this machine, and VS Code
+        // inside every one of them. Six processes here, five running the editor,
+        // one running its crash handler, and a seventh with no `exe` to read --
+        // which is what an unprivileged look at somebody else's process gets.
+        const QString shim =
+            graphical + QStringLiteral("/app-Hyprland-gtk\\x2dlaunch-4f8ae1c3.scope");
+        makeCgroup(shim, 7, 7000);
+        for (int pid = 7000; pid < 7005; ++pid)
+            makeProcess(procRoot(m_tree.path()), pid, QStringLiteral("/usr/share/code/code"));
+        makeProcess(procRoot(m_tree.path()), 7005,
+                    QStringLiteral("/usr/share/code/chrome_crashpad_handler"));
+
+        // A binary the package manager replaced while it was running. The kernel
+        // writes the path with ` (deleted)` after it, which is a fact about the
+        // file and not part of its name.
+        const QString upgraded = graphical + QStringLiteral("/app-Hyprland-mpv-1a2b3c4d.scope");
+        makeCgroup(upgraded, 2, 7100);
+        for (int pid = 7100; pid < 7102; ++pid)
+            makeProcess(procRoot(m_tree.path()), pid,
+                        QStringLiteral("/usr/bin/mpv (deleted)"));
+
         // session.slice, spec.md §5's blind spot.
         const QString session = sessionSlice(m_tree.path());
         makeCgroup(session + QStringLiteral("/wayland-wm@hyprland.desktop.service"), 8);
@@ -130,7 +173,7 @@ private slots:
             units.append(scope.unit);
         // Both depths, and nothing that is not a scope: no dconf.service, no
         // slice, no dbus activation.
-        QCOMPARE(units.size(), 8);
+        QCOMPARE(units.size(), 10);
         QVERIFY(units.contains(QStringLiteral("app-code-3579042.scope")));
         QVERIFY(units.contains(QStringLiteral("app-Hyprland-chromium-031bdc27.scope")));
         for (const QString &unit : units)
@@ -206,6 +249,69 @@ private slots:
         QCOMPARE(gone->id, QStringLiteral("sleep"));
         QCOMPARE(gone->pidCount, 0);
         QVERIFY(!gone->isLive());
+    }
+
+    // The second signal of spec.md §5: what a scope is actually running, which
+    // is the only thing that catches a launcher shim. Filled here and nowhere in
+    // src/core -- reading it is reading the machine -- and never handed to
+    // `Policy::evaluate`, which goes on matching by id.
+    void readsWhatAScopeIsActuallyRunning()
+    {
+        const Proc proc(m_tree.path(), procRoot(m_tree.path()));
+        QVector<AppScope> scopes = proc.scopesFor(kUid);
+        proc.resolveDominantExe(&scopes);
+
+        const AppScope *shim =
+            find(scopes, QStringLiteral("app-Hyprland-gtk\\x2dlaunch-4f8ae1c3.scope"));
+        QVERIFY(shim);
+        QCOMPARE(shim->id, QStringLiteral("gtk-launch"));
+        QCOMPARE(shim->pidCount, 7);
+        // Five of the seven, over the one running the crash handler and the one
+        // whose executable could not be read.
+        QCOMPARE(shim->dominantExe, QStringLiteral("/usr/share/code/code"));
+        QCOMPARE(shim->dominantExeCount, 5);
+        // And this is the whole point of having read it.
+        QVERIFY(!exeCorroboratesId(shim->id, shim->dominantExe));
+    }
+
+    void readsThePathOfABinaryThatWasReplacedUnderIt()
+    {
+        const Proc proc(m_tree.path(), procRoot(m_tree.path()));
+        AppScope scope;
+        scope.cgroupPath = appSlice(m_tree.path())
+            + QStringLiteral("/app-graphical.slice/app-Hyprland-mpv-1a2b3c4d.scope");
+        proc.resolveDominantExe(&scope);
+        QCOMPARE(scope.dominantExe, QStringLiteral("/usr/bin/mpv"));
+        QCOMPARE(scope.dominantExeCount, 2);
+    }
+
+    // Nothing readable is no opinion, and it must never read as a disagreement:
+    // an unprivileged run looking at another account's processes gets exactly
+    // this, and warning about every scope of a session it cannot see into would
+    // be warning about nothing.
+    void saysNothingAboutAScopeItCannotReadInto()
+    {
+        const Proc proc(m_tree.path(), procRoot(m_tree.path()));
+        QVector<AppScope> scopes = proc.scopesFor(kUid);
+        proc.resolveDominantExe(&scopes);
+
+        const AppScope *chromium =
+            find(scopes, QStringLiteral("app-Hyprland-chromium-031bdc27.scope"));
+        QVERIFY(chromium);
+        QVERIFY(chromium->dominantExe.isEmpty());
+        QCOMPARE(chromium->dominantExeCount, 0);
+        QVERIFY(exeCorroboratesId(chromium->id, chromium->dominantExe));
+    }
+
+    void takesTheProcessTableFromTheEnvironmentToo()
+    {
+        qunsetenv("OMAHOUSE_PROC_ROOT");
+        QCOMPARE(Proc::defaultProcRoot(), QStringLiteral("/proc"));
+        qputenv("OMAHOUSE_PROC_ROOT", procRoot(m_tree.path()).toLocal8Bit());
+        QCOMPARE(Proc::defaultProcRoot(), procRoot(m_tree.path()));
+        QCOMPARE(Proc().procRoot(), procRoot(m_tree.path()));
+        qunsetenv("OMAHOUSE_PROC_ROOT");
+        QCOMPARE(Proc::defaultProcRoot(), QStringLiteral("/proc"));
     }
 
     void ordersTheScopesTheSameWayTwice()

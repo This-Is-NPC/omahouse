@@ -33,18 +33,35 @@ TODAY = date.today()
 # What the development machine had open while stage 4 was written, plus the two
 # shapes only the PoC saw. The counts are what makes the table assertions mean
 # something.
+#
+# Each scope is (processes, first pid, what those processes are running). The
+# pids do not overlap between scopes because the executable of a scope is read
+# per process, and two scopes sharing a pid would be two scopes sharing an
+# answer. `None` is a scope whose processes have no executable to read, which is
+# what an unprivileged look at another account's process gets.
 SCOPES = {
-    "app-graphical.slice/app-Hyprland-chromium-031bdc27.scope": 19,
-    "app-code-3579042.scope": 12,
-    "app-org.chromium.Chromium-3735302.scope": 4,
-    "app-graphical.slice/app-Hyprland-xdg\\x2dterminal\\x2dexec-151e8e07.scope": 4,
-    "app-graphical.slice/app-flatpak-org.freedesktop.Platform-2351381583.scope": 4,
+    "app-graphical.slice/app-Hyprland-chromium-031bdc27.scope":
+        (19, 4000, "/usr/lib/chromium/chromium"),
+    "app-code-3579042.scope": (12, 4100, "/usr/share/code/code"),
+    "app-org.chromium.Chromium-3735302.scope": (4, 4200, "/usr/lib/chromium/chromium"),
+    # Round 4: the terminal is named after the shim that opened it.
+    "app-graphical.slice/app-Hyprland-xdg\\x2dterminal\\x2dexec-151e8e07.scope":
+        (4, 4300, "/usr/bin/alacritty"),
+    # The opposite failure, and the reason the executable is not a verdict: every
+    # flatpak on a machine runs the same one.
+    "app-graphical.slice/app-flatpak-org.freedesktop.Platform-2351381583.scope":
+        (4, 4400, "/usr/bin/bwrap"),
     # A scope on its way out: the unit is there, nothing is in it.
-    "app-graphical.slice/app-Hyprland-sleep-7865852f.scope": 0,
+    "app-graphical.slice/app-Hyprland-sleep-7865852f.scope": (0, 4500, None),
     # Under app.slice and not an app scope name. This machine has thirty.
-    "app-graphical.slice/tmux-spawn-8d371e9b-645e-4030-a0d1-2243708321e2.scope": 18,
+    "app-graphical.slice/tmux-spawn-8d371e9b-645e-4030-a0d1-2243708321e2.scope":
+        (18, 4600, "/usr/bin/bash"),
     # Plumbing on the app side of the tree. Never an app.
-    "dconf.service": 1,
+    "dconf.service": (1, 4700, None),
+    # Round 4 of poc/findings.md, the whole reason the executable is read at all:
+    # seven scopes of this name on this machine, and VS Code inside every one.
+    "app-graphical.slice/app-Hyprland-gtk\\x2dlaunch-4f8ae1c3.scope":
+        (7, 4800, "/usr/share/code/code"),
 }
 
 SESSION = {
@@ -56,18 +73,35 @@ SESSION = {
 }
 
 
-def write_cgroup(path, pids):
+def write_cgroup(path, pids, first_pid=4000):
     path.mkdir(parents=True, exist_ok=True)
-    (path / "cgroup.procs").write_text("".join(f"{4000 + i}\n" for i in range(pids)))
+    (path / "cgroup.procs").write_text(
+        "".join(f"{first_pid + i}\n" for i in range(pids)))
 
 
-def build_cgroup_tree(root):
-    """A user@<uid>.service the way systemd lays one out."""
+def write_process(proc_root, pid, executable):
+    """A process, as far as the executable of a scope is concerned.
+
+    The link dangles on purpose: the kernel's own one points at a file a package
+    upgrade may have replaced since, so the code under test reads the link and
+    never the file.
+    """
+    directory = proc_root / str(pid)
+    directory.mkdir(parents=True, exist_ok=True)
+    os.symlink(executable, directory / "exe")
+
+
+def build_cgroup_tree(root, proc_root):
+    """A user@<uid>.service the way systemd lays one out, and its processes."""
     manager = root / "user.slice" / f"user-{UID}.slice" / f"user@{UID}.service"
-    for relative, pids in SCOPES.items():
-        write_cgroup(manager / "app.slice" / relative, pids)
+    for relative, (pids, first_pid, executable) in SCOPES.items():
+        write_cgroup(manager / "app.slice" / relative, pids, first_pid)
+        if executable is None:
+            continue
+        for i in range(pids):
+            write_process(proc_root, first_pid + i, executable)
     for unit, pids in SESSION.items():
-        write_cgroup(manager / "session.slice" / unit, pids)
+        write_cgroup(manager / "session.slice" / unit, pids, 9000)
     return root
 
 
@@ -121,7 +155,8 @@ class Box:
 
     def __init__(self, directory):
         self.root = Path(directory)
-        self.cgroup = build_cgroup_tree(self.root / "cgroup")
+        self.proc = self.root / "proc"
+        self.cgroup = build_cgroup_tree(self.root / "cgroup", self.proc)
         self.config = self.root / "etc"
         self.state = self.root / "var"
         self.config.mkdir()
@@ -141,6 +176,7 @@ class Box:
         env = {
             **os.environ,
             "OMAHOUSE_CGROUP_ROOT": str(self.cgroup),
+            "OMAHOUSE_PROC_ROOT": str(self.proc),
             "OMAHOUSE_CONFIG_DIR": str(self.config),
             "OMAHOUSE_STATE_DIR": str(self.state),
         }
@@ -158,6 +194,17 @@ class Box:
 
 def columns(line):
     return re.split(r" {2,}", line.strip())
+
+
+def below(stdout, heading):
+    """Everything printed after a heading.
+
+    One screen holds several tables and two of them start with an `APP` column,
+    so the anchor for a row has to be the heading above the table and not the
+    header row of it.
+    """
+    assert heading in stdout, heading
+    return stdout.split(heading, 1)[1]
 
 
 def row_for(stdout, first_cell, after=None):
@@ -283,6 +330,57 @@ def check_status_reports_what_it_cannot_see(box):
     # count.
     assert "pipewire" not in seen.stdout
     assert "dbus-broker" not in seen.stdout
+
+
+def check_status_says_what_a_scope_really_holds(box):
+    """poc/findings.md round 4: the shim erases the name of the app.
+
+    A rule is written about an id, and on this machine seven ids read
+    `gtk-launch` and hold VS Code. `status` says so, because an operator who is
+    about to allow `gtk-launch` has to be told what that lets in. The verdict
+    itself does not move: `Policy::evaluate` goes on matching by id, and this is
+    a sentence rather than a decision.
+    """
+    seen = box.run("status", USER)
+    assert seen.returncode == 0, seen.stderr
+    inside = below(seen.stdout, "Not what the name says")
+
+    assert row_for(inside, "gtk-launch", after="APP") == \
+        ["gtk-launch", "/usr/share/code/code", "7 of 7", "1"]
+    assert row_for(inside, "xdg-terminal-exec", after="APP") == \
+        ["xdg-terminal-exec", "/usr/bin/alacritty", "4 of 4", "1"]
+    # The flatpak reads as a disagreement too, and it is the opposite failure:
+    # its processes really do all run /usr/bin/bwrap. Both are printed with what
+    # is inside them so that whoever is writing the rule can tell them apart.
+    assert row_for(inside, "org.freedesktop.Platform", after="APP")[1] == "/usr/bin/bwrap"
+
+    # And an id that names its own program is not in the block at all.
+    assert row_for(inside, "chromium", after="APP") is None
+    assert row_for(inside, "code", after="APP") is None
+
+    document = json.loads(box.run("--json", "status", USER).stdout)
+    ids = {scope["id"]: scope for scope in document["scopes"]}
+    assert ids["chromium"]["exe"] == "/usr/lib/chromium/chromium"
+    assert ids["chromium"]["exeProcesses"] == 19
+    assert ids["chromium"]["exeAgrees"] is True
+    assert ids["org.chromium.Chromium"]["exeAgrees"] is True
+    assert ids["gtk-launch"]["exe"] == "/usr/share/code/code"
+    assert ids["gtk-launch"]["exeAgrees"] is False
+    assert ids["org.freedesktop.Platform"]["exeAgrees"] is False
+    # A scope with no id has nothing to agree with, and what it is running is
+    # still the only thing anybody can say about it.
+    assert document["unnamed"][0]["exe"] == "/usr/bin/bash"
+
+    # Nothing readable is no opinion, and it must not read as a disagreement:
+    # this is what an unprivileged run looking at another account gets.
+    blind = box.run("status", USER, extra_env={"OMAHOUSE_PROC_ROOT": str(box.root / "nothing")})
+    assert blind.returncode == 0, blind.stderr
+    assert "Not what the name says" not in blind.stdout
+    unread = json.loads(
+        box.run("--json", "status", USER,
+                extra_env={"OMAHOUSE_PROC_ROOT": str(box.root / "nothing")}).stdout)
+    assert all(scope["exe"] is None and scope["exeAgrees"] is None
+               for scope in unread["scopes"])
 
 
 def check_status_with_a_profile(box):
@@ -571,6 +669,7 @@ def main():
         check_status_about_nobody_in_particular,
         check_status_refuses_an_account_that_is_not_there,
         check_status_of_a_user_who_is_not_logged_in,
+        check_status_says_what_a_scope_really_holds,
         check_status_with_a_profile,
         check_status_json,
         check_a_broken_profiles_file_is_not_an_empty_one,

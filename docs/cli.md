@@ -13,6 +13,7 @@ Three files, and every one of them can be moved by a variable, which is what let
 - `/etc/omahouse/profiles.json`, or `$OMAHOUSE_CONFIG_DIR/profiles.json` -- who is under rules. Root writes it and everyone reads it. Its absence is not an error: it is the state of every machine before the first profile is written, and `status` says so and goes on scanning.
 - `/var/lib/omahouse/<user>/<AAAA-MM-DD>.json`, or the same under `$OMAHOUSE_STATE_DIR` -- one ledger per day. A day with no file is a day nobody spent, and it is left out of a report rather than printed as a row of zeroes.
 - `/sys/fs/cgroup`, or `$OMAHOUSE_CGROUP_ROOT` -- where the app scopes are read from.
+- `/proc`, or `$OMAHOUSE_PROC_ROOT` -- where the executable of a scope's processes is read from.
 
 The identity of a running app is its systemd scope and not the path of its executable. `app-Hyprland-chromium-031bdc27.scope` is `chromium`, `app-flatpak-org.freedesktop.Platform-2351381583.scope` is `org.freedesktop.Platform`, and `app-Hyprland-xdg\x2dterminal\x2dexec-151e8e07.scope` is `xdg-terminal-exec` once systemd's escaping is undone. That is what groups the twenty-one processes of one Chromium into one app, tells an app apart from session plumbing, and names a flatpak whose every process runs `/usr/bin/bwrap`.
 
@@ -26,7 +27,7 @@ The identity of a running app is its systemd scope and not the path of its execu
 
   The shapes, by verb:
 
-  - `status` -- `user`, `uid`, `date`, `session`, `profile` (the whole profile, or null), `scopes`, `unnamed`, `outOfReach` and `budgets`. A `scopes` entry is `id`, `unit`, `cgroup` and `processes`, plus `verdict` where there is a profile to give one. `unnamed` is the same minus the id, for a scope under `app.slice` whose unit name is not an app scope name. `outOfReach` is `processes` and the `units` they are in.
+  - `status` -- `user`, `uid`, `date`, `session`, `profile` (the whole profile, or null), `scopes`, `unnamed`, `outOfReach` and `budgets`. A `scopes` entry is `id`, `unit`, `cgroup` and `processes`, plus `verdict` where there is a profile to give one, plus `exe`, `exeProcesses` and `exeAgrees` -- the executable most of its processes are running, how many of them are running it, and whether that backs up the id. `exe` and `exeAgrees` are null together when nothing in the scope could be read, which is no opinion and not a disagreement. `unnamed` is the same minus the id and the agreement, for a scope under `app.slice` whose unit name is not an app scope name. `outOfReach` is `processes` and the `units` they are in.
   - `report` -- `user`, `since`, `until`, `days` and `totals`. A day is the ledger of `spec.md` §4 without its `schemaVersion` and `user`, both of which would be the same words on every day of the range.
   - `profile list` -- an array of `user`, `displayName`, `enabled`, `enforce`, `default`, and the counts of `rules` and `budgets`.
   - `profile show` -- the profile as `/etc/omahouse/profiles.json` holds it.
@@ -50,6 +51,8 @@ With a profile it adds the verdict each app would get and a line per budget: the
 And it reports what it cannot see, which `spec.md` §5 asks of it in so many words.
 
 Two kinds of blind spot, and they are different. A scope under `app.slice` whose unit name is not an app scope name -- a `tmux-spawn-<uuid>.scope`, say -- is seen and not named: omahouse knows it is there and how many processes are in it, and could close it, but has no id to match a rule against, so it is listed rather than judged. Processes in `session.slice` are the real blind spot: an app started outside `uwsm app`, by a raw `exec` in a keybinding or from inside a terminal, lands in the compositor's own cgroup, where it cannot be told from Hyprland itself. It is not counted and it cannot be closed, because `cgroup.kill` there would take the session with it. That number is never zero on a live session -- the compositor's own processes are in it -- and saying so plainly is the point: the honest report of a limit, not an alarm.
+
+And it says when a scope is not what its name says. An app launched through a shim takes the shim's name, so the id is the launcher's and not the program's: `poc/findings.md` round 4 found seven `app-Hyprland-gtk\x2dlaunch-*.scope` on the development machine with VS Code inside every one of them, and the terminal calling itself `xdg-terminal-exec`. Under `Not what the name says`, `status` prints the id, the executable most of its processes are running, and how many of them -- because a rule about `gtk-launch` is a rule about whatever it launches next, and nobody can weigh that without seeing what is in there. A flatpak reads the same way and is the opposite case: the id is right and the executable is `/usr/bin/bwrap` for every flatpak alike. Neither signal can overrule the other, which is why this is a sentence and never a verdict -- the rule goes on matching the id, and `evaluate` is never shown the executable.
 
 ### Arguments
 - **`[user]`** — Whose session to look at; defaults to whoever ran it

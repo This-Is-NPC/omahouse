@@ -4,6 +4,9 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
+
+#include <unistd.h>
 
 #include <algorithm>
 
@@ -13,6 +16,8 @@ namespace {
 
 const char *const kDefaultCgroupRoot = "/sys/fs/cgroup";
 const char *const kCgroupRootVariable = "OMAHOUSE_CGROUP_ROOT";
+const char *const kDefaultProcRoot = "/proc";
+const char *const kProcRootVariable = "OMAHOUSE_PROC_ROOT";
 
 bool endsWith(const QString &name, const char *suffix)
 {
@@ -53,6 +58,68 @@ int processesInTree(const QString &cgroupPath)
     for (const QFileInfo &child : children)
         count += processesInTree(child.absoluteFilePath());
     return count;
+}
+
+/// The pids written in one `cgroup.procs`, appended to `out`.
+///
+/// The same file `processesIn` counts, read for the numbers this time. A line
+/// that is not a number is skipped rather than taken as pid zero: the file is
+/// written by the kernel, but it is also a file a test writes, and a zero would
+/// go looking at the process table's own directory.
+void pidsIn(const QString &cgroupPath, QVector<qint64> *out)
+{
+    QFile file(cgroupPath + QStringLiteral("/cgroup.procs"));
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return;
+    const QList<QByteArray> lines = file.readAll().split('\n');
+    for (const QByteArray &line : lines) {
+        bool ok = false;
+        const qint64 pid = line.trimmed().toLongLong(&ok);
+        if (ok && pid > 0)
+            out->append(pid);
+    }
+}
+
+void pidsInTree(const QString &cgroupPath, QVector<qint64> *out)
+{
+    pidsIn(cgroupPath, out);
+    const QDir directory(cgroupPath);
+    const QFileInfoList children =
+        directory.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo &child : children)
+        pidsInTree(child.absoluteFilePath(), out);
+}
+
+/// What one process is running, by the link the kernel keeps to its executable.
+///
+/// readlink(2) and not QFileInfo::symLinkTarget: the link is not an ordinary
+/// one. It has no length to stat, it resolves to a file that may have been
+/// replaced by a package upgrade since -- the kernel then writes the path with
+/// ` (deleted)` after it, which is a fact about the file and not part of its
+/// name -- and it is unreadable for a process the caller does not own, which is
+/// an answer rather than a failure.
+QString executableOf(const QString &procRoot, qint64 pid)
+{
+    const QByteArray path =
+        QFile::encodeName(QStringLiteral("%1/%2/exe").arg(procRoot).arg(pid));
+    QByteArray buffer(1024, Qt::Uninitialized);
+    for (;;) {
+        const ssize_t written = ::readlink(path.constData(), buffer.data(), buffer.size());
+        if (written < 0)
+            return {};
+        if (written < buffer.size()) {
+            QString target = QFile::decodeName(buffer.left(static_cast<int>(written)));
+            const QString deleted = QStringLiteral(" (deleted)");
+            if (target.endsWith(deleted))
+                target.chop(deleted.size());
+            return target;
+        }
+        // Filled the buffer exactly: the path may have been truncated, and
+        // readlink does not say which. Ask again with room.
+        if (buffer.size() >= 64 * 1024)
+            return {};
+        buffer.resize(buffer.size() * 2);
+    }
 }
 
 /// Walks `app.slice` for scopes.
@@ -98,8 +165,17 @@ QString Proc::defaultCgroupRoot()
     return QString::fromLatin1(kDefaultCgroupRoot);
 }
 
-Proc::Proc(const QString &cgroupRoot)
+QString Proc::defaultProcRoot()
+{
+    const QByteArray fromEnvironment = qgetenv(kProcRootVariable);
+    if (!fromEnvironment.isEmpty())
+        return QString::fromLocal8Bit(fromEnvironment);
+    return QString::fromLatin1(kDefaultProcRoot);
+}
+
+Proc::Proc(const QString &cgroupRoot, const QString &procRoot)
     : m_cgroupRoot(cgroupRoot)
+    , m_procRoot(procRoot)
 {
 }
 
@@ -167,6 +243,47 @@ QVector<SessionUnit> Proc::sessionSliceUnits(uid_t uid) const
         return a.unit < b.unit;
     });
     return units;
+}
+
+void Proc::resolveDominantExe(AppScope *scope) const
+{
+    if (!scope)
+        return;
+    scope->dominantExe.clear();
+    scope->dominantExeCount = 0;
+    if (scope->cgroupPath.isEmpty())
+        return;
+
+    QVector<qint64> pids;
+    pidsInTree(scope->cgroupPath, &pids);
+
+    QHash<QString, int> tally;
+    for (qint64 pid : pids) {
+        const QString executable = executableOf(m_procRoot, pid);
+        if (!executable.isEmpty())
+            ++tally[executable];
+    }
+
+    // Ties broken by the path, so that two runs over one unchanged scope say the
+    // same thing. A scope with two executables in equal number is a real shape --
+    // a browser and its crash handler -- and which of them gets named matters
+    // less than its not changing under the operator between two reads.
+    for (auto it = tally.cbegin(); it != tally.cend(); ++it) {
+        const bool better = it.value() > scope->dominantExeCount
+            || (it.value() == scope->dominantExeCount && it.key() < scope->dominantExe);
+        if (better) {
+            scope->dominantExe = it.key();
+            scope->dominantExeCount = it.value();
+        }
+    }
+}
+
+void Proc::resolveDominantExe(QVector<AppScope> *scopes) const
+{
+    if (!scopes)
+        return;
+    for (AppScope &scope : *scopes)
+        resolveDominantExe(&scope);
 }
 
 int Proc::sessionSliceProcesses(uid_t uid) const

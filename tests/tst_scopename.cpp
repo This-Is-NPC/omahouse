@@ -111,6 +111,71 @@ private slots:
         unnamed.id.clear();
         QVERIFY(!unnamed.isLive());
     }
+
+    // The second signal, and the only thing that catches a launcher shim:
+    // whether what is running inside the scope backs up the name on it.
+    //
+    // Every disagreeing row was measured on this machine in round 4 of
+    // poc/findings.md, and every agreeing one is a scope this machine had open
+    // while the rest of stage 4 was written. Not a list of shims: there is no
+    // list anywhere in the tree, because a list of names to keep current is what
+    // the PoC killed with baseline.json in round 1.
+    void tellsAnIdThatNamesItsAppFromOneThatNamesALauncher_data()
+    {
+        QTest::addColumn<QString>("id");
+        QTest::addColumn<QString>("exe");
+        QTest::addColumn<bool>("agrees");
+
+        QTest::newRow("the plain case")
+            << QStringLiteral("chromium") << QStringLiteral("/usr/lib/chromium/chromium") << true;
+        QTest::newRow("a directory of its own")
+            << QStringLiteral("code") << QStringLiteral("/usr/share/code/code") << true;
+        // The id spells the app out in reverse domain form and the file is the
+        // last word of it. Neither contains the other whole, and they are the
+        // same program.
+        QTest::newRow("a chromium web app")
+            << QStringLiteral("org.chromium.Chromium")
+            << QStringLiteral("/usr/lib/chromium/chromium") << true;
+        QTest::newRow("dashes against underscores")
+            << QStringLiteral("gnome-calculator") << QStringLiteral("/usr/bin/gnome_calculator")
+            << true;
+
+        // Round 4: seven scopes of this name on this machine, and VS Code inside
+        // every one of them. Allowing `gtk-launch` is allowing whatever it
+        // launches next.
+        QTest::newRow("the shim of round 4")
+            << QStringLiteral("gtk-launch")
+            << QStringLiteral("/usr/share/code/chrome_crashpad_handler") << false;
+        QTest::newRow("the terminal, which is also a shim")
+            << QStringLiteral("xdg-terminal-exec") << QStringLiteral("/usr/bin/alacritty")
+            << false;
+        // The opposite failure, and the reason this is not a verdict. The
+        // executable of every flatpak on a machine is the same one, so here it is
+        // the id that is right and this function that is wrong -- which is why
+        // its answer is printed beside both halves rather than acted on.
+        QTest::newRow("a flatpak, where the executable is the one that lies")
+            << QStringLiteral("org.freedesktop.Platform") << QStringLiteral("/usr/bin/bwrap")
+            << false;
+        // Two letters found inside a reverse domain name is a coincidence, and a
+        // coincidence that says `these agree` is the warning not firing on the
+        // scope it was written for.
+        QTest::newRow("a short name is not a match")
+            << QStringLiteral("org.gnome.Shell") << QStringLiteral("/usr/bin/sh") << false;
+
+        // No executable is nobody having looked, or a process whose executable
+        // could not be read. Having no opinion is the honest answer, and it must
+        // not read as a disagreement.
+        QTest::newRow("nothing read") << QStringLiteral("gtk-launch") << QString() << true;
+        QTest::newRow("no id either") << QString() << QStringLiteral("/usr/bin/bwrap") << true;
+    }
+
+    void tellsAnIdThatNamesItsAppFromOneThatNamesALauncher()
+    {
+        QFETCH(QString, id);
+        QFETCH(QString, exe);
+        QFETCH(bool, agrees);
+        QCOMPARE(exeCorroboratesId(id, exe), agrees);
+    }
 };
 
 int runScopeNameTests(int argc, char **argv)

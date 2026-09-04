@@ -43,9 +43,17 @@ public:
     /// assert what `status` prints, and a real session is a moving target.
     static QString defaultCgroupRoot();
 
-    explicit Proc(const QString &cgroupRoot = defaultCgroupRoot());
+    /// `/proc`, or `$OMAHOUSE_PROC_ROOT`. The same door as the cgroup root and
+    /// for the same reason: the dominant executable of a scope is read from the
+    /// kernel's process table, and a suite that needs a real session with a real
+    /// VS Code in it to assert anything is a suite nobody runs.
+    static QString defaultProcRoot();
+
+    explicit Proc(const QString &cgroupRoot = defaultCgroupRoot(),
+                  const QString &procRoot = defaultProcRoot());
 
     QString cgroupRoot() const { return m_cgroupRoot; }
+    QString procRoot() const { return m_procRoot; }
 
     /// `<root>/user.slice/user-<uid>.slice/user@<uid>.service/app.slice`, the
     /// path of spec.md §5 step 2.
@@ -87,8 +95,26 @@ public:
     /// "how many rules were broken".
     int sessionSliceProcesses(uid_t uid) const;
 
+    /// Fills `dominantExe` and `dominantExeCount` on a scope: the executable
+    /// most of its processes are running, read one process at a time from the
+    /// kernel's own record of them.
+    ///
+    /// A step of its own rather than part of `scopesFor`, because the two are
+    /// wanted in different places. Counting a tick needs the id and the process
+    /// count and nothing else; showing an operator what an id would really let in
+    /// needs this, and pays a readlink per process for it. The daemon of stage 6
+    /// ticks every two seconds and has no use for it at all.
+    ///
+    /// An executable that cannot be read leaves the fields empty. That is the
+    /// ordinary answer for an unprivileged run looking at another account -- the
+    /// kernel refuses the link of a process it does not own -- and it means "no
+    /// opinion", never "they disagree".
+    void resolveDominantExe(AppScope *scope) const;
+    void resolveDominantExe(QVector<AppScope> *scopes) const;
+
 private:
     QString m_cgroupRoot;
+    QString m_procRoot;
 };
 
 } // namespace omahouse

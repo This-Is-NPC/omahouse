@@ -65,6 +65,25 @@ bool unescape(const QString &escaped, QString *out, QString *error)
     return true;
 }
 
+/// One spelling for the several a program is written in: lower case, and without
+/// the separators that tell `gnome-calculator` from `org.gnome.Calculator`.
+///
+/// The slash is kept, so that a path stays a path and `code` cannot be found
+/// inside `/usr/share/co/de`.
+QString flattened(const QString &text)
+{
+    QString out;
+    out.reserve(text.size());
+    for (QChar character : text) {
+        if (character == QLatin1Char('-') || character == QLatin1Char('_')
+            || character == QLatin1Char('.')) {
+            continue;
+        }
+        out.append(character.toLower());
+    }
+    return out;
+}
+
 QString refuse(const QString &unit, const QString &why, QString *error)
 {
     if (error)
@@ -112,6 +131,32 @@ QString scopeIdFromUnit(const QString &unit, QString *error)
     if (id.isEmpty())
         return refuse(unit, QStringLiteral("it has an empty app name"), error);
     return id;
+}
+
+bool exeCorroboratesId(const QString &id, const QString &exePath)
+{
+    if (id.isEmpty() || exePath.isEmpty())
+        return true;
+
+    const QString path = flattened(exePath);
+    const QString name = flattened(id);
+    if (name.isEmpty() || path.isEmpty())
+        return true;
+    if (path.contains(name))
+        return true;
+
+    // The other direction, for an id that spells the app out in reverse domain
+    // form: `org.chromium.Chromium` is `/usr/lib/chromium/chromium`, and no
+    // amount of looking for the whole id inside the path will say so.
+    //
+    // Only for a file name long enough to mean something. Two letters found
+    // inside a reverse domain name is a coincidence, and a coincidence that says
+    // "these agree" is worse than saying nothing: it is the warning not firing
+    // on the one scope it was written for.
+    constexpr int kShortestName = 3;
+    const int slash = exePath.lastIndexOf(QLatin1Char('/'));
+    const QString base = flattened(exePath.mid(slash + 1));
+    return base.size() >= kShortestName && name.contains(base);
 }
 
 } // namespace omahouse

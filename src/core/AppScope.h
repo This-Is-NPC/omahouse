@@ -24,6 +24,29 @@ struct AppScope {
     /// Processes in the scope right now. Zero is a scope on its way out, and it
     /// is not somebody's app running.
     int pidCount = 0;
+    /// The executable most of the processes inside the scope are running, as an
+    /// absolute path, or empty when nothing could be read. Filled by `Proc`,
+    /// because reading it is reading the machine; the core only carries it.
+    ///
+    /// It is here because the id alone is not always the name of what is
+    /// running: poc/findings.md round 4 found seven scopes called
+    /// `app-Hyprland-gtk\x2dlaunch-*.scope` on this machine whose processes were
+    /// all VS Code. The launcher shim gives the scope its own name, so the id
+    /// collapses every app opened that way into one word.
+    ///
+    /// It is not a second selector, and `Policy::evaluate` never sees it. The
+    /// two signals fail in opposite places -- the id fails on a shim and is
+    /// right about a flatpak, the executable is right about a shim and is
+    /// `/usr/bin/bwrap` for every flatpak alike -- so neither can overrule the
+    /// other. This one is for configuration and for the report: it is what lets
+    /// `status` say what a scope really holds and `allow` say what an id would
+    /// really let in.
+    QString dominantExe;
+    /// How many processes of the scope are running `dominantExe`. Zero with an
+    /// empty path is "nobody looked, or nothing could be read"; the count is
+    /// printed beside the path so that a claim made from one readable process
+    /// out of twenty looks like what it is.
+    int dominantExeCount = 0;
 
     bool isLive() const { return pidCount > 0 && !id.isEmpty(); }
 };
@@ -49,5 +72,33 @@ struct AppScope {
 /// thing `omahouse status` can report as unseen, which is what spec.md §5 asks
 /// of everything the model cannot account for.
 QString scopeIdFromUnit(const QString &unit, QString *error);
+
+/// Whether `exePath` backs up `id` -- whether the program running inside the
+/// scope is plausibly the one the scope is named after.
+///
+/// There is no list of known shims anywhere in this tree, and there will not be:
+/// a `baseline.json` of names to keep current is exactly what the PoC killed in
+/// round 1. The disagreement is derived from the two things that were measured
+/// instead. Either the id appears somewhere in the path of the executable --
+/// `chromium` in `/usr/lib/chromium/chromium`, `code` in `/usr/share/code/code`
+/// -- or the name of the executable appears in the id, which is what makes
+/// `org.chromium.Chromium` and `/usr/lib/chromium/chromium` the same app. Case,
+/// dots, dashes and underscores are all dropped before comparing, because
+/// `gnome-calculator`, `gnome_calculator` and `org.gnome.Calculator` are three
+/// spellings of one program and none of them is the file name.
+///
+/// Anything else is a disagreement: `gtk-launch` against
+/// `/usr/share/code/chrome_crashpad_handler`, `xdg-terminal-exec` against the
+/// terminal it opened. So is `org.freedesktop.Platform` against
+/// `/usr/bin/bwrap`, and that one is not a mistake to fix here -- the executable
+/// really is bwrap for every flatpak on the machine. A disagreement is a thing
+/// to say out loud to whoever is writing a rule, not a thing to decide by, and
+/// the caller says both halves of it so the operator can tell which case they
+/// are looking at.
+///
+/// An empty path is not a disagreement. It is nobody having looked, or a process
+/// whose executable could not be read, and having no opinion is the honest
+/// answer to that.
+bool exeCorroboratesId(const QString &id, const QString &exePath);
 
 } // namespace omahouse
