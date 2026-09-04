@@ -30,23 +30,23 @@ Ela sobe em uns 30 segundos e cai direto no greeter. O endereço é fixo:
 A tela sai por **VNC em `127.0.0.1:5900`** (`virsh vncdisplay omahouse-omarchy`
 diz `127.0.0.1:0`, que é a porta 5900).
 
-Esta máquina não tem cliente VNC instalado, e eu não instalei nada aqui. Um
-comando resolve:
+Você já tem o **remmina** instalado — não precisa instalar nada:
+
+```bash
+remmina -c vnc://127.0.0.1:5900
+```
+
+Se preferir o `virt-viewer`, ele pega o teclado inteiro (inclusive a tecla
+SUPER, que é metade do Omarchy) e tem tela cheia no `F11`, mas exige instalar:
 
 ```bash
 sudo pacman -S virt-viewer
 virt-viewer --connect qemu:///system omahouse-omarchy
 ```
 
-Ou, se preferir um cliente VNC cru:
-
-```bash
-sudo pacman -S tigervnc
-vncviewer 127.0.0.1:5900
-```
-
-O `virt-viewer` é o melhor dos dois: ele pega o teclado inteiro (inclusive a
-tecla SUPER, que é metade do Omarchy) e tem tela cheia no `F11`.
+> No remmina, marque **"Capturar todas as teclas"** na conexão, senão o
+> `SUPER` vai para o seu Hyprland em vez de ir para o da VM — e o `SUPER` é
+> metade do Omarchy.
 
 > **Por que funciona.** O qemu desta máquina não tem `virtio-gpu` nem `qxl` —
 > só `vga`, `cirrus`, `vmvga`, `bochs` e `ramfb`. A VM usa **`bochs`**, que dá
