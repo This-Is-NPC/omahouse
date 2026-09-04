@@ -506,5 +506,7 @@ a structural change when the time comes.
 - **Focus time** instead of running time. Fairer, and it needs IPC from Hyprland
   inside the fiscalised session, which that session can kill.
 - **Site filtering**, DNS, proxy — another problem, another program.
+  [`proposal-network.md`](proposal-network.md) argues the other way, per account
+  through `nft meta skuid`. It is a **proposal**: none of it is built.
 - **Several machines on a network.** The model carries it; v1 is one machine.
 - **Credit that crosses days**, a time bank, time bought with a chore.
