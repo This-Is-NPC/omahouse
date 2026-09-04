@@ -281,6 +281,25 @@ keybinding, e o que nasce de dentro de um terminal.
 O omahouse **relata o que não consegue ver** em vez de fingir que não existe:
 um perfil com processo demais em `session.slice` rende um aviso no `status`.
 
+### O shim apaga o nome do app
+
+Segundo furo, medido na etapa 4 (`poc/findings.md`, rodada 4): app lançado por
+um shim herda o nome do shim. Sete escopos `app-Hyprland-gtk\x2dlaunch-*` desta
+máquina contêm, na verdade, VS Code; o terminal aparece como
+`xdg-terminal-exec`.
+
+Liberar `gtk-launch` numa allowlist é liberar um conjunto desconhecido de
+programas.
+
+O sinal que corrige é o `exe` dominante dos processos dentro do escopo — e
+repare que os dois sinais erram em situações opostas: o id falha no shim e
+acerta no flatpak; o `exe` falha no flatpak (`bwrap`) e acerta no shim.
+
+`evaluate` continua casando por **id** e continua puro. O `exe` dominante é
+informação de **configuração**: serve para o operador não liberar às cegas, e
+para o `status` mostrar o que um escopo realmente contém. Não é critério de
+decisão.
+
 `enforce: false` continua sendo o padrão de um perfil recém-criado — não mais
 para calibrar uma baseline, mas porque ver um dia de relatório antes de ligar
 os dentes é o que a lan house sempre fez.

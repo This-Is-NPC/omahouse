@@ -195,3 +195,40 @@ arquivo na virada do dia. Sem módulo PAM próprio — `pam_listfile` é padrão
 
 As cinco perguntas da rodada 1 estão respondidas. O modelo do `spec.md` está
 validado numa sessão Omarchy-like real.
+
+---
+
+# Rodada 4 — o shim de lançamento apaga a identidade
+
+Achado ao rodar o `omahouse status` da etapa 4 contra uma sessão real.
+
+Sete escopos desta máquina se chamam `app-Hyprland-gtk\x2dlaunch-*.scope`. O
+`Description` da unidade também diz apenas `gtk-launch`. Mas os processos lá
+dentro são `/usr/share/code/chrome_crashpad_handler` — **é o VS Code**.
+
+Mesma forma para o terminal: o escopo é `xdg-terminal-exec`, não o nome do
+emulador.
+
+É o problema do `bwrap` da rodada 1 reaparecendo uma camada acima: quando o app
+é lançado por um shim, o escopo herda o nome do shim, e todos os apps lançados
+por aquele caminho colapsam num id só.
+
+**Consequência prática:** liberar `gtk-launch` numa allowlist é liberar um
+conjunto desconhecido e variável de programas. É um furo de verdade, não uma
+imprecisão de relatório.
+
+**Sinal secundário disponível:** o `exe` dominante dos processos dentro do
+escopo. Ele resolve o caso do shim (`/usr/share/code/…` → VS Code) justamente
+onde o id falha, e o id resolve o caso do flatpak (`org.freedesktop.Platform`)
+justamente onde o `exe` falha. Os dois erram em situações opostas.
+
+Ainda **não** implementado. O `evaluate` continua casando por id e permanece
+puro; o `exe` dominante é informação de configuração, para o operador não
+liberar às cegas, e não critério de decisão.
+
+## Segundo ponto cego, distinto
+
+Escopos sob `app.slice` cujo nome o parser recusa — aqui, 23 do tipo
+`tmux-spawn-<uuid>.scope`, com 71 processos. Diferente do `session.slice`:
+esses o omahouse **vê e consegue fechar**, só não tem id para casar com regra.
+O `status` os reporta em separado.
