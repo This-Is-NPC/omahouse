@@ -13,7 +13,7 @@
 
 namespace omahouse {
 
-// The loop of spec.md §5: watch, count, say, and -- since stage 7 -- act.
+// The loop of docs/design.md §5: watch, count, say, and -- since stage 7 -- act.
 //
 // The steps are the ones the spec numbers. Find the users with a profile who
 // have a session; list their app scopes; hand the scopes, the profile, the day's
@@ -194,10 +194,10 @@ public:
 
     const Options &options() const { return m_options; }
 
-    /// One turn of spec.md §5, for every profile handed in.
+    /// One turn of docs/design.md §5, for every profile handed in.
     ///
     /// The profiles come in by parameter and are not read here, so that the
-    /// caller can read them again every cycle: `spec.md` §1 asks that an
+    /// caller can read them again every cycle: `docs/design.md` §1 asks that an
     /// operator be able to hand over ten minutes with the game still running,
     /// and a daemon holding a copy of the rules from when it started cannot
     /// honour that.
@@ -205,7 +205,7 @@ public:
 
 private:
     void observe(const Profile &profile, Watched *watched, const QDateTime &now);
-    /// The sequence of spec.md §5 for one scope, spread across ticks: SIGTERM
+    /// The sequence of docs/design.md §5 for one scope, spread across ticks: SIGTERM
     /// the first time, `cgroup.kill` once the window has gone by.
     void closeScope(const Profile &profile, Watched *watched, const Decision &decision,
                     const AppScope &scope, const QDateTime &now);
@@ -222,7 +222,7 @@ private:
     QHash<QString, QString> m_shape;
     /// When each scope was sent its SIGTERM, keyed by user and unit.
     ///
-    /// spec.md §5 spells closing as a sequence -- SIGTERM, wait, `cgroup.kill`
+    /// docs/design.md §5 spells closing as a sequence -- SIGTERM, wait, `cgroup.kill`
     /// -- and a two second loop cannot wait inside a tick: twenty seconds of
     /// sleeping is twenty seconds of everybody else's day not being counted. So
     /// the wait is spread across ticks, and this is the only thing the loop

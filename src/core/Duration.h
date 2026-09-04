@@ -4,7 +4,7 @@
 
 namespace omahouse {
 
-// How long, written the way spec.md §7 writes it on a command line: `45m`,
+// How long, written the way docs/design.md §7 writes it on a command line: `45m`,
 // `2h`, `1h30m`, and a bare `90` for the minutes it is all counted in.
 //
 // In the core because it is a pure reading of a string, and it is a reading two

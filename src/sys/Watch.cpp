@@ -36,7 +36,7 @@ const Budget *budgetOf(const Profile &profile, const QString &id)
 
 /// How a budget is named in a sentence that starts with it.
 ///
-/// `session` is the budget whose selector is `*` -- spec.md §2 -- and to whoever
+/// `session` is the budget whose selector is `*` -- docs/design.md §2 -- and to whoever
 /// is being warned it is not a budget at all, it is their evening. Every other
 /// id is left exactly as it was written, lower case and all: `chromium` is the
 /// word an operator typed and the word `omahouse status` prints, and
@@ -178,7 +178,7 @@ Words wordsFor(const Profile &profile, const Decision &decision, const QString &
         break;
 
     case Decision::Reason::Warning:
-        // The clock time, and not the number of minutes twice: `spec.md` §6
+        // The clock time, and not the number of minutes twice: `docs/design.md` §6
         // writes the example this way -- "Faltam 5 minutos" / "Minecraft fecha
         // às 19:35" -- and it is right, because a time of day is a thing
         // somebody can plan around and "in five minutes" is not.
@@ -239,7 +239,7 @@ Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now)
         watched.displayName = profile.displayName;
         watched.enabled = profile.enabled;
 
-        // spec.md §5 step 1, and the only two ways there is nothing to do about
+        // docs/design.md §5 step 1, and the only two ways there is nothing to do about
         // somebody: no account of that name on this machine, and a profile
         // switched off. Neither is an error. A profile can be written before its
         // account and outlive it, and off is off.
@@ -255,7 +255,7 @@ Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now)
         cycle.users.append(watched);
     }
 
-    // The file first, then the terminations. spec.md §2 makes them one action,
+    // The file first, then the terminations. docs/design.md §2 makes them one action,
     // and this is the order that makes them one: a session ended before the name
     // is in `blocked` is a session the tty1 autologin brings back before the next
     // cycle, which is exactly what round 2 measured.
@@ -270,14 +270,14 @@ Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now)
 void Watch::observe(const Profile &profile, Watched *watched, const QDateTime &now)
 {
     // Whether the user's own systemd manager is up, which is the same question
-    // spec.md §5 asks as "does /run/user/<uid> exist". This is the stronger half
+    // docs/design.md §5 asks as "does /run/user/<uid> exist". This is the stronger half
     // of it: a session with no `app.slice` has no scope to count and none to
     // close, so there is nothing here either way -- and it is asked of the one
     // tree that already moves by variable, which is what lets the suite ask it
     // without a session.
     watched->session = m_proc->hasSession(watched->uid);
 
-    // The day's own file, spec.md §4. Read by the date of `now` and not by a
+    // The day's own file, docs/design.md §4. Read by the date of `now` and not by a
     // date the loop is holding on to, so the turn of midnight simply starts
     // reading and writing tomorrow's file.
     //
@@ -357,7 +357,7 @@ void Watch::observe(const Profile &profile, Watched *watched, const QDateTime &n
         watched->wrote = true;
     }
 
-    // The warnings first, and all of them, before anything closes. spec.md §6:
+    // The warnings first, and all of them, before anything closes. docs/design.md §6:
     // nobody is cut off cold, and a notification that arrives after the window
     // it was about is a notification about a window that is already shut.
     for (const Decision &decision : outcome.decisions) {
@@ -457,7 +457,7 @@ void Watch::closeScope(const Profile &profile, Watched *watched, const Decision 
         return;
     }
 
-    // spec.md §5: the whole cgroup in one write, with no reaping order, no
+    // docs/design.md §5: the whole cgroup in one write, with no reaping order, no
     // orphan and no hunting for pids that forked while the list was being read.
     Done killed;
     killed.what = Done::What::Kill;
@@ -487,7 +487,7 @@ void Watch::reconcileBlocked(Cycle *cycle)
     QStringList have = sortedWithoutRepeats(readBlocked(path, &error));
     if (!error.isEmpty()) {
         // A `blocked` that cannot be read is a `blocked` refusing nobody --
-        // `onerr=succeed`, spec.md §2 -- so this is worth saying and is not
+        // `onerr=succeed`, docs/design.md §2 -- so this is worth saying and is not
         // worth writing over: the file may be somebody's to repair.
         cycle->blockedError = error;
         cycle->blocked = have;

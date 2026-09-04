@@ -75,7 +75,7 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
     // means. It is `selectorMatches` that knows the difference -- `*` takes it,
     // a named selector cannot -- so below it is billed by the session, never by
     // a budget about one app, and judged by the profile's default verdict.
-    // Naming what could not be identified is still `status`'s job (spec.md §5);
+    // Naming what could not be identified is still `status`'s job (docs/design.md §5);
     // counting it is this one's.
     QVector<AppScope> live;
     for (const AppScope &scope : scopes) {
@@ -179,7 +179,7 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
         const int remaining =
             static_cast<int>(unspent < 0 ? 0 : qMin<qint64>(unspent, grace));
 
-        // The last word, once, before anything is closed -- spec.md §6: nobody
+        // The last word, once, before anything is closed -- docs/design.md §6: nobody
         // is cut off cold. `remaining` is what tells the caller whether to speak
         // now and act later or whether this is the end of it.
         if (!outcome.ledger.hasWarned(budget.id, kFinalWarning)) {

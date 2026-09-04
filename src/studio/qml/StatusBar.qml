@@ -10,7 +10,7 @@ import omahouse
 // what is happening instead of naming list keys while you type in a field.
 //
 // The blind spot has a permanent place here rather than a warning that appears
-// when it is bad. spec.md §5 asks omahouse to report what it cannot account for,
+// when it is bad. docs/design.md §5 asks omahouse to report what it cannot account for,
 // and the number is never zero on a live session -- the compositor's own
 // processes are in it. Said plainly and always, it reads as the honest limit it
 // is; said only sometimes, it would read as an alarm.

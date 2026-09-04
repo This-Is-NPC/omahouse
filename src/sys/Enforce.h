@@ -51,7 +51,7 @@ namespace omahouse {
 ///    that would hold if somebody ever added a third source of scopes.
 /// 3. **Is `session.slice` nowhere in it?** Structurally implied by 2, and
 ///    checked anyway, because this is the failure that kills the product:
-///    spec.md §5 makes `session.slice` untouchable, `cgroup.kill` there takes
+///    docs/design.md §5 makes `session.slice` untouchable, `cgroup.kill` there takes
 ///    Hyprland, `quickshell`, `pipewire` and the user's own systemd with it, and
 ///    what the person sees is a greeter two seconds after logging in with no
 ///    explanation. A check that is redundant today is a check that costs nothing
@@ -63,7 +63,7 @@ namespace omahouse {
 QString whyNotCloseable(const QString &cgroupRoot, const QString &appSlicePath,
                         const AppScope &scope);
 
-/// Why the block of spec.md §2 must not be acted on, or an empty string.
+/// Why the block of docs/design.md §2 must not be acted on, or an empty string.
 ///
 /// One question: is `/etc/omahouse` the directory this run is configured from?
 ///
@@ -108,7 +108,7 @@ public:
     /// processes all leave is a scope `cgroup.kill` is never asked about.
     virtual bool terminate(const AppScope &scope, int *count, QString *error) = 0;
 
-    /// `echo 1 > <scope>/cgroup.kill` -- the write of spec.md §5.
+    /// `echo 1 > <scope>/cgroup.kill` -- the write of docs/design.md §5.
     ///
     /// The whole cgroup at once, with no reaping order, no orphan and no hunting
     /// for pids that forked while the list was being read. It is also why the

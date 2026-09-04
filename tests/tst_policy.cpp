@@ -104,7 +104,7 @@ private slots:
 
         const Outcome outcome = evaluate(profile, {steam}, startOfDay(), at(19, 0), 2);
 
-        // Told, and closed. spec.md §5 asks for both: the notification is what
+        // Told, and closed. docs/design.md §5 asks for both: the notification is what
         // turns a window vanishing into a rule the user can name.
         QCOMPARE(outcome.decisions.size(), 2);
         QCOMPARE(outcome.decisions.at(0).kind, Decision::Kind::Warn);
@@ -136,7 +136,7 @@ private slots:
             QCOMPARE(decision.scopeUnit, steam.unit);
 
         // A denylist: the same engine with the default the other way up, which
-        // is spec.md §4's focus profile for an adult.
+        // is docs/design.md §4's focus profile for an adult.
         Profile denylist = profileOf();
         denylist.defaultVerdict = Verdict::Allow;
         denylist.rules = {Rule{QStringLiteral("steam"), Verdict::Deny}};
@@ -366,7 +366,7 @@ private slots:
     }
 
     // Observation mode. It counts, it says so, and it never closes anything --
-    // spec.md §5's default for a profile that has just been created.
+    // docs/design.md §5's default for a profile that has just been created.
     void neverClosesOrLogsOutWithoutEnforce()
     {
         Profile profile = profileOf();
@@ -419,7 +419,7 @@ private slots:
     }
 
     // The operator hands over ten minutes with the game open, and the game stays
-    // open. spec.md §7: an operator who cannot do that is not an operator.
+    // open. docs/design.md §7: an operator who cannot do that is not an operator.
     void addsAGrantToTheLimit()
     {
         Profile profile = profileOf();

@@ -8,7 +8,7 @@
 # of and the account table live on this side of the line instead, and the core
 # stays a thing that can be proved with a QDateTime made up on the spot.
 #
-# So does the loop that joins them: `Watch` is the caller `spec.md` §5 describes,
+# So does the loop that joins them: `Watch` is the caller `docs/design.md` §5 describes,
 # and it is here because the clock, the ledger file and the notification are all
 # the machine. Warning is a systemd-run, and that arrived with stage 6. Stage 7
 # grew this library rather than adding another for the two that were left:

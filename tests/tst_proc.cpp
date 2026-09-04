@@ -150,7 +150,7 @@ private slots:
             makeProcess(procRoot(m_tree.path()), pid,
                         QStringLiteral("/usr/bin/mpv (deleted)"));
 
-        // session.slice, spec.md §5's blind spot.
+        // session.slice, docs/design.md §5's blind spot.
         const QString session = sessionSlice(m_tree.path());
         makeCgroup(session + QStringLiteral("/wayland-wm@hyprland.desktop.service"), 8);
         makeCgroup(session + QStringLiteral("/pipewire.service"), 1);
@@ -227,7 +227,7 @@ private slots:
     // Kept, not dropped, and counted. `Policy::evaluate` bills it to every
     // budget whose selector is `*` -- eighteen processes is somebody using the
     // machine, name or no name -- and `status` reports it as something counted
-    // and not named, which is what spec.md §5 asks of everything the model
+    // and not named, which is what docs/design.md §5 asks of everything the model
     // cannot account for. What it cannot do is match a budget or a rule that
     // names an app, so its verdict is the profile's default.
     void keepsAScopeItCannotName()
@@ -254,7 +254,7 @@ private slots:
         QVERIFY(!gone->isLive());
     }
 
-    // The second signal of spec.md §5: what a scope is actually running, which
+    // The second signal of docs/design.md §5: what a scope is actually running, which
     // is the only thing that catches a launcher shim. Filled here and nowhere in
     // src/core -- reading it is reading the machine -- and never handed to
     // `Policy::evaluate`, which goes on matching by id.

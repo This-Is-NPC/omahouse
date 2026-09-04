@@ -4,7 +4,7 @@
 
 using namespace omahouse;
 
-// The identity of an app, which spec.md §5 says is the cgroup scope and not the
+// The identity of an app, which docs/design.md §5 says is the cgroup scope and not the
 // path of the executable. Every unit below is one the PoC actually saw
 // (poc/findings.md, rounds 1 to 3), because a parser tested against names
 // somebody invented is a parser tested against a format somebody invented.

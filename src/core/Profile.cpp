@@ -203,7 +203,7 @@ bool Profile::fromJson(const QJsonObject &object, Profile *out, QString *error)
 
     // A missing `default` is allow, and deliberately not deny. Guessing deny
     // for a half-written profile locks somebody out of their own machine, which
-    // is the failure mode `onerr=succeed` on the PAM line of spec.md §2 exists
+    // is the failure mode `onerr=succeed` on the PAM line of docs/design.md §2 exists
     // to refuse; guessing allow leaves a profile that counts and does not bite.
     QString defaultName;
     if (!wantsString(object, QStringLiteral("default"), named, &defaultName, false, error))

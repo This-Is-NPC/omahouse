@@ -1,6 +1,6 @@
 # omahouse — what a package cannot do from a file list.
 #
-# Four things: the two directories of spec.md §4, the service of §9, and the one
+# Four things: the two directories of docs/design.md §4, the service of §9, and the one
 # line of PAM that makes `logout` mean anything at all (§2). The last is the only
 # one that edits a file this package does not own, and it is the reason this
 # script is longer than it looks like it should be.
@@ -24,7 +24,7 @@ _pam_marker='pam_listfile.so.*file=/etc/omahouse/blocked'
 # the first time somebody runs out of time -- would refuse every login on the
 # system, at the console, with no way in to fix it. The same reasoning runs
 # through the whole of omahouse: the failure that leaves the rules soft is
-# recoverable, and the one that leaves them hard is not. spec.md §2 and §4 both
+# recoverable, and the one that leaves them hard is not. docs/design.md §2 and §4 both
 # say it, and this is the place where getting it wrong costs somebody their
 # machine rather than an afternoon.
 _pam_line='account    required   pam_listfile.so item=user sense=deny file=/etc/omahouse/blocked onerr=succeed'
@@ -85,7 +85,7 @@ _remove_pam_line() {
 }
 
 _directories() {
-    # 0644 files in 0755 directories -- spec.md §4. Root writes both and
+    # 0644 files in 0755 directories -- docs/design.md §4. Root writes both and
     # everybody reads them, which is what lets the fiscalised user run
     # `omahouse status` and see what is left of their own day.
     install -d -m 0755 /etc/omahouse
@@ -101,7 +101,7 @@ post_install() {
     # on a machine that has just installed this -- `watch` would find an empty
     # list and say so. It starts at the next boot, or when somebody asks.
     #
-    # Enabling at all is the deliberate part: spec.md §9. A stopped daemon is a
+    # Enabling at all is the deliberate part: docs/design.md §9. A stopped daemon is a
     # rule switched off, and this package exists to be a rule.
     systemctl enable omahouse.service >/dev/null 2>&1 || true
 

@@ -4,7 +4,7 @@
 
 using namespace omahouse;
 
-// How long, written the way spec.md §7 writes it on a command line.
+// How long, written the way docs/design.md §7 writes it on a command line.
 //
 // The refusals matter more than the readings. A parser that takes what it does
 // not understand for minutes turns `--limit 2h` into a two minute budget, and
@@ -23,7 +23,7 @@ private slots:
         QTest::newRow("hours") << QStringLiteral("2h") << 120;
         QTest::newRow("minutes") << QStringLiteral("45m") << 45;
         // A bare number is minutes, because minutes is what a budget is counted
-        // in: spec.md §4 writes `dailyMinutes` and §7 writes `45m` beside it.
+        // in: docs/design.md §4 writes `dailyMinutes` and §7 writes `45m` beside it.
         QTest::newRow("a bare number") << QStringLiteral("90") << 90;
         QTest::newRow("both") << QStringLiteral("1h30m") << 90;
         QTest::newRow("upper case") << QStringLiteral("1H30M") << 90;

@@ -1,8 +1,8 @@
-# The daemon of spec.md §5, which is not a daemon: it is `omahouse watch`, a verb
+# The daemon of docs/design.md §5, which is not a daemon: it is `omahouse watch`, a verb
 # of the same CLI everything else goes through. No second binary, no IPC, and no
 # second reader of /etc/omahouse/profiles.json.
 #
-# Why it is a system service and not something in the fiscalised session: spec.md
+# Why it is a system service and not something in the fiscalised session: docs/design.md
 # §1. Whatever runs as the fiscalised user is something that user can `pkill`,
 # and a rule that the person under it can switch off is not a rule. It is also
 # what makes the counting trustworthy -- the ledger under /var/lib is written by
@@ -22,7 +22,7 @@ Type=simple
 ExecStart=/usr/bin/omahouse watch
 # A stopped daemon is a rule switched off, and an account without privilege
 # cannot stop a system service -- so the only way this ends is a crash, and a
-# crash must not be how somebody gets their evening back. spec.md §9 puts it in
+# crash must not be how somebody gets their evening back. docs/design.md §9 puts it in
 # as many words.
 Restart=always
 RestartSec=2

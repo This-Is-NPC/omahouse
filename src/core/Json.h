@@ -5,7 +5,7 @@
 
 namespace omahouse {
 
-// The version both files of spec.md §4 carry, and the only one this code can
+// The version both files of docs/design.md §4 carry, and the only one this code can
 // read. A file from a newer omahouse is a file whose fields this one would have
 // to invent, so a reader that meets another number says so and stops.
 constexpr int kSchemaVersion = 1;
@@ -19,7 +19,7 @@ bool readJsonObject(const QString &path, QJsonObject *out, QString *error,
                     bool *missing = nullptr);
 
 /// Writes `object` to `path` through a sibling temporary file that is flushed,
-/// synced, and renamed over the target -- spec.md §4's tmp + rename.
+/// synced, and renamed over the target -- docs/design.md §4's tmp + rename.
 ///
 /// The core owns the routine and not the destination: a reader of the ledger is
 /// a program that has to see either the whole of the last tick or the whole of

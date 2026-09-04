@@ -248,7 +248,7 @@ QString humanClock(const QDateTime &when)
 }
 
 /// What the profile does when this budget runs out, as a sentence about the
-/// user rather than as the name of an enum. spec.md §8 asks the same of the
+/// user rather than as the name of an enum. docs/design.md §8 asks the same of the
 /// studio: the screen talks about programs and minutes.
 QString whenOut(OnExhausted action)
 {
@@ -501,7 +501,7 @@ void printCountedNotNamed(const QVector<AppScope> &unnamed, const Profile *profi
     }
 }
 
-/// What is in `session.slice`, where omahouse cannot look -- spec.md §5.
+/// What is in `session.slice`, where omahouse cannot look -- docs/design.md §5.
 ///
 /// Printed whether or not there is a profile, and phrased as a fact rather than
 /// as an alarm. On a live graphical session the number is never zero: Hyprland's
@@ -530,7 +530,7 @@ void printOutOfReach(const QVector<SessionUnit> &session, int sessionProcesses)
     out() << "  An app started outside `uwsm app` — a raw `exec` in a keybinding, or\n"
              "  something opened from a terminal — lands in the compositor's own unit.\n"
              "  It gets no scope, so it is not counted, and closing it would take the\n"
-             "  session with it. See spec.md §5.\n";
+             "  session with it.\n";
 }
 
 // The scopes whose id is not the name of what is running inside them.
@@ -539,7 +539,7 @@ void printOutOfReach(const QVector<SessionUnit> &session, int sessionProcesses)
 // machine, all of them VS Code, and a terminal that calls itself
 // `xdg-terminal-exec`. The rule still matches the id -- that is the model, and
 // `Policy::evaluate` never sees any of this -- so the only thing to do about it
-// is to say it, which is the same duty spec.md §5 puts on the blind spot.
+// is to say it, which is the same duty docs/design.md §5 puts on the blind spot.
 
 /// One id and one thing found running under it, however many scopes that was.
 ///
@@ -1223,7 +1223,7 @@ int wrote(const Globals &g, const Profile &profile, const QString &line)
 
 /// What an id would really let in, said to whoever is about to let it in.
 ///
-/// spec.md §5: an app launched through a shim takes the shim's name, so a rule
+/// docs/design.md §5: an app launched through a shim takes the shim's name, so a rule
 /// about `gtk-launch` is a rule about whatever gtk-launch launches next. This
 /// warns and does not refuse. It may be exactly what somebody meant -- and the
 /// same reading calls a flatpak a shim, because every flatpak on a machine runs
@@ -1287,7 +1287,7 @@ int cmdProfileAdd(const Globals &g, const QStringList &positionals, const Option
                   paths::configDirIsTheSystems(), g))
         return kUsage;
 
-    // spec.md §1: the operator is whoever is in wheel. A profile for one of them
+    // docs/design.md §1: the operator is whoever is in wheel. A profile for one of them
     // is somebody fiscalising themselves by accident, and the person who could
     // undo it is the same person it would be imposed on -- so it is refused
     // rather than warned about, which is the one place this stage refuses.
@@ -1341,11 +1341,11 @@ int cmdProfileAdd(const Globals &g, const QStringList &positionals, const Option
     profile.user = user;
     profile.displayName = options.name;
     profile.enabled = true;
-    // spec.md §5: a new profile observes. It counts and reports and closes
+    // docs/design.md §5: a new profile observes. It counts and reports and closes
     // nothing, because seeing a day of the report before switching the teeth on
     // is what the lan house always did.
     profile.enforce = false;
-    // And it allows, which is spec.md §4's reading of a missing `default`: a
+    // And it allows, which is docs/design.md §4's reading of a missing `default`: a
     // profile written by halves that counts without biting is recoverable, and
     // one that denies everything locks somebody out of their own machine.
     profile.defaultVerdict = Verdict::Allow;
@@ -1409,7 +1409,7 @@ int cmdProfileRemove(const Globals &g, const QStringList &positionals, const Opt
     if (!saveProfiles(QStringLiteral("profile remove"), kept))
         return kUsage;
 
-    // The account is left where it is, always. spec.md §7 spells the flag as
+    // The account is left where it is, always. docs/design.md §7 spells the flag as
     // `--keep-account`, which reads as though dropping it would delete the
     // account; this build never runs `userdel`. Deleting somebody's account and
     // their home directory because their screen time was taken off the books is
@@ -1491,7 +1491,7 @@ int cmdProfileDefault(const Globals &g, const QStringList &positionals, const Op
     profile->defaultVerdict = options.deny ? Verdict::Deny : Verdict::Allow;
     if (!saveProfiles(QStringLiteral("profile default"), profiles.all))
         return kUsage;
-    // The same engine, said the way spec.md §8 asks the studio to say it: a list
+    // The same engine, said the way docs/design.md §8 asks the studio to say it: a list
     // of programs, and not a form of verdicts.
     return wrote(g, *profile,
                  options.deny
@@ -1573,7 +1573,7 @@ int cmdRule(const Globals &g, const QString &verb, const QStringList &positional
         return kUsage;
     }
 
-    // `allow ... --limit 45m` is sugar, and spec.md §7 says why: the rule and the
+    // `allow ... --limit 45m` is sugar, and docs/design.md §7 says why: the rule and the
     // budget are one thought at the moment somebody is configuring, and making
     // them two commands is making the second one easy to forget.
     int minutes = 0;
@@ -1643,7 +1643,7 @@ int cmdLimit(const Globals &g, const QStringList &positionals, const Options &op
         return kUsage;
     }
 
-    // The session is the budget whose selector is `*` -- spec.md §2, and the
+    // The session is the budget whose selector is `*` -- docs/design.md §2, and the
     // whole reason there is no branch for "the user's time" anywhere in the
     // core. It is spelled differently on the command line because that is how
     // people say it, and it is the same structure underneath.
@@ -1765,7 +1765,7 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
     if (!loadLedger(user, today, &ledger, &missing, &status))
         return status;
 
-    // The day's own file, so the minutes expire when the file does: spec.md §4
+    // The day's own file, so the minutes expire when the file does: docs/design.md §4
     // resets the balance at the local turn of the date, and a grant that
     // survived it would be tomorrow's time given away today.
     Grant grant;
@@ -1816,7 +1816,7 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
 
 // -- watch -------------------------------------------------------------------
 //
-// The loop of spec.md §5, and the one verb of this build that keeps running.
+// The loop of docs/design.md §5, and the one verb of this build that keeps running.
 // The work itself is `Watch` in src/sys, because counting is reading the machine
 // and warning is speaking to it; what is here is the command line, the screen
 // and the journal.
@@ -2138,7 +2138,7 @@ int cmdWatch(const Globals &g, const QStringList &positionals, const Options &op
 
     // Two files now, and both are asked for before anything is read. The day's
     // ledger under /var/lib, and -- since the teeth went in -- the
-    // /etc/omahouse/blocked of spec.md §2, which is the half of `logout` that
+    // /etc/omahouse/blocked of docs/design.md §2, which is the half of `logout` that
     // does the work. A dry run asks for neither, which is what lets anybody
     // point the roots at a directory of their own and watch one cycle of their
     // own session.
@@ -2207,7 +2207,7 @@ int cmdWatch(const Globals &g, const QStringList &positionals, const Options &op
                             "end this run abruptly rather than after the cycle it is in"));
     }
 
-    // Read again every cycle, and not held from here. spec.md §1: the operator
+    // Read again every cycle, and not held from here. docs/design.md §1: the operator
     // hands over ten minutes with the game still running, and a daemon holding a
     // copy of the rules from when it started cannot honour that. A file that
     // stops parsing is complained about once and the loop keeps its last good

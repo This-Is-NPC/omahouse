@@ -4,20 +4,20 @@
  "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
 
 <!--
-  spec.md §3: the studio is never root. It reads with the same two libraries the
+  docs/design.md §3: the studio is never root. It reads with the same two libraries the
   CLI reads with — everything it reads is world readable, so looking needs no
   privilege at all — and every write it does is `pkexec omahouse <verb>`, which
   is the CLI, with the same checks and the same refusals.
 
   So there is one action here and not one per verb. What is being authorised is
   "run omahouse as root", and the verbs behind it are the writing half of
-  spec.md §7: profile add, remove, enforce, default, allow, deny, limit, grant.
+  docs/design.md §7: profile add, remove, enforce, default, allow, deny, limit, grant.
   The reading half needs none of this and must never be behind it — the
   fiscalised user runs `omahouse status` to see what is left of their own day,
   and a prompt for an administrator's password to read your own balance is a
   product nobody uses twice.
 
-  `auth_admin` and not `auth_admin_keep`: the operator of spec.md §1 is whoever
+  `auth_admin` and not `auth_admin_keep`: the operator of docs/design.md §1 is whoever
   is in wheel, and the thing being changed is somebody else's evening. A five
   minute window where the machine will do it again without asking is a window
   where the person it is about is standing at the same keyboard.

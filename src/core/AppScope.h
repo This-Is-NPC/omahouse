@@ -5,7 +5,7 @@
 namespace omahouse {
 
 // One systemd scope under `app.slice`, which is what the PoC settled on as the
-// identity of a running app -- see spec.md §5 and poc/findings.md.
+// identity of a running app -- see docs/design.md §5 and poc/findings.md.
 //
 // The path of the executable was the earlier answer and it does not work: the
 // PoC found 21 processes sharing /usr/lib/chromium/chromium, and 26 sharing
@@ -21,7 +21,7 @@ struct AppScope {
     /// scope nothing can name, not a scope nothing is running: it still counts
     /// towards `*`, and what it cannot do is match a budget or a rule that
     /// names an app, so its verdict is the profile's default. See
-    /// `selectorMatches` and spec.md §5.
+    /// `selectorMatches` and docs/design.md §5.
     QString id;
     /// The unit as systemd spells it, escapes and random suffix and all. What a
     /// Close decision names, because it is what `cgroup.kill` is found under.
@@ -86,7 +86,7 @@ struct AppScope {
 /// into something id-shaped. An app whose id came out wrong is worse than an app
 /// with no id at all: the first quietly matches the wrong budget or falls
 /// through to the default verdict under a name nobody wrote, and the second is a
-/// thing `omahouse status` can report as unseen, which is what spec.md §5 asks
+/// thing `omahouse status` can report as unseen, which is what docs/design.md §5 asks
 /// of everything the model cannot account for.
 QString scopeIdFromUnit(const QString &unit, QString *error);
 

@@ -76,7 +76,7 @@ private slots:
         QCOMPARE(whyNotCloseable(Proc::systemCgroupRoot(), slice, code), QString());
 
         // And a scope nothing can name. It is still an app scope, it is still
-        // under app.slice, and spec.md §5 is explicit that under an allowlist
+        // under app.slice, and docs/design.md §5 is explicit that under an allowlist
         // with the teeth in it is closed like anything else.
         const AppScope nameless =
             scopeAt(slice + QStringLiteral("/app-graphical.slice/")
@@ -87,7 +87,7 @@ private slots:
 
     // -- the one that justifies the whole file -------------------------------
 
-    // `session.slice` is never judged -- spec.md §5 -- and this is the failure
+    // `session.slice` is never judged -- docs/design.md §5 -- and this is the failure
     // that kills the product: an allowlist that takes Hyprland down two seconds
     // after somebody logs in, leaving them at a greeter with no explanation. The
     // prefix test alone already refuses it; the name is looked for as well,
@@ -189,7 +189,7 @@ private slots:
 
     // -- the block and the termination are one action ------------------------
 
-    // spec.md §2. A `blocked` in $TMPDIR is a file no PAM stack reads, so a
+    // docs/design.md §2. A `blocked` in $TMPDIR is a file no PAM stack reads, so a
     // `terminate-user` behind it is a session ended with nothing holding the
     // door -- which poc/findings.md round 2 measured being undone by the tty1
     // autologin in the same breath.
@@ -284,7 +284,7 @@ private slots:
         QCOMPARE(loginctlProgram(), QStringLiteral("loginctl"));
     }
 
-    // The file the PAM line of spec.md §2 names, spelt in one place.
+    // The file the PAM line of docs/design.md §2 names, spelt in one place.
     void theBlockedFileIsBesideTheProfiles()
     {
         qputenv("OMAHOUSE_CONFIG_DIR", QFile::encodeName(m_tree.path()));

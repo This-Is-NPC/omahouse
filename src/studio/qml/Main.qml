@@ -135,7 +135,7 @@ Window {
                     label: "back to the people",
                     usable: win.view !== 1 })
 
-        // The subject reads and nothing else. spec.md §8: the fiscalised account
+        // The subject reads and nothing else. docs/design.md §8: the fiscalised account
         // is shown what is left today, and the decisions are the operator's.
         if (!win.operating)
             return rows
@@ -336,8 +336,8 @@ Window {
         if (id === "new") {
             prompt.ask("new", "Which account?",
                        "The user name on this machine. An account in wheel is refused: "
-                       + "spec.md §1 makes the operator whoever is in wheel, and a profile "
-                       + "for one of them is somebody fiscalising themselves by accident.",
+                       + "the operator is whoever is in wheel, and a profile for one of them "
+                       + "is somebody fiscalising themselves by accident.",
                        "", "", false)
             return
         }
@@ -1035,7 +1035,7 @@ Window {
                                               + (programRow.app.pids === 1 ? "" : "es")
                                     }
                                 }
-                                // The shim, said out loud. spec.md §5: an app
+                                // The shim, said out loud. docs/design.md §5: an app
                                 // launched through one takes its name, so a rule
                                 // about `gtk-launch` is a rule about whatever it
                                 // launches next -- and nobody can weigh that

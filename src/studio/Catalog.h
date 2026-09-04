@@ -26,7 +26,7 @@ struct DesktopApp {
     /// The `Name` of the entry, which is what a person calls the program.
     QString name;
     /// The program `Exec` starts, without its arguments. This is the shim
-    /// evidence of spec.md §5 for an entry that is not running: an entry whose
+    /// evidence of docs/design.md §5 for an entry that is not running: an entry whose
     /// `Exec` is `gtk-launch` names a launcher and not a program, and the
     /// operator is shown that before writing the rule rather than after.
     QString exec;

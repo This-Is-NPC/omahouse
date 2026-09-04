@@ -67,7 +67,7 @@ QString userStateDir(const QString &user)
 
 QString ledgerFile(const QString &user, const QDate &date)
 {
-    // The name is the date as spec.md §4 writes it, and it is built here rather
+    // The name is the date as docs/design.md §4 writes it, and it is built here rather
     // than by the caller so that the reader of a day and the writer of it cannot
     // disagree about the format.
     return userStateDir(user) + QLatin1Char('/')

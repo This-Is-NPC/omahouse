@@ -9,7 +9,7 @@ namespace omahouse {
 
 namespace {
 
-/// ISO 8601 with the offset always written, as in spec.md §4's
+/// ISO 8601 with the offset always written, as in docs/design.md §4's
 /// `2026-09-03T19:12:04-03:00`. Qt leaves the offset off a local-time value,
 /// and a stamp with no offset is a stamp that means a different instant either
 /// side of a DST change -- which a day of accounting will eventually straddle.

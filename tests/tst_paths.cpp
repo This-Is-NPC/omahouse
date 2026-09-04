@@ -4,7 +4,7 @@
 
 using namespace omahouse;
 
-// Where the two files of spec.md §4 are looked for, and the two doors that let a
+// Where the two files of docs/design.md §4 are looked for, and the two doors that let a
 // suite look for them somewhere it may write.
 //
 // The defaults are asserted as literals on purpose. `/etc/omahouse/profiles.json`

@@ -99,7 +99,7 @@ const Budget *budgetFor(const Profile &profile, const QString &id)
 ///
 /// `allowanceSeconds` is the limit plus whatever an operator handed over today,
 /// because a grant that did not show up in the limit would read on this window
-/// as though it had gone nowhere -- and `spec.md` §7 keeps `grant` precisely so
+/// as though it had gone nowhere -- and `docs/design.md` §7 keeps `grant` precisely so
 /// that an operator can add ten minutes and see it land.
 QVariantMap clockOf(const Budget &budget, const Ledger &ledger, bool running)
 {
@@ -192,7 +192,7 @@ QVariantList programsOf(const Profile &profile, const Ledger &ledger,
         row.insert(QStringLiteral("running"), live.pids > 0);
         row.insert(QStringLiteral("exe"), live.exe);
         row.insert(QStringLiteral("exeCount"), live.exeCount);
-        // Said out loud rather than corrected. spec.md §5: the id is what the
+        // Said out loud rather than corrected. docs/design.md §5: the id is what the
         // rule matches and the executable is what is really in there, and they
         // fail in opposite places -- so an operator about to release
         // `gtk-launch` is shown the VS Code inside it, and decides.
@@ -418,7 +418,7 @@ void House::refresh()
 
     // Nobody chooses the face on screen, and there is no switch to flip.
     //
-    // spec.md §1 makes the operator whoever is in wheel, and `profile add`
+    // docs/design.md §1 makes the operator whoever is in wheel, and `profile add`
     // refuses to write a profile for one of them -- so the two answers cannot
     // both be true for the same account by any route this program offers. Wheel
     // is asked first anyway, because if a machine ever did have both, the reply
@@ -495,7 +495,7 @@ void House::refresh()
         person.insert(QStringLiteral("enabled"), profile.enabled);
         person.insert(QStringLiteral("enforce"), profile.enforce);
         // The word the file carries is `deny`, and it is never printed. The
-        // window says what it does to programs: spec.md §8 asks for programs and
+        // window says what it does to programs: docs/design.md §8 asks for programs and
         // minutes, not a form of verdicts.
         person.insert(QStringLiteral("allowlist"), profile.defaultVerdict == Verdict::Deny);
         person.insert(QStringLiteral("policy"),

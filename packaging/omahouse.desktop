@@ -7,7 +7,7 @@ GenericName=Screen time
 GenericName[pt_BR]=Tempo de tela
 Comment=Which programs each account may open, and for how long
 Comment[pt_BR]=Quais programas cada conta pode abrir, e por quanto tempo
-# The window of spec.md §8, and never the daemon. It opens as whoever launched
+# The window of docs/design.md §8, and never the daemon. It opens as whoever launched
 # it and chooses its face from that -- the operator sees the profiles and the
 # balances, and somebody under a profile sees what is left of their own day.
 # Writing goes out through `pkexec omahouse`, so this line is never `pkexec`.

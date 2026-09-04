@@ -9,7 +9,7 @@
 
 namespace omahouse {
 
-// One day of one user, spec.md §4: seconds spent per budget, the time an
+// One day of one user, docs/design.md §4: seconds spent per budget, the time an
 // operator handed over, and what the daemon already said out loud.
 //
 // The events are not a log kept for the report's sake. They are where the

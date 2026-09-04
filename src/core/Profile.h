@@ -6,7 +6,7 @@
 
 namespace omahouse {
 
-// The three nouns of spec.md §2 and nothing else. A profile is an account under
+// The three nouns of docs/design.md §2 and nothing else. A profile is an account under
 // rules, a rule is a (selector, verdict) pair, a budget is a daily counter with
 // a selector, a limit and an action for running out.
 //
@@ -63,7 +63,7 @@ struct Profile {
     /// False is observation: count and report, close and log out nothing. The
     /// default for a profile that has just been written, because seeing a day of
     /// the report before switching the teeth on is what the lan house always
-    /// did (spec.md §5).
+    /// did (docs/design.md §5).
     bool enforce = false;
     /// What happens to an app no rule names. `deny` makes the rules an
     /// allowlist, `allow` makes them a denylist, and it is the same engine.
@@ -85,7 +85,7 @@ struct Profile {
     static bool fromJson(const QJsonObject &object, Profile *out, QString *error);
 };
 
-/// The whole of /etc/omahouse/profiles.json, spec.md §4.
+/// The whole of /etc/omahouse/profiles.json, docs/design.md §4.
 QJsonObject profilesToJson(const QVector<Profile> &profiles);
 bool profilesFromJson(const QJsonObject &root, QVector<Profile> *out, QString *error);
 

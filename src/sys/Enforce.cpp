@@ -72,7 +72,7 @@ QString whyNotCloseable(const QString &cgroupRoot, const QString &appSlicePath,
 
     // 3. And `session.slice` nowhere in it. Implied by the line above and
     //    checked anyway: this is the one mistake that ends somebody's session
-    //    without ever meaning to, and spec.md §5 makes the rule structural.
+    //    without ever meaning to, and docs/design.md §5 makes the rule structural.
     if (path.contains(QLatin1String("/session.slice/"))
         || path.endsWith(QLatin1String("/session.slice"))) {
         return QStringLiteral("%1 is in session.slice, which is never judged").arg(path);

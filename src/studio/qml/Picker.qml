@@ -11,7 +11,7 @@ import omahouse
 // entries under it are the programs that would get a scope the next time they
 // are launched, and their id is inferred from the file name.
 //
-// And it says when a scope is not what its name says. spec.md §5: an app started
+// And it says when a scope is not what its name says. docs/design.md §5: an app started
 // through a shim takes the shim's name, so releasing `gtk-launch` is releasing
 // whatever it launches next. The line under the id is what is really running in
 // there, in the urgent colour when the two disagree. An operator cannot weigh

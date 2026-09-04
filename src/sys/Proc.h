@@ -10,7 +10,7 @@
 namespace omahouse {
 
 // One unit under `session.slice` that is holding processes omahouse can neither
-// count nor close -- spec.md §5, "O ponto cego".
+// count nor close -- docs/design.md §5, "O ponto cego".
 //
 // It is not a list of things that went wrong. It is the shape of what the model
 // cannot reach: an app started by a raw `exec` from a keybinding, or from inside
@@ -68,7 +68,7 @@ public:
     bool cgroupRootIsTheSystems() const { return m_cgroupRoot == systemCgroupRoot(); }
 
     /// `<root>/user.slice/user-<uid>.slice/user@<uid>.service/app.slice`, the
-    /// path of spec.md §5 step 2.
+    /// path of docs/design.md §5 step 2.
     QString appSlicePath(uid_t uid) const;
     QString sessionSlicePath(uid_t uid) const;
 

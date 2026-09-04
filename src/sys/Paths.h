@@ -5,7 +5,7 @@
 
 namespace omahouse {
 
-// Where the two files of spec.md §4 live on this machine.
+// Where the two files of docs/design.md §4 live on this machine.
 //
 // In `src/sys` and not in `src/core` for the one reason everything else here is:
 // it reads the environment. The core is handed a path and writes to it; deciding
@@ -30,7 +30,7 @@ QString systemConfigDir();
 
 /// `<configDir>/profiles.json` -- root writes it, everyone reads it.
 QString profilesFile();
-/// `<configDir>/blocked` -- the file the PAM line of spec.md §2 reads.
+/// `<configDir>/blocked` -- the file the PAM line of docs/design.md §2 reads.
 ///
 /// Not JSON, and it cannot be: `pam_listfile.so` reads one name per line, and
 /// the whole point of §2 is that the block is a stock PAM module and not a

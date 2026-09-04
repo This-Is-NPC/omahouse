@@ -92,7 +92,7 @@ bool writeJsonAtomically(const QString &path, const QJsonObject &object, QString
                          .arg(path, QString::fromLocal8Bit(::strerror(errno)));
         return false;
     }
-    // 0644, spec.md §4: root writes both files and everybody reads them, so the
+    // 0644, docs/design.md §4: root writes both files and everybody reads them, so the
     // fiscalised user can run `omahouse status` and see what is left. A
     // temporary file is created 0600, so this is a widening and has to be said
     // out loud rather than left to the umask of whoever started the daemon.

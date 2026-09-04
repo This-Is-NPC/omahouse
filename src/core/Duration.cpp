@@ -26,7 +26,7 @@ bool minutesFromDuration(const QString &text, int *minutes, QString *error)
 
     // Every shape in one pass: a run of digits, then the unit it is in, then
     // maybe another pair. `90` is the pair with no unit, and it is minutes
-    // because minutes is what a budget is counted in -- spec.md §4 writes
+    // because minutes is what a budget is counted in -- docs/design.md §4 writes
     // `dailyMinutes`, and the CLI of §7 writes `45m` beside it.
     qint64 total = 0;
     int index = 0;

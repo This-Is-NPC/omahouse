@@ -65,7 +65,7 @@ struct Outcome {
 /// the time -- `scopes` is what Proc saw and `now` is when it saw it.
 ///
 /// The returned ledger is always dated `now`: a ledger from yesterday comes back
-/// as an empty today, because spec.md §4 keeps one file per day and the balance
+/// as an empty today, because docs/design.md §4 keeps one file per day and the balance
 /// resets at the local turn of the date.
 Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const Ledger &ledger,
                  const QDateTime &now, int tickSeconds);

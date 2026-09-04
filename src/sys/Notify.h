@@ -7,7 +7,7 @@
 
 namespace omahouse {
 
-// How a daemon that is root speaks to a session it is not in -- spec.md §6.
+// How a daemon that is root speaks to a session it is not in -- docs/design.md §6.
 //
 // There is no helper process inside the fiscalised session, and there must not
 // be: whatever runs as the fiscalised user is something that user can kill, and

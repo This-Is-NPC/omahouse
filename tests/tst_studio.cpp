@@ -524,7 +524,7 @@ QVariantList TestStudio::todayOf(const QString &user) const
 void TestStudio::opensOnTheFaceOfWhoeverRanIt()
 {
     // Nobody chooses it, and there is no switch on screen to look for. It is
-    // wheel or it is not -- spec.md §1 -- and this machine's answer is whatever
+    // wheel or it is not -- docs/design.md §1 -- and this machine's answer is whatever
     // it is; what is asserted is that the window agrees with the account table
     // rather than with a default.
     QString why;
@@ -893,7 +893,7 @@ void TestStudio::saysWhatIsReallyInsideAShim()
     if (!root()->property("operating").toBool())
         QSKIP("not in wheel");
 
-    // spec.md §5, and the reason this window exists rather than a form: an
+    // docs/design.md §5, and the reason this window exists rather than a form: an
     // operator must not be able to release `gtk-launch` without being shown the
     // VS Code inside it.
     //
@@ -1190,7 +1190,7 @@ void TestStudio::seedTheExampleHousehold()
 /// A session for that account: three app scopes and the compositor's own unit.
 ///
 /// One scope agrees with its id, one is a launcher shim holding something else
-/// entirely -- spec.md §5, the reason this window exists rather than a form --
+/// entirely -- docs/design.md §5, the reason this window exists rather than a form --
 /// and one is a `tmux-spawn` scope the parser cannot name at all.
 void TestStudio::seedTheExampleSession(uid_t uid)
 {

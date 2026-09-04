@@ -5,7 +5,7 @@
 
 namespace omahouse {
 
-// `/etc/omahouse/blocked`, and the other half of `logout` -- spec.md §2.
+// `/etc/omahouse/blocked`, and the other half of `logout` -- docs/design.md §2.
 //
 // `loginctl terminate-user` on its own is theatre. poc/findings.md round 2
 // measured it: the session went down in seconds and the tty1 autologin brought
@@ -22,7 +22,7 @@ namespace omahouse {
 // the reason this file can be missing without anything breaking: a `blocked`
 // that is not there, or not readable, lets everybody in. The failure that leaves
 // the rules soft is recoverable and the one that leaves them hard is not, which
-// is the same choice `default: allow` makes in spec.md §4.
+// is the same choice `default: allow` makes in docs/design.md §4.
 //
 // The format is not ours. `pam_listfile` reads one name per line, so this is the
 // one file omahouse writes whose shape somebody else chose, and it is written

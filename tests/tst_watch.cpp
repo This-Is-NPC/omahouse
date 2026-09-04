@@ -130,7 +130,7 @@ const Done *firstOf(const QVector<Done> &done, Done::What what)
 
 } // namespace
 
-// The loop of spec.md §5, against a machine that is a directory.
+// The loop of docs/design.md §5, against a machine that is a directory.
 //
 // Everything the loop touches moves: the cgroup tree by `OMAHOUSE_CGROUP_ROOT`,
 // the ledgers by `OMAHOUSE_STATE_DIR`, the notification by the `Notifier` it is
@@ -259,7 +259,7 @@ private slots:
 
     // -- the cycle -----------------------------------------------------------
 
-    // spec.md §5 steps 2 to 6, in one turn: the scopes are listed, the budgets
+    // docs/design.md §5 steps 2 to 6, in one turn: the scopes are listed, the budgets
     // with a live app matching them are debited once each, and the day is
     // written.
     void countsOneTickAndWritesTheDay()
@@ -479,7 +479,7 @@ private slots:
 
     // -- logout is two things ------------------------------------------------
 
-    // spec.md §2, and the order it has to happen in. The name goes into
+    // docs/design.md §2, and the order it has to happen in. The name goes into
     // `blocked` first, and only a user who is really in that file has their
     // session ended -- because poc/findings.md round 2 measured a bare
     // `terminate-user` being undone by the tty1 autologin in the same breath.
@@ -549,7 +549,7 @@ private slots:
         QCOMPARE(blockedNames(), QStringList({m_user}));
 
         // An operator hands over ten minutes with the game still open --
-        // spec.md §1 -- and the very next cycle lets them back in.
+        // docs/design.md §1 -- and the very next cycle lets them back in.
         Ledger day3 = readBack(day);
         Grant grant;
         grant.at = QDateTime(day, QTime(19, 0, 1));
@@ -569,7 +569,7 @@ private slots:
         QVERIFY(unblock->carriedOut);
     }
 
-    // The turn of the day, which is the one spec.md §2 names in as many words.
+    // The turn of the day, which is the one docs/design.md §2 names in as many words.
     // Nothing does it: the balance is a file per day, so tomorrow's ledger is
     // empty, so no logout stands, so the name is not written.
     void theTurnOfTheDayLiftsTheBlock()
@@ -685,7 +685,7 @@ private slots:
 
     // -- the day -------------------------------------------------------------
 
-    // spec.md §4 keeps one file per day and the balance resets at the local turn
+    // docs/design.md §4 keeps one file per day and the balance resets at the local turn
     // of the date. The loop reads and writes by the date of `now`, so a session
     // open across midnight simply starts writing tomorrow's file.
     void theTurnOfTheDayStartsANewFile()

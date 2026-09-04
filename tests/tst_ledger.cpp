@@ -17,7 +17,7 @@ using namespace omahouse;
 
 namespace {
 
-// The profiles.json of spec.md §4, copied whole. The test reads the spec's own
+// The profiles.json of docs/design.md §4, copied whole. The test reads the spec's own
 // bytes rather than the ones this code happens to write, because a round trip
 // through a writer and a reader that agree with each other and with nothing else
 // is a round trip that proves nothing about the file on disk.
@@ -92,7 +92,7 @@ uint inodeOf(const QString &path)
 } // namespace
 
 // The day's accounting: what gets debited, when the day starts over, and the two
-// files of spec.md §4 going out to disk and coming back.
+// files of docs/design.md §4 going out to disk and coming back.
 class LedgerTest : public QObject {
     Q_OBJECT
 
@@ -143,7 +143,7 @@ private slots:
         QCOMPARE(dying.ledger.secondsFor(QStringLiteral("session")), 2);
     }
 
-    // Midnight. spec.md §4 keeps one file per day, so a ledger from yesterday is
+    // Midnight. docs/design.md §4 keeps one file per day, so a ledger from yesterday is
     // a balance of nothing today -- and the session that was open across the turn
     // just carries on debiting the new one.
     void startsTheDayOverWhenTheDateTurns()
@@ -285,7 +285,7 @@ private slots:
         QVERIFY(back.hasDenied(QStringLiteral("app-Hyprland-steam-031bdc27.scope")));
     }
 
-    // tmp + rename, spec.md §4. A reader of the ledger sees the whole of one
+    // tmp + rename, docs/design.md §4. A reader of the ledger sees the whole of one
     // tick or the whole of the one before it, never the first half of a write
     // that a power cut ended.
     void writesTheLedgerByRename()
@@ -329,7 +329,7 @@ private slots:
         QCOMPARE(leftovers, QStringList{QStringLiteral("2026-09-03.json")});
 
         // 0644: root writes it and the fiscalised user reads it to see what is
-        // left (spec.md §4).
+        // left (docs/design.md §4).
         const QFileDevice::Permissions mode = QFile(path).permissions();
         QVERIFY(mode.testFlag(QFileDevice::ReadOwner));
         QVERIFY(mode.testFlag(QFileDevice::WriteOwner));

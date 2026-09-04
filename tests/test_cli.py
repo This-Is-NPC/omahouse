@@ -343,7 +343,7 @@ def check_help_and_refusals(box):
     assert "unknown command" in unknown.stderr
     assert unknown.stdout == ""
 
-    # The writing verbs of spec.md §7 are on the screen too, now that they do
+    # The writing verbs of docs/design.md §7 are on the screen too, now that they do
     # something.
     for verb in ("allow", "deny", "limit", "grant", "profile add"):
         assert verb in helped.stdout, verb
@@ -401,7 +401,7 @@ def check_status_scans_without_a_profile(box):
 
 
 def check_status_reports_what_it_cannot_see(box):
-    """spec.md §5, and the two things it asks for are not the same thing.
+    """docs/design.md §5, and the two things it asks for are not the same thing.
 
     A `tmux-spawn-<uuid>.scope` is counted and not named: omahouse knows it is
     there, spends the session on it, and could close it, and what it has no id
@@ -631,7 +631,7 @@ def check_report_of_one_day(box):
     assert row_for(reported.stdout, "session") == ["session", "1h10m"]
     assert row_for(reported.stdout, "chromium") == ["chromium", "45m"]
 
-    # The grants and the events of spec.md §4, which are not decoration: they are
+    # The grants and the events of docs/design.md §4, which are not decoration: they are
     # where a once-only decision remembers that it has fired.
     assert "GRANTS" in reported.stdout
     assert "+10m" in reported.stdout
@@ -767,7 +767,7 @@ def a_wheel_user():
 
     Read from the machine rather than invented, because the refusal is about
     what NSS says and not about a name. `root` is asserted separately and is
-    always there; a wheel member is what the rule of spec.md §1 is actually
+    always there; a wheel member is what the rule of docs/design.md §1 is actually
     about, and a machine without one is a machine where that half is skipped
     out loud.
     """
@@ -788,14 +788,14 @@ def check_a_profile_from_nothing_to_read_back(box):
 
     No root anywhere in here: every root the binary writes to has been moved to
     a directory of its own, which is the same door stage 4 read through. What
-    lands on disk is asserted against spec.md §4 field by field, because a verb
+    lands on disk is asserted against docs/design.md §4 field by field, because a verb
     that writes a file only this program can read is a verb that has quietly
     invented its own format.
     """
     made = box.run("profile", "add", "julia", "--name", "Júlia")
     assert made.returncode == 0, made.stderr
     assert str(box.config / "profiles.json") in made.stdout
-    # A new profile observes, and it allows -- spec.md §5 and §4. Somebody who
+    # A new profile observes, and it allows -- docs/design.md §5 and §4. Somebody who
     # gets this far and stops has a profile that counts and reports and cannot
     # lock anybody out of their own machine.
     assert "observing" in made.stdout
@@ -811,7 +811,7 @@ def check_a_profile_from_nothing_to_read_back(box):
         "rules": [], "budgets": [],
     }
 
-    # The four editing verbs of spec.md §7, in the order somebody configuring
+    # The four editing verbs of docs/design.md §7, in the order somebody configuring
     # would reach for them.
     assert box.run("profile", "default", "julia", "--deny").returncode == 0
     assert box.run("allow", "julia", "chromium", "--limit", "45m").returncode == 0
@@ -831,7 +831,7 @@ def check_a_profile_from_nothing_to_read_back(box):
         {"match": "code", "verdict": "allow"},
         {"match": "steam", "verdict": "deny"},
     ]
-    # `allow --limit` is sugar for the rule and the budget at once, spec.md §7.
+    # `allow --limit` is sugar for the rule and the budget at once, docs/design.md §7.
     # The session is the budget whose selector is `*` and nothing else, §2.
     assert profile["budgets"] == [
         {"id": "chromium", "match": "chromium", "dailyMinutes": 45, "onExhausted": "close"},
@@ -869,7 +869,7 @@ def check_a_profile_from_nothing_to_read_back(box):
 
 
 def check_grant_writes_the_days_ledger(box):
-    """The verb spec.md §7 says is the difference between an operator and a form.
+    """The verb docs/design.md §7 says is the difference between an operator and a form.
 
     Ten minutes, with the app open, without restarting anything. It lands in the
     day's own file, so it expires when the file does.
@@ -957,7 +957,7 @@ def check_allow_warns_about_what_is_really_inside(box):
 
 
 def check_it_refuses_a_profile_for_an_administrator(box):
-    """spec.md §1: the operator is whoever is in wheel.
+    """docs/design.md §1: the operator is whoever is in wheel.
 
     A profile for one of them is somebody fiscalising themselves by accident,
     and the person who could undo it is the person it would be imposed on.
@@ -1109,7 +1109,7 @@ def check_the_writing_verbs_want_a_profile_that_is_there(box):
 
 # -- watch --------------------------------------------------------------------
 #
-# The loop of spec.md §5, driven the same way everything else here is: the four
+# The loop of docs/design.md §5, driven the same way everything else here is: the four
 # roots in a temporary directory, no root, no session of the fiscalised user, and
 # `notify-send` pointed at a script that writes down what it was handed.
 #
@@ -1268,7 +1268,7 @@ def check_watch_debits_the_day_and_warns_once(box):
     said = box.said()
     assert len(said) == 1, said
     assert said[0][0] == "5 minutes left"
-    # The clock time of spec.md §6's example, worked out by the caller from the
+    # The clock time of docs/design.md §6's example, worked out by the caller from the
     # seconds the core handed back.
     assert re.fullmatch(r"Your session runs out at \d\d:\d\d\.", said[0][1]), said
 
@@ -1332,7 +1332,7 @@ def check_watch_decides_the_teeth_and_never_bites_a_tree_it_was_lent(box):
 
 
 def check_watch_writes_the_block_and_refuses_to_end_a_session_behind_it(box):
-    """spec.md §2: `logout` is two things, and the second needs the first.
+    """docs/design.md §2: `logout` is two things, and the second needs the first.
 
     The name goes into `blocked` -- one per line, because `pam_listfile` reads it
     -- and the session is only ended for a user who is really in that file, on a
@@ -1365,7 +1365,7 @@ def check_watch_writes_the_block_and_refuses_to_end_a_session_behind_it(box):
     assert "end-session" in acts and not acts["end-session"]["carriedOut"]
 
     # And the name comes out on its own, with nothing having to know the file
-    # exists. An operator hands over ten minutes -- spec.md §1, with the game
+    # exists. An operator hands over ten minutes -- docs/design.md §1, with the game
     # still running -- and the next cycle lets them back in.
     granted = box.run("grant", USER, "--session", "10m")
     assert granted.returncode == 0, granted.stderr

@@ -157,7 +157,7 @@ bool isAdministrator(const QString &user, QString *why)
     // A machine with no wheel group at all is a machine where nobody is in it.
     // Not an error: `sudo` on a Debian is a different group, and answering "I
     // do not know, so nobody" here would be answering a question about a machine
-    // this code is not on. spec.md §1 says wheel, so wheel is what is asked.
+    // this code is not on. docs/design.md §1 says wheel, so wheel is what is asked.
     if (!haveWheel)
         return false;
 

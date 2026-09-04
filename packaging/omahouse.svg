@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   A house with a clock in it, which is the whole product in one shape: the roof
-  is the household and the hands are the budget of spec.md §2.
+  is the household and the hands are the budget of docs/design.md §2.
 
   Monochrome, on `currentColor`, so it takes the theme rather than fighting it,
   which is the same choice Theme.cpp makes when it reads the omarchy palette at

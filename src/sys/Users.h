@@ -40,7 +40,7 @@ bool runningAsRoot();
 /// Whether `user` administers this machine, and in `why` the reason in words --
 /// `is root`, `is in wheel`.
 ///
-/// spec.md §1 makes the operator "whoever is in wheel", so a profile for one of
+/// docs/design.md §1 makes the operator "whoever is in wheel", so a profile for one of
 /// them is a person fiscalising themselves by accident, which `profile add`
 /// refuses. Both halves of the group are looked at: the primary gid and the
 /// member list, because `usermod -aG wheel` and a fresh account with wheel as
@@ -59,7 +59,7 @@ bool isAdministrator(const QString &user, QString *why = nullptr);
 /// built it.
 QString useraddProgram();
 
-/// `useradd -m <user>`, and nothing else -- spec.md §7. False with the sentence
+/// `useradd -m <user>`, and nothing else -- docs/design.md §7. False with the sentence
 /// the command printed, or with why it could not be started.
 bool createAccount(const QString &user, QString *error);
 
