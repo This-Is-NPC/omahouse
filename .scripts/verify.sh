@@ -9,13 +9,17 @@
 # wherever `git commit` runs, and usage-check says so plainly when it is not.
 #
 # The gate grows by gaining a line here as the thing it would check comes into
-# existence: `qml-check.sh` with the studio of stage 8. A step that runs before
-# there is anything for it to look at is a green light nobody earned, so there is
-# none.
+# existence. The studio of stage 8 brought two: `qml-check.sh`, which lints the
+# QML with every warning fatal, and `studio-check.sh`, which drives the window
+# by keyboard and then by mouse with no screen involved. A step that runs before
+# there is anything for it to look at is a green light nobody earned, which is
+# why neither was here before there was a window.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
 "$root/.scripts/usage-check.sh"
-exec "$root/.scripts/test.sh"
+"$root/.scripts/test.sh"
+"$root/.scripts/qml-check.sh"
+exec "$root/.scripts/studio-check.sh"

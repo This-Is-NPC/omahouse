@@ -35,8 +35,8 @@ sudo omahouse watch               # the loop, every two seconds
 ```
 
 Reading needs no privilege — the fiscalised user runs `omahouse status` and sees
-what is left of their own day. Writing needs root, and the studio of stage 8 will
-get there through `pkexec`. A new profile is born observing and allowing
+what is left of their own day. Writing needs root, and the window gets there
+through `pkexec`. A new profile is born observing and allowing
 everything: it counts and reports and closes nothing, which is a day of evidence
 before the teeth go on. An account in `wheel` is refused a profile, because an
 administrator does not fiscalise themselves by accident.
@@ -69,6 +69,43 @@ does not refuse — the same reading calls a flatpak a shim, because every flatp
 runs `/usr/bin/bwrap` — and the rule goes on matching the id, which is the only
 thing the model decides by.
 
+## The window
+
+`omahouse-studio` is the same model with a Qt Quick front on it. It reads by
+linking the two libraries directly — everything it reads is world readable — and
+it writes by running `pkexec omahouse <verb>`, so the privileged half is the CLI
+above, with the same argument checking and the same refusals. **It is never
+root**, and it refuses to start as root rather than working and letting nobody
+find out.
+
+Two faces, and nobody picks one on screen. Whoever is in `wheel` gets the
+operator's: the people under rules, the programs released to each of them, the
+day's balance live, and the chips to change all three. Everybody else gets the
+subject's, which is the same window with nothing to press — what is left today,
+by program and in total.
+
+Everything is on the keyboard, and the mouse does exactly the same thing. There
+is one table of commands in the window; the chips are drawn from it, the keys are
+looked up in it, and `:` and `?` list it — so an action cannot exist on only one
+of the two.
+
+- `j` / `k`, `↓` / `↑` — move the cursor
+- `g` / `G`, `Home` / `End` — first, last row
+- `l` / `Enter` — open the profile under the cursor
+- `h` / `Esc` — back, or clear the filter, or leave a control
+- `1` / `2` / `3` — the people, their programs, their day
+- `/` — filter the list · `:` — commands · `?` — the key map
+- `Tab` — next control · `Space` — press the one the keyboard is on
+- `n` — put an account under rules · `e` — close programs, or only watch
+- `d` — only the listed run, or everything but the listed
+- `a` — release a program · `m` — minutes a day · `+` — more time today
+- `x` — take a program off the list, or an account off the books
+
+The picker behind `a` is fed from the installed `.desktop` entries, with whatever
+is open in that account right now at the top — and it says when a scope is not
+what its name says, so nobody releases `gtk-launch` without being shown the VS
+Code inside it.
+
 **It is not a security boundary.** A program started from inside a terminal
 inherits the terminal's scope, so a profile with a terminal on its allowlist is
 a profile that allows everything — and all of it counts as terminal time. Do not
@@ -79,11 +116,14 @@ because none of it depends on the goodwill of the session, is the clock, the
 ## Build
 
 ```bash
-mise run deps      # Qt 6 + qmake
-mise run build     # build/bin/omahouse
-mise run test      # unit tests and the CLI end to end
-mise run usage:gen # docs/cli.md, from omahouse.usage.kdl
-mise run verify    # the local gate: docs current, then the tests
+mise run deps        # Qt 6 + qmake
+mise run build       # build/bin/omahouse and build/bin/omahouse-studio
+mise run studio      # open the window
+mise run test        # unit tests and the CLI end to end
+mise run lint        # the QML, with every warning fatal
+mise run studio:test # the window, by keyboard and by mouse, with no screen
+mise run usage:gen   # docs/cli.md, from omahouse.usage.kdl
+mise run verify      # the local gate: all of the above
 mise run hooks:install
 ```
 
@@ -91,7 +131,8 @@ Shadow build only — qmake refuses to configure inside the source tree.
 
 ## Requirements
 
-- Qt 6: `qt6-base`
+- Qt 6: `qt6-base`, and `qt6-declarative` for the window and its linter
+- `polkit` for `pkexec`, which is how the window writes
 - [mise](https://mise.jdx.dev/) for the tasks above, and for the pinned `usage`
   that generates `docs/cli.md`
 

@@ -6,12 +6,20 @@ description = "Checks the system Qt/qmake toolchain"
 run = ".scripts/deps.sh"
 
 [tasks.build]
-description = "Builds the CLI"
+description = "Builds the CLI and the studio"
 run = ".scripts/build.sh"
+
+[tasks.studio]
+description = "Opens the window"
+run = ".scripts/studio.sh"
 
 [tasks.test]
 description = "Builds and runs the unit tests and the CLI e2e"
 run = ".scripts/test.sh"
+
+[tasks."studio:test"]
+description = "Drives the studio window by keyboard and by mouse, offscreen"
+run = ".scripts/studio-check.sh"
 
 [tasks.verify]
 description = "Runs the local gate (docs current, then the tests)"
