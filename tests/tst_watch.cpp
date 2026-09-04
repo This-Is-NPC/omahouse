@@ -109,6 +109,40 @@ public:
     bool refuse = false;
 };
 
+/// A seat and a screen the suite decides, rather than the ones the machine
+/// running it happens to have.
+///
+/// The same seam `Recorder` and `Bite` are, and here it is what keeps the suite
+/// honest: the machine this runs on has a screen, and a loop whose presence came
+/// from that screen would pass or fail depending on whether somebody had walked
+/// away from the build.
+///
+/// Unread by default, which is a seat nobody looked at and a presence of
+/// `unknown`. That is deliberately the state that writes nothing: every case
+/// here that is about counting time asserts a ledger, and a fake that quietly
+/// added presence seconds to all of them would be a fixture editing the thing
+/// under test.
+class Eyes : public PresenceSource {
+public:
+    SeatReading reading;
+    int looks = 0;
+
+    SeatReading readSeat() override
+    {
+        ++looks;
+        return reading;
+    }
+
+    /// The seat showing `uid` with the screen lit -- somebody at the machine.
+    void showing(uid_t uid)
+    {
+        reading.read = true;
+        reading.occupied = true;
+        reading.uid = uid;
+        reading.screen = ScreenState::On;
+    }
+};
+
 QStringList unitsOf(const QVector<Done> &done, Done::What what)
 {
     QStringList units;
@@ -268,7 +302,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
 
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         const Cycle cycle = watch.tick({profile()}, now);
@@ -311,7 +346,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {5, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {5, false});
 
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         watch.tick({profile()}, now);
@@ -332,7 +368,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
 
         const Cycle first = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(first.users.first().said.size(), 1);
@@ -370,8 +407,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
+        Eyes eyes;
         recorder.refuse = true;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
 
         const Cycle first = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(first.users.first().said.size(), 1);
@@ -403,7 +441,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
         const Cycle cycle = watch.tick({observing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
@@ -452,7 +491,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
         const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
@@ -496,7 +536,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
         const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
@@ -543,7 +584,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
 
         watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(blockedNames(), QStringList({m_user}));
@@ -585,7 +627,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
 
         watch.tick({enforcing}, QDateTime(day, QTime(23, 59, 58)));
         QCOMPARE(blockedNames(), QStringList({m_user}));
@@ -613,7 +656,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
         const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
 
         QVERIFY(!cycle.users.first().session);
@@ -638,7 +682,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
         watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(blockedNames(), QStringList({m_user}));
 
@@ -671,7 +716,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, true});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, true});
         const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
@@ -694,7 +740,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
 
         const QDate before(2026, 9, 3);
         const QDate after(2026, 9, 4);
@@ -720,7 +767,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, true});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, true});
         const Cycle cycle = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
 
         // It decided, and it wrote the decision down nowhere.
@@ -742,7 +790,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         const Cycle cycle = watch.tick({profile()}, now);
 
@@ -760,7 +809,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         const Cycle cycle = watch.tick({off}, now);
 
@@ -780,12 +830,124 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
         const Cycle cycle = watch.tick({orphan}, QDateTime(QDate(2026, 9, 3), QTime(19, 0, 0)));
 
         QVERIFY(!cycle.users.first().account);
         QVERIFY(!cycle.users.first().session);
         QVERIFY(recorder.notes.isEmpty());
+    }
+
+    // -- presence ------------------------------------------------------------
+
+    // The seat is one thing about one machine, so it is read once and handed to
+    // every profile in the cycle. Three profiles asking `loginctl` three times a
+    // tick would be paying per person for an answer that is not about a person.
+    void theSeatIsReadOncePerCycleAndNotOncePerUser()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+
+        Profile second = profile();
+        second.user = QStringLiteral("omahouse-nobody-4f8ae1c3");
+        const Cycle cycle =
+            watch.tick({profile(), second}, QDateTime(QDate(2026, 9, 3), QTime(19, 0, 0)));
+
+        QCOMPARE(eyes.looks, 1);
+        QCOMPARE(cycle.users.size(), 2);
+        QVERIFY(cycle.seat.read);
+        QCOMPARE(cycle.users.first().presence.reason, Presence::Reason::Using);
+        QVERIFY(cycle.users.first().presence.present);
+    }
+
+    // The day's file gains the presence beside the budgets, and the budgets are
+    // the same either way. This is the whole of what this step promised: the
+    // screen going dark is written down and changes nothing about what an app is
+    // billed -- docs/design.md §5 bills running time, and that is not this
+    // step's to take back.
+    void presenceIsWrittenBesideTheBudgetsAndNeverIntoThem()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        const QDate day(2026, 9, 3);
+
+        watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
+        Ledger written = readBack(day);
+        QCOMPARE(written.presenceSecondsFor(QStringLiteral("using")), 2);
+        QCOMPARE(written.secondsFor(QStringLiteral("session")), 2);
+
+        // The screen goes dark with every one of those apps still running. The
+        // presence says so; the session budget goes on being spent exactly as it
+        // was.
+        eyes.reading.screen = ScreenState::Off;
+        const Cycle dark = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 2)));
+        QCOMPARE(dark.users.first().presence.reason, Presence::Reason::ScreenOff);
+        QVERIFY(!dark.users.first().presence.present);
+
+        written = readBack(day);
+        QCOMPARE(written.presenceSecondsFor(QStringLiteral("using")), 2);
+        QCOMPARE(written.presenceSecondsFor(QStringLiteral("screen-off")), 2);
+        QCOMPARE(written.secondsFor(QStringLiteral("session")), 4);
+        QCOMPARE(written.secondsFor(QStringLiteral("chromium")), 4);
+    }
+
+    // A loop that was never given eyes must say it cannot see. Nothing is
+    // written about presence at all, because an hour of `unknown` in the day's
+    // file is an hour of somebody's afternoon described as a failure to look.
+    void aCycleWithNoPresenceSourceWritesNoPresence()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Watch watch(&reader, &recorder, &teeth, nullptr, Watch::Options {2, false});
+        const QDate day(2026, 9, 3);
+
+        const Cycle cycle = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
+        QCOMPARE(cycle.users.first().presence.reason, Presence::Reason::Unknown);
+        QVERIFY(!cycle.seat.read);
+
+        const Ledger written = readBack(day);
+        QVERIFY(written.presence.isEmpty());
+        QCOMPARE(written.secondsFor(QStringLiteral("session")), 2);
+    }
+
+    // A screen going dark is a change of shape and gets its line. Without it,
+    // the journal of an evening where somebody walked away at eight reads
+    // exactly like the journal of an evening where they did not.
+    void aChangeOfPresenceIsWorthALine()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        const QDate day(2026, 9, 3);
+
+        QVERIFY(watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)))
+                    .users.first()
+                    .worthSaying);
+        QVERIFY(!watch.tick({profile()}, QDateTime(day, QTime(19, 0, 2)))
+                     .users.first()
+                     .worthSaying);
+
+        eyes.reading.screen = ScreenState::Off;
+        QVERIFY(watch.tick({profile()}, QDateTime(day, QTime(19, 0, 4)))
+                    .users.first()
+                    .worthSaying);
     }
 
     // -- the journal ---------------------------------------------------------
@@ -801,7 +963,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
         const QDate day(2026, 9, 3);
 
         QVERIFY(watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)))

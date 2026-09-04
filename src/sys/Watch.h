@@ -3,6 +3,7 @@
 #include "Enforce.h"
 #include "Notify.h"
 #include "Policy.h"
+#include "Presence.h"
 #include "Proc.h"
 
 #include <QDateTime>
@@ -113,6 +114,15 @@ struct Watched {
     bool account = false;
     bool enabled = false;
     bool session = false;
+    /// Whether anybody is in front of the machine, and why -- `Presence.h`.
+    ///
+    /// Measured and reported, and it decides nothing. It does not change what an
+    /// app is billed: docs/design.md §5 bills running time, that is published
+    /// behaviour, and a day counted differently because a screen went dark is
+    /// not this step's to hand out. The seconds land in the day's ledger beside
+    /// the budgets, and `status` says the state out loud, and that is all -- what
+    /// will use it is the time per site.
+    Presence presence;
     /// The ids of the live scopes, sorted and without repeats. Only the ones
     /// that have an id: a scope nothing could name has no word to put in a
     /// sentence, and an empty string in this list would print as a gap between
@@ -172,6 +182,10 @@ struct Cycle {
     /// but it is the one thing about it worth saying out loud.
     QStringList blocked;
     QString blockedError;
+    /// The one look at the seat and the screens this cycle took, shared by every
+    /// user in it. One machine, one seat, one set of monitors: asking per profile
+    /// would be paying per profile for an answer that does not vary by profile.
+    SeatReading seat;
 };
 
 class Watch {
@@ -189,8 +203,12 @@ public:
 
     /// None of the pointers is owned. `enforcer` may be null, and then nothing
     /// is ever closed and nobody is ever logged out -- which is what a caller
-    /// that only wants the accounting hands in.
-    Watch(const Proc *proc, Notifier *notifier, Enforcer *enforcer, const Options &options);
+    /// that only wants the accounting hands in. `presence` may be null too, and
+    /// then every user's presence is `Unknown` and nothing about it is written:
+    /// a loop that was never given eyes must say it cannot see, not that nobody
+    /// is there.
+    Watch(const Proc *proc, Notifier *notifier, Enforcer *enforcer, PresenceSource *presence,
+          const Options &options);
 
     const Options &options() const { return m_options; }
 
@@ -204,7 +222,8 @@ public:
     Cycle tick(const QVector<Profile> &profiles, const QDateTime &now);
 
 private:
-    void observe(const Profile &profile, Watched *watched, const QDateTime &now);
+    void observe(const Profile &profile, Watched *watched, const SeatReading &seat,
+                 const QDateTime &now);
     /// The sequence of docs/design.md §5 for one scope, spread across ticks: SIGTERM
     /// the first time, `cgroup.kill` once the window has gone by.
     void closeScope(const Profile &profile, Watched *watched, const Decision &decision,
@@ -216,6 +235,7 @@ private:
     const Proc *m_proc;
     Notifier *m_notifier;
     Enforcer *m_enforcer;
+    PresenceSource *m_presence;
     Options m_options;
     /// What each user's cycle looked like last time, so that a cycle that says
     /// the same thing says nothing at all.

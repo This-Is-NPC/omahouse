@@ -3,6 +3,7 @@
 #include "Ledger.h"
 #include "Notify.h"
 #include "Paths.h"
+#include "Presence.h"
 #include "Proc.h"
 #include "Profile.h"
 #include "Users.h"
@@ -444,6 +445,58 @@ QJsonArray balancesToJson(const QVector<Balance> &balances)
     return array;
 }
 
+// -- presence -----------------------------------------------------------------
+
+/// The day's presence, by reason, in the order the ledger holds it.
+///
+/// Its own object beside `budgets` and never inside it, exactly as the ledger
+/// keeps it: a reader that walked the budgets and found `screen-off` among them
+/// would be a reader that had been told a screen is a budget.
+QJsonObject presenceToJson(const Ledger &ledger)
+{
+    QJsonObject object;
+    for (auto it = ledger.presence.constBegin(); it != ledger.presence.constEnd(); ++it)
+        object.insert(it.key(), it.value());
+    return object;
+}
+
+/// What the day's presence adds up to, in words: `12m using, 5m screen-off`.
+QString presenceToday(const Ledger &ledger)
+{
+    QStringList parts;
+    for (auto it = ledger.presence.constBegin(); it != ledger.presence.constEnd(); ++it)
+        parts.append(QStringLiteral("%1 %2").arg(humanDuration(it.value()), it.key()));
+    return parts.join(QStringLiteral(", "));
+}
+
+/// Presence, said out loud on the screen an operator reads.
+///
+/// Four lines at most, and the last of them is the one that matters: this is
+/// measured and reported and it takes nothing away from anybody. Somebody
+/// reading `away: every connected screen is off` beside a budget that is still
+/// being spent has to be told, on the same screen, that the two are not
+/// connected -- otherwise the obvious reading is that omahouse has stopped
+/// counting, and it has not.
+void printPresence(const QString &user, const Presence &presence, const SeatReading &seat,
+                   const Ledger &ledger)
+{
+    out() << "\nPresence\n";
+    out() << QStringLiteral("  %1 is %2.\n").arg(user, presenceSentence(presence));
+    const QString whatTheSeatIs =
+        seat.read ? (seat.occupied ? QStringLiteral("showing uid %1")
+                                         .arg(static_cast<qulonglong>(seat.uid))
+                                   : QStringLiteral("empty"))
+                  : QStringLiteral("unreadable");
+    out() << QStringLiteral("  Screen %1, seat %2 — read from the kernel's DRM connectors and "
+                            "from\n  logind, never from %3's own compositor.\n")
+                 .arg(screenStateName(seat.screen), whatTheSeatIs, user);
+    const QString today = presenceToday(ledger);
+    if (!today.isEmpty())
+        out() << QStringLiteral("  Today: %1.\n").arg(today);
+    out() << "  Measured and reported, and it takes nothing away: an app is still billed for\n"
+             "  running, screen or no screen (docs/design.md §5).\n";
+}
+
 // -- the sites ---------------------------------------------------------------
 
 /// The reach of a browser policy, in three lines, written once.
@@ -744,6 +797,13 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
 
     const Proc proc;
     const bool session = proc.hasSession(uid);
+    // The seat and the screens, once. Two `loginctl` calls and a walk of
+    // /sys/class/drm, all of them world readable, so this stays a screen anybody
+    // can ask for without a privilege -- which is the rule the whole read side of
+    // this program is built on.
+    SeatPresenceSource presenceSource;
+    const SeatReading seat = presenceSource.readSeat();
+    const Presence presence = presenceOf(uid, session, seat);
     QVector<AppScope> named;
     QVector<AppScope> unnamed;
     const QVector<AppScope> scopes = proc.scopesFor(uid);
@@ -830,6 +890,24 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
             {QStringLiteral("uid"), static_cast<qint64>(uid)},
             {QStringLiteral("date"), today.toString(Qt::ISODate)},
             {QStringLiteral("session"), session},
+            // Measured and reported, and it decides nothing: `verdict` and
+            // `budgets` above are exactly what they were before anybody looked
+            // at a screen. What reads this is the time per site, later.
+            {QStringLiteral("presence"),
+             QJsonObject {
+                 // Null and not false for `unknown`: "nobody is there" and
+                 // "nothing could be read" are different answers, and only one
+                 // of them is about the person.
+                 {QStringLiteral("present"),
+                  presence.known() ? QJsonValue(presence.present) : QJsonValue()},
+                 {QStringLiteral("reason"), presenceReasonName(presence.reason)},
+                 {QStringLiteral("screen"), screenStateName(seat.screen)},
+                 {QStringLiteral("seatRead"), seat.read},
+                 {QStringLiteral("seatUid"),
+                  seat.read && seat.occupied ? QJsonValue(static_cast<qint64>(seat.uid))
+                                             : QJsonValue()},
+                 {QStringLiteral("today"), presenceToJson(ledger)},
+             }},
             {QStringLiteral("profile"), profile ? QJsonValue(profile->toJson()) : QJsonValue()},
             {QStringLiteral("scopes"), scopesJson},
             {QStringLiteral("unnamed"), unnamedJson},
@@ -919,6 +997,8 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
         }
     }
 
+    printPresence(user, presence, seat, ledger);
+
     if (profile)
         printWebRules(*profile, profiles.all);
 
@@ -959,6 +1039,18 @@ void printDay(const Ledger &ledger)
         out() << "  nothing counted\n";
     else
         printTable({QStringLiteral("BUDGET"), QStringLiteral("USED")}, rows, {false, true});
+
+    // Beside the budgets and never among them: this is how much of the day
+    // somebody was really in front of the machine, and nothing above was billed
+    // by it.
+    if (!ledger.presence.isEmpty()) {
+        out() << "\nPRESENCE\n";
+        QVector<QStringList> presenceRows;
+        for (auto it = ledger.presence.cbegin(); it != ledger.presence.cend(); ++it)
+            presenceRows.append({it.key(), humanDuration(it.value())});
+        printTable({QStringLiteral("STATE"), QStringLiteral("FOR")}, presenceRows,
+                   {false, true});
+    }
 
     if (!ledger.grants.isEmpty()) {
         out() << "\nGRANTS\n";
@@ -2352,7 +2444,12 @@ QString whatHappened(const Watched &watched)
     const QString clock = watched.debited.isEmpty()
         ? QStringLiteral("nothing on the clock")
         : QStringLiteral("counting %1").arg(watched.debited.join(QStringLiteral(", ")));
-    return QStringLiteral("%1, %2").arg(apps, clock);
+    // And whether anybody was in front of it. Said on the same line as the
+    // counting, deliberately: `screen-off, counting session` is the sentence
+    // that tells an operator these two are not connected yet, and it is the
+    // sentence the time per site exists to fix.
+    return QStringLiteral("%1, %2, %3")
+        .arg(apps, clock, presenceReasonName(watched.presence.reason));
 }
 
 /// How a notification went, as a parenthesis after it.
@@ -2522,6 +2619,16 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
             {QStringLiteral("account"), watched.account},
             {QStringLiteral("enabled"), watched.enabled},
             {QStringLiteral("session"), watched.session},
+            // Reported and never acted on. `budgets` below is what it would have
+            // been with nobody in the room.
+            {QStringLiteral("presence"),
+             QJsonObject {
+                 {QStringLiteral("present"),
+                  watched.presence.known() ? QJsonValue(watched.presence.present)
+                                           : QJsonValue()},
+                 {QStringLiteral("reason"), presenceReasonName(watched.presence.reason)},
+                 {QStringLiteral("today"), presenceToJson(watched.ledger)},
+             }},
             {QStringLiteral("apps"), QJsonArray::fromStringList(watched.apps)},
             // Not in `apps`, and not left out either: a scope with no id has no
             // word to go in that list and is counted like everything else.
@@ -2546,6 +2653,17 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
         {QStringLiteral("tickSeconds"), cycle.tickSeconds},
         {QStringLiteral("dryRun"), cycle.dryRun},
         {QStringLiteral("blocked"), QJsonArray::fromStringList(cycle.blocked)},
+        // The one look at the seat and the screens this cycle took. One
+        // machine's worth, above the users, because that is what it is.
+        {QStringLiteral("seat"),
+         QJsonObject {
+             {QStringLiteral("read"), cycle.seat.read},
+             {QStringLiteral("screen"), screenStateName(cycle.seat.screen)},
+             {QStringLiteral("uid"),
+              cycle.seat.read && cycle.seat.occupied
+                  ? QJsonValue(static_cast<qint64>(cycle.seat.uid))
+                  : QJsonValue()},
+         }},
         {QStringLiteral("users"), users},
     };
     document.insert(QStringLiteral("blockedError"),
@@ -2650,10 +2768,15 @@ int cmdWatch(const Globals &g, const QStringList &positionals, const Options &op
     // about a flag on this command line. A flag would be a thing somebody could
     // pass by accident on the wrong machine.
     MachineEnforcer enforcer;
+    // The eyes -- `Presence.h`. Handed in like the teeth are, and for the same
+    // reason: what it reads is the kernel's DRM attributes and root's own
+    // logind, never the fiscalised user's compositor, so a run on a machine with
+    // no seat and no screen says `unknown` and carries on counting.
+    SeatPresenceSource presence;
     Watch::Options watching;
     watching.tickSeconds = interval;
     watching.dryRun = options.dryRun;
-    Watch watch(&proc, &notifier, &enforcer, watching);
+    Watch watch(&proc, &notifier, &enforcer, &presence, watching);
 
     const auto cycle = [&](const Profiles &current) {
         // The clock enters here and nowhere else. `evaluate` takes `now` by

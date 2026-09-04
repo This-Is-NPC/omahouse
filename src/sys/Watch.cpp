@@ -218,10 +218,12 @@ Words wordsFor(const Profile &profile, const Decision &decision, const QString &
     return words;
 }
 
-Watch::Watch(const Proc *proc, Notifier *notifier, Enforcer *enforcer, const Options &options)
+Watch::Watch(const Proc *proc, Notifier *notifier, Enforcer *enforcer, PresenceSource *presence,
+             const Options &options)
     : m_proc(proc)
     , m_notifier(notifier)
     , m_enforcer(enforcer)
+    , m_presence(presence)
     , m_options(options)
 {
 }
@@ -232,6 +234,12 @@ Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now)
     cycle.at = now;
     cycle.tickSeconds = m_options.tickSeconds;
     cycle.dryRun = m_options.dryRun;
+
+    // Once, before anybody is looked at. The seat and the screens are facts
+    // about the machine and not about a profile, and a source that is not there
+    // leaves the reading unread, which every verdict below turns into `Unknown`.
+    if (m_presence)
+        cycle.seat = m_presence->readSeat();
 
     for (const Profile &profile : profiles) {
         Watched watched;
@@ -250,7 +258,7 @@ Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now)
         watched.account = uidForUser(profile.user, &uid);
         watched.uid = uid;
         if (watched.account && watched.enabled)
-            observe(profile, &watched, now);
+            observe(profile, &watched, cycle.seat, now);
 
         cycle.users.append(watched);
     }
@@ -267,7 +275,8 @@ Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now)
     return cycle;
 }
 
-void Watch::observe(const Profile &profile, Watched *watched, const QDateTime &now)
+void Watch::observe(const Profile &profile, Watched *watched, const SeatReading &seat,
+                    const QDateTime &now)
 {
     // Whether the user's own systemd manager is up, which is the same question
     // docs/design.md §5 asks as "does /run/user/<uid> exist". This is the stronger half
@@ -276,6 +285,11 @@ void Watch::observe(const Profile &profile, Watched *watched, const QDateTime &n
     // tree that already moves by variable, which is what lets the suite ask it
     // without a session.
     watched->session = m_proc->hasSession(watched->uid);
+
+    // And whether anybody is in front of it -- `Presence.h`. Pure, over the one
+    // reading this cycle took and the session above, so the whole of the
+    // decision is provable without a seat, a screen or a `loginctl`.
+    watched->presence = presenceOf(watched->uid, watched->session, seat);
 
     // The day's own file, docs/design.md §4. Read by the date of `now` and not by a
     // date the loop is holding on to, so the turn of midnight simply starts
@@ -332,7 +346,18 @@ void Watch::observe(const Profile &profile, Watched *watched, const QDateTime &n
     }
     watched->apps = sortedWithoutRepeats(apps);
 
-    const Outcome outcome = evaluate(profile, scopes, before, now, m_options.tickSeconds);
+    Outcome outcome = evaluate(profile, scopes, before, now, m_options.tickSeconds);
+
+    // The day's presence, beside the budgets and never inside them. `evaluate`
+    // has already decided everything it is going to decide, and this is written
+    // after it precisely so that it cannot reach the decision: docs/design.md §5
+    // bills an app for running, that is published behaviour, and changing it is
+    // not this step's to hand out. Only a state that was really read is counted,
+    // so a machine with no seat writes nothing rather than an hour of `unknown`.
+    if (watched->presence.known())
+        outcome.ledger.addPresenceSeconds(presenceReasonName(watched->presence.reason),
+                                          m_options.tickSeconds);
+
     watched->ledger = outcome.ledger;
     for (auto it = outcome.ledger.seconds.cbegin(); it != outcome.ledger.seconds.cend(); ++it) {
         if (it.value() > before.secondsFor(it.key()))
@@ -582,6 +607,10 @@ bool Watch::worthSaying(const Watched &watched)
         watched.enabled ? QStringLiteral("on") : QStringLiteral("off"),
         watched.account ? QStringLiteral("account") : QStringLiteral("no account"),
         watched.session ? QStringLiteral("session") : QStringLiteral("no session"),
+        // A screen going dark is a change of shape and gets its line, which is
+        // the only way anybody reading the journal later can tell an hour of use
+        // from an hour of an empty room.
+        presenceReasonName(watched.presence.reason),
         watched.apps.join(QLatin1Char(',')),
         QString::number(watched.unnamedScopes),
         watched.debited.join(QLatin1Char(',')),

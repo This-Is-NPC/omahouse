@@ -181,6 +181,59 @@ class Box:
         self.notify_send.write_text(
             f'#!/bin/sh\n{{ printf "%s\\t" "$@"; printf "\\n"; }} >> {self.notified}\n')
         self.notify_send.chmod(0o755)
+        # The fourth and fifth roots, and they arrived with presence: the DRM
+        # connectors of /sys/class/drm and the `loginctl` that says which session
+        # the seat is showing. Both are pointed somewhere of their own for every
+        # case, always, and for a reason the other roots do not have -- the real
+        # ones answer differently depending on whether whoever started the suite
+        # has walked away from the machine since, and a suite whose result
+        # depends on that is a suite nobody can read a failure of.
+        self.drm = self.root / "drm"
+        self.drm.mkdir()
+        self.loginctl = self.root / "loginctl"
+        self.screen("connected", "On")
+        self.seat(uid=UID)
+
+    def screen(self, status, dpms, name="card0-Virtual-1"):
+        """One DRM connector, in the shape the VM's really has.
+
+        `enabled` is written and never read: the measurement is that Hyprland
+        turning a monitor off moves it to `disabled` in the same modeset that
+        moves `dpms` to `Off`, so a reader that filtered on it would find no
+        screens at exactly the moment there is a dark one to find.
+        """
+        connector = self.drm / name
+        connector.mkdir(parents=True, exist_ok=True)
+        (connector / "status").write_text(status + "\n")
+        (connector / "enabled").write_text(
+            ("enabled" if dpms == "On" else "disabled") + "\n")
+        (connector / "dpms").write_text(dpms + "\n")
+
+    def seat(self, uid=None, fails=False):
+        """A `loginctl` that is a script, so the seat is the suite's to decide.
+
+        The same door `$OMAHOUSE_USERADD` and `$OMAHOUSE_NOTIFY_SEND` are. Here
+        it is doubly worth having: the real `loginctl` would answer about the
+        session of whoever is running this, which on a build machine is nobody.
+        """
+        # Anything that is not one of the two reads refuses, loudly. This
+        # variable is also the one `Enforce` ends a session through, and a fake
+        # that answered `terminate-user` with a cheerful exit 0 would be a suite
+        # that could not tell a refusal from a logout.
+        refuse = '  *) echo "not this loginctl: $*" >&2; exit 1 ;;\n'
+        if fails:
+            body = "exit 1\n"
+        elif uid is None:
+            body = ('case "$1" in\n'
+                    "  show-seat) echo ActiveSession= ;;\n"
+                    + refuse + "esac\n")
+        else:
+            body = ('case "$1" in\n'
+                    "  show-seat) echo ActiveSession=7 ;;\n"
+                    f"  show-session) echo User={uid} ;;\n"
+                    + refuse + "esac\n")
+        self.loginctl.write_text("#!/bin/sh\n" + body)
+        self.loginctl.chmod(0o755)
 
     def policy(self):
         """The managed policy on this box, or None when there is no file.
@@ -263,6 +316,9 @@ class Box:
             # to do exactly once before nobody runs it again.
             "OMAHOUSE_NOTIFY_SEND": str(self.notify_send),
             "OMAHOUSE_CHROMIUM_POLICY_DIR": str(self.chromium),
+            # Presence: the screens and the seat, both of them the suite's own.
+            "OMAHOUSE_DRM_ROOT": str(self.drm),
+            "OMAHOUSE_LOGINCTL": str(self.loginctl),
         }
         env.pop("OMAHOUSE_JSON", None)
         # The roots put back where the machine keeps them, which is how the
@@ -617,6 +673,93 @@ def check_status_of_a_user_who_is_not_logged_in(box):
     away = box.run("status", USER, extra_env={"OMAHOUSE_CGROUP_ROOT": str(empty)})
     assert away.returncode == 0, away.stderr
     assert "is not logged in" in away.stdout
+
+
+def check_status_says_who_is_in_front_of_the_machine(box):
+    """Presence, on the screen an operator reads — the three states, measured.
+
+    `.temp/spike-extension.md` §5 measured a browser answering `active` for
+    twenty-five minutes with the monitor physically off. So the question is asked
+    of the machine: which session the seat is showing, and whether the screens
+    are lit. Both roots are this box's own, which is what lets the three states
+    be produced here rather than only in a VM with somebody walking away from it.
+    """
+    box.write_profiles()
+
+    # Using: the seat is showing this session and the screen is on.
+    using = box.run("status", USER)
+    assert using.returncode == 0, using.stderr
+    assert f"{USER} is at the machine" in using.stdout, using.stdout
+    assert "Screen on, seat showing uid" in using.stdout, using.stdout
+    # And the sentence that stops the obvious misreading: a budget still being
+    # spent beside `away` is not omahouse having quietly stopped counting.
+    assert "takes nothing away" in using.stdout, using.stdout
+
+    # Screen off: the connector is still connected, and dark. This is the state
+    # the browser could not see.
+    box.screen("connected", "Off")
+    dark = box.run("status", USER)
+    assert dark.returncode == 0, dark.stderr
+    assert "away: every connected screen is off" in dark.stdout, dark.stdout
+    assert json.loads(box.run("status", USER, "--json").stdout)["presence"] == {
+        "present": False, "reason": "screen-off", "screen": "off",
+        "seatRead": True, "seatUid": UID, "today": {},
+    }
+
+    # The seat showing somebody else, with the screen lit. Only logind knows the
+    # difference, which is the whole reason it is asked.
+    box.screen("connected", "On")
+    box.seat(uid=UID + 1)
+    elsewhere = box.run("status", USER)
+    assert "away: the seat is showing another session" in elsewhere.stdout, elsewhere.stdout
+
+    # A seat that could not be read is not an absence, and it says so rather
+    # than deciding.
+    box.seat(fails=True)
+    blind = box.run("status", USER)
+    assert "not known" in blind.stdout, blind.stdout
+    assert json.loads(
+        box.run("status", USER, "--json").stdout)["presence"]["present"] is None
+
+
+def check_watch_writes_presence_beside_the_budgets_and_never_into_them(box):
+    """The day's file gains the presence, and the budgets are what they were.
+
+    This is the promise of the step in one case: presence is measured and
+    reported and takes nothing away. `docs/design.md` §5 bills an app for
+    running, and a screen going dark does not change that -- what will use this
+    is the time per site, later.
+    """
+    box.write_profiles(watching_profile())
+
+    lit = box.run("watch", "--once")
+    assert lit.returncode == 0, lit.stderr
+    day = box.day(TODAY)
+    assert day["presence"] == {"using": 2}, day
+    spent = dict(day["budgets"])
+
+    box.screen("connected", "Off")
+    dark = box.run("watch", "--once")
+    assert dark.returncode == 0, dark.stderr
+    # The journal says it on the same line as the counting, which is what makes
+    # the disagreement legible.
+    assert "screen-off" in dark.stderr, dark.stderr
+
+    day = box.day(TODAY)
+    assert day["presence"] == {"screen-off": 2, "using": 2}, day
+    # Every budget gained exactly the tick it would have gained with somebody in
+    # the room. That is the assertion this whole case exists for.
+    assert day["budgets"] == {name: seconds + 2 for name, seconds in spent.items()}, day
+
+    document = json.loads(box.run("watch", "--once", "--json").stdout)
+    assert document["seat"] == {"read": True, "screen": "off", "uid": UID}
+    assert document["users"][0]["presence"]["reason"] == "screen-off"
+    assert document["users"][0]["presence"]["present"] is False
+
+    # And it comes back out of `report`, beside the budgets and not among them.
+    reported = box.run("report", USER)
+    assert "PRESENCE" in reported.stdout, reported.stdout
+    assert "screen-off" in below(reported.stdout, "PRESENCE"), reported.stdout
 
 
 def check_a_broken_profiles_file_is_not_an_empty_one(box):
@@ -1726,6 +1869,7 @@ def main():
         check_status_says_what_a_scope_really_holds,
         check_status_with_a_profile,
         check_status_json,
+        check_status_says_who_is_in_front_of_the_machine,
         check_a_broken_profiles_file_is_not_an_empty_one,
         check_report_of_one_day,
         check_report_of_a_range,
@@ -1760,6 +1904,7 @@ def main():
         check_watch_dry_run_never_writes_the_block,
         check_watch_refuses_what_it_does_not_do,
         check_watch_counts_a_faster_tick,
+        check_watch_writes_presence_beside_the_budgets_and_never_into_them,
         check_the_reading_verbs_write_nothing,
     ]
     for case in cases:
