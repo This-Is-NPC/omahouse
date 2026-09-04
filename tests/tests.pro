@@ -20,6 +20,7 @@ SOURCES += \
     tst_ledger.cpp \
     tst_proc.cpp \
     tst_paths.cpp \
+    tst_presence.cpp \
     tst_watch.cpp \
     tst_enforce.cpp \
     tst_webpolicy.cpp

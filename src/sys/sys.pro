@@ -35,6 +35,7 @@ HEADERS += \
     Enforce.h \
     Notify.h \
     Paths.h \
+    Presence.h \
     Proc.h \
     Users.h \
     Watch.h
@@ -45,6 +46,7 @@ SOURCES += \
     Enforce.cpp \
     Notify.cpp \
     Paths.cpp \
+    Presence.cpp \
     Proc.cpp \
     Users.cpp \
     Watch.cpp
