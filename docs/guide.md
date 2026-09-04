@@ -234,7 +234,12 @@ BUDGET                 APP                    A DAY  WHEN OUT
 chromium               chromium                  3m  closes
 org.chromium.Chromium  org.chromium.Chromium     3m  closes
 session                *                      2h00m  logs out
+
+SITES
+  kid has no web rules: every site opens, and there is no browser policy on this machine because of them.
 ```
+
+§2.7 is where that last block gets something in it.
 
 Before switching it on, watch a cycle with no consequences at all:
 
@@ -257,6 +262,113 @@ kid: enforcing — budgets now close and log out.
 ```
 
 In the studio, `e`.
+
+### 2.7 Block a site
+
+```bash
+sudo omahouse web block kid youtube.com
+```
+
+```
+kid: youtube.com is blocked, and so are its subdomains.
+omahouse: the browser policy is one file for the whole machine. A site blocked here is
+          blocked for everyone who opens Chromium on it, including you. Chromium has no
+          per-account policy on Linux (docs/proposal-browser.md §3.1), and that was accepted.
+```
+
+**Read that second paragraph before you go on, because it is the one surprise in
+this page.** Chromium has no per-account policy on Linux; there is one file in
+`/etc/chromium/policies/managed/`, and it decides for every account on the
+machine. Blocking YouTube for the kid blocks it for you. That is a real cost and
+it was accepted rather than worked around — `docs/design.md` §11 says why, and
+also says what the way out would be if the household wants one: the kid on
+Chromium and the operator on a different browser.
+
+It is said once, when you write the rule, and again under `SITES` in
+`omahouse status`. It is not repeated per site.
+
+![The site refused, in the child's session](../vm/shots/44-chromium-site-bloqueado.png)
+
+A bare domain covers its subdomains: `youtube.com` also stops
+`www.youtube.com`, which is what the picture above is. A whole address is
+refused rather than quietly turned into a rule about its host:
+
+```bash
+sudo omahouse web block kid https://youtube.com/feed
+```
+
+```
+web block: 'https://youtube.com/feed' is not a domain. Write the site's name on its own, like youtube.com,
+           and not a whole address. A bare domain covers its subdomains too.
+```
+
+To take it back:
+
+```bash
+sudo omahouse web allow kid youtube.com
+```
+
+Taking back the **last** block on the machine removes the policy file entirely
+rather than leaving an empty one. There is nothing to clean up afterwards.
+
+**Only the listed sites.** The mirror of `profile default --deny`, for the web:
+
+```bash
+sudo omahouse web kid --only-listed
+sudo omahouse web allow kid wikipedia.org
+sudo omahouse web allow kid scratch.mit.edu
+```
+
+```
+kid: only the listed sites open. 0 sites on the list.
+kid: wikipedia.org is allowed through what is blocked.
+kid: scratch.mit.edu is allowed through what is blocked.
+```
+
+`omahouse web kid --all-but-listed` puts it back.
+
+An `allow` on its own does nothing. The allowed list is an exception carved out
+of the blocked list, so with nothing blocked anywhere it blocks nothing — and
+omahouse says so instead of letting the line read as a rule that is working:
+
+```
+kid: wikipedia.org is on the allowed list — which blocks nothing on its own, because nothing is blocked yet.
+```
+
+**Incognito.**
+
+```bash
+sudo omahouse web incognito kid --deny
+```
+
+```
+kid: incognito windows do not open — for every account on this machine.
+```
+
+Chromium's own menu is where it shows:
+
+![Nova janela anônima, greyed out](../vm/shots/45-chromium-anonimo-desabilitado.png)
+
+`--allow` puts it back, and it is worth knowing that allowing it is not a hole in
+the clock. An incognito window is the same browser in the same scope under the
+same profile, so the session budget and the browser's own budget go on counting
+exactly as they did. What it hides is *which site*, not the time.
+
+**Two accounts that disagree.** There is one file and no precedence between
+profiles, so the most restrictive of them is what the machine does: a site one
+profile blocks is blocked for all of them, and one profile's `--only-listed`
+closes the door for everybody. The verb names the profile that overruled you
+rather than letting you find out from the browser:
+
+```
+omahouse: pedro disagrees about youtube.com, and the most restrictive of the two is what the machine
+          does — there is one policy file, and no precedence between profiles.
+```
+
+**And when omahouse goes.** `pacman -R omahouse` takes the policy file off the
+machine with everything else it wrote, and every site opens again:
+
+![The same site, after the package was removed](../vm/shots/46-chromium-site-abre-de-novo.png)
 
 ---
 
@@ -378,6 +490,40 @@ sudo omahouse profile remove kid
 history: the days already counted stay in `/var/lib/omahouse/kid/`, because a
 report is evidence and outlives the rule that collected it. In the studio, `x`
 does either one depending on the tab you are on.
+
+It also takes that profile's web rules off the machine. If it was the last
+profile with any, the browser policy file goes with it and every site opens
+again — there is nothing left in `/etc/chromium` to find later and wonder about.
+
+### Taking omahouse off the machine
+
+```bash
+sudo pacman -R omahouse
+```
+
+```
+>>> omahouse: everything omahouse put on this machine is off it.
+>>>
+>>>           The login block is gone and everybody can log in again, the
+>>>           browser policy in /etc/chromium/policies/managed/omahouse.json
+>>>           is gone and every site opens again, and the service is stopped
+>>>           and disabled. No rule omahouse wrote is still in force.
+>>>
+>>>           Two things were kept on purpose, and here is where they are:
+>>>             /etc/omahouse/profiles.json   who was under rules
+>>>             /var/lib/omahouse/            the days already counted
+>>>           A report is evidence, and it outlives the rules it was
+>>>           collected under. Neither of them does anything to the machine
+>>>           now; `rm -rf` both if you want the account back to nothing.
+```
+
+Four of the things omahouse does are not files it owns, and all four come off:
+the `pam_listfile` line in `/etc/pam.d/system-login`, the `blocked` list that
+line reads, the Chromium managed policy, and the enabled service. That is
+deliberate and it is the point — a name left in `blocked` with no omahouse on
+the disk would lock somebody out of their own machine with nothing left to let
+them back in, and a policy left in `/etc/chromium` would be a site that will not
+open and a browser saying "managed by your organisation" with nobody to ask.
 
 ### Reading the day
 

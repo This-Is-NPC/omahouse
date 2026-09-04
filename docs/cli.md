@@ -10,11 +10,12 @@ An app is named by the id of its scope -- `chromium`, `org.freedesktop.Platform`
 
 Exit codes: 0, the run answered; 1, a usage error or a file that is there and would not parse; 2, something it was asked about is not there -- no such account, no such profile. The split matters to a script: a profiles.json full of half-written JSON must not read as `kid has no profile`.
 
-Four roots, and every one of them can be moved by a variable, which is what lets the end to end suite create, edit and read a profile as an ordinary user with nothing installed:
+Five roots, and every one of them can be moved by a variable, which is what lets the end to end suite create, edit and read a profile as an ordinary user with nothing installed:
 
 - `/etc/omahouse/blocked`, or `$OMAHOUSE_CONFIG_DIR/blocked` -- the accounts that may not log in, one name per line, which stock `pam_listfile` reads. Written by `watch` and by nothing else, and its whole content is rewritten every cycle from what is true right now, which is what takes a name back out at the turn of the day.
 - `/etc/omahouse/profiles.json`, or `$OMAHOUSE_CONFIG_DIR/profiles.json` -- who is under rules. Root writes it and everyone reads it. Its absence is not an error: it is the state of every machine before the first profile is written, and `status` says so and goes on scanning.
 - `/var/lib/omahouse/<user>/<YYYY-MM-DD>.json`, or the same under `$OMAHOUSE_STATE_DIR` -- one ledger per day. A day with no file is a day nobody spent, and it is left out of a report rather than printed as a row of zeroes.
+- `/etc/chromium/policies/managed/omahouse.json`, or the same file under `$OMAHOUSE_CHROMIUM_POLICY_DIR` -- which sites open in the browser, composed from every profile at once. It belongs to another program's directory, so it is written under its own name and never merged into anybody else's file, and it is removed rather than emptied when the profiles stop asking for anything. The machine's own copy of it is only written by a run that is also managing the machine's own `/etc/omahouse`, which is what keeps the end to end suite away from the browser of whoever is running it.
 - `/sys/fs/cgroup`, or `$OMAHOUSE_CGROUP_ROOT` -- where the app scopes are read from.
 - `/proc`, or `$OMAHOUSE_PROC_ROOT` -- where the executable of a scope's processes is read from.
 
@@ -33,8 +34,9 @@ The identity of a running app is its systemd scope and not the path of its execu
   - `status` -- `user`, `uid`, `date`, `session`, `profile` (the whole profile, or null), `scopes`, `unnamed`, `outOfReach` and `budgets`. A `scopes` entry is `id`, `unit`, `cgroup` and `processes`, plus `verdict` where there is a profile to give one, plus `exe`, `exeProcesses` and `exeAgrees` -- the executable most of its processes are running, how many of them are running it, and whether that backs up the id. `exe` and `exeAgrees` are null together when nothing in the scope could be read, which is no opinion and not a disagreement. `unnamed` is the same minus the id and the agreement, for a scope under `app.slice` whose unit name is not an app scope name. `outOfReach` is `processes` and the `units` they are in.
   - `report` -- `user`, `since`, `until`, `days` and `totals`. A day is the ledger of `docs/design.md` §4 without its `schemaVersion` and `user`, both of which would be the same words on every day of the range.
   - `profile list` -- an array of `user`, `displayName`, `enabled`, `enforce`, `default`, and the counts of `rules` and `budgets`.
-  - `profile show` -- the profile as `/etc/omahouse/profiles.json` holds it.
-  - every verb that writes a profile -- `profile add`, `profile remove`, `profile enforce`, `profile default`, `allow`, `deny`, `limit` -- prints the profile it wrote, or for `remove` the one it took out. So a script can write and read in one call, and the answer is the same shape `profile show` gives.
+  - `profile show` -- the profile as `/etc/omahouse/profiles.json` holds it, including its `web` half when it has one.
+  - `status` also carries `webPolicy`: the `path` of the managed policy file, `wholeMachine` (always true, and there so a reader cannot miss it), and `contents` -- the composed policy of every profile at once, or null when there should be no file on the machine at all.
+  - every verb that writes a profile -- `profile add`, `profile remove`, `profile enforce`, `profile default`, `allow`, `deny`, `limit`, `web block`, `web allow`, `web incognito` -- prints the profile it wrote, or for `remove` the one it took out. So a script can write and read in one call, and the answer is the same shape `profile show` gives.
   - `grant` -- `user`, `budget`, `minutes`, `by`, `at`, and the day's `usedSeconds`, `grantedSeconds`, `limitSeconds` and `leftSeconds` for that budget.
 
   A budget with no limit has `limitSeconds` and `leftSeconds` null rather than zero: zero left is a budget that has run out, and the two must never read the same.
@@ -258,6 +260,85 @@ A budget the profile does not have is refused: time added to a counter the daemo
 ### Flags
 - **`--session <duration>`** — More of the session: 10m
 - **`--budget <id>=<duration>`** — More of one budget: minecraft=15m
+
+## `omahouse web`
+
+- **Usage:** `omahouse web [--all-but-listed] [--only-listed] [user] <SUBCOMMAND>`
+
+Which sites open in the browser, and whether incognito does.
+
+The same three parts the app half has -- a default verdict, a list of `(match, verdict)` rules, and the verbs to change them -- with a domain where a scope id would be. `omahouse web block kid youtube.com` is `omahouse deny kid steam` written about a site, and the profile holds it in the same shape:
+
+    "web": { "default": "allow", "incognito": "deny",
+              "rules": [ { "match": "youtube.com", "verdict": "deny" } ] }
+
+**It holds for the whole machine, and that was decided rather than overlooked.** Chromium's policy directory is a compile-time constant -- `docs/proposal-browser.md` §3.1 reads it out of `policy_paths.cc` -- so there is no per-account browser policy on Linux short of a managed cloud account, which is exactly what this project is not. One file therefore decides for every account that opens Chromium here, the operator's included. `omahouse web` says so once when it writes and `omahouse status` says so once when it prints, and neither says it twice.
+
+**Profiles that disagree compose to the most restrictive, with no precedence between them.** A domain opens on this machine only if every profile with web rules allows it; one profile blocking it blocks it for all of them, and one profile's `--only-listed` puts `*` in front of everybody. Inventing a precedence would mean a rule an operator wrote, and can still read back in `omahouse profile show`, silently not happening -- with nothing in that file to tell them why. Being more restrictive than one profile asked for is visible the moment somebody opens the site, so the surprise is put where it will be noticed.
+
+A site is named by its bare domain, and a bare domain covers its subdomains: `youtube.com` is also `www.youtube.com` and `m.youtube.com`. A whole URL, a path or a scheme is refused rather than repaired into a rule about its host, because a rule that is not quite the one that was typed is a rule nobody finds out about until the day it does not fire.
+
+The file it writes is `/etc/chromium/policies/managed/omahouse.json` -- its own name, beside whatever else is in that directory, because Chromium merges every file it finds there and Omarchy's `browser-policy.sh` already owns `policies.json`. It is written atomically and 0644, and it is **removed** rather than emptied the moment the profiles stop asking for anything: taking the last block back, or removing the last profile that had web rules, takes the file off the machine. An empty managed policy left behind is a machine that still looks managed, and `pacman -R omahouse` removes the same path for the same reason.
+
+An allowlist with nothing blocked beside it is not a policy. `URLAllowlist` is only ever an exception carved out of `URLBlocklist`, so `omahouse web allow` on a machine where nothing is blocked writes no file and says so. That is not a guess: `.temp/spike-extension.md` §7 measured the same trap one policy over, where a `NativeMessagingAllowlist` with no blocklist beside it let through exactly the host it was meant to keep out.
+
+None of this is a security boundary, and it claims exactly what the app allowlist claims. Nothing in the browser stops a child opening a different browser; what stops them is the app allowlist of `docs/design.md` §5, with the same hole -- a released terminal launches anything. `docs/design.md` §10 already says not to release one in a profile that is meant to hold.
+
+### Arguments
+- **`[user]`** — Whose sites, when setting the mode rather than one rule
+
+### Flags
+- **`--all-but-listed`** — Every site opens except the blocked ones
+- **`--only-listed`** — Only the listed sites open, and nothing else
+
+## `omahouse web block`
+
+- **Usage:** `omahouse web block <user> <domain>`
+
+Do not let that site open, for every account on this machine.
+
+A rule that is already there is changed in place rather than appended to: the first rule that names a site is the one that wins, so a second line about it would be a line that never fires. The domain is lower cased on the way in, because a hostname is not case sensitive -- the opposite of the app half, where `org.freedesktop.Platform` and `org.freedesktop.platform` are two different flatpaks.
+
+It says who else has a say. If another profile allows that domain, the block still wins -- the most restrictive composes -- and the profile that was overruled is named, because being overruled in silence is the one thing that would make the rule dishonest.
+
+### Arguments
+- **`<user>`**
+- **`<domain>`** — The site's bare domain, like youtube.com; subdomains are covered
+
+## `omahouse web allow`
+
+- **Usage:** `omahouse web allow <user> <domain>`
+
+Let that site open through what is blocked.
+
+The mirror of `block`, and the way to take a rule back. Taking back the last block on the machine takes the policy file with it.
+
+An allowlist entry is an exception carved out of a blocklist and nothing else: with nothing blocked anywhere, it blocks nothing and no file is written, and the line printed says so rather than reading as a rule that is doing something.
+
+It cannot open a site another profile blocks. There is one file and no precedence, so the most restrictive of the two is what the machine does.
+
+### Arguments
+- **`<user>`**
+- **`<domain>`**
+
+## `omahouse web incognito`
+
+- **Usage:** `omahouse web incognito [--allow] [--deny] <user>`
+
+Whether incognito windows open.
+
+`--deny` writes `IncognitoModeAvailability: 1`, and like everything else on this page it is a per-machine act.
+
+`--allow` asks the browser for nothing at all -- it does not write a `0`. Writing one would override whatever else on the machine had turned incognito off, and omahouse being *more* permissive than it was asked to be is the one direction it never takes by itself.
+
+An incognito window is not extra screen time. `docs/proposal-browser.md` §4.3: it is the same browser, in the same `app.slice` scope, under the same profile, so the session budget and the browser's own budget go on debiting exactly as they did. What it buys is anonymity about *which site*, inside a total that keeps running -- which is what makes `--allow` a defensible answer rather than a hole somebody left open.
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--allow`** — Incognito windows open
+- **`--deny`** — Incognito windows do not open
 
 ## `omahouse watch`
 

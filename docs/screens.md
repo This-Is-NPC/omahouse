@@ -292,6 +292,12 @@ One run through a VM with Omarchy installed on it, on **2026-09-04, between
 `grim`. Forty-three frames; [the guide](guide.md) is where they are read in
 order, with what each one was.
 
+Four more were added on the same machine on **2026-09-04, between 18:58 and
+19:01**, for the web rules of `design.md` §11 — the whole cycle of installing
+the package, blocking a site, and removing the package again. `44` and `45` are
+with the rule in force, `46` and `47` are the same two screens after
+`pacman -Rns omahouse`, which is the pair that proves removal is complete.
+
 The account under rules on that machine was called `julia`, and the name is
 drawn into the pictures. Everywhere else in this repository the example account
 is `kid`, which stands for whatever the account is called on the machine you are
@@ -312,6 +318,8 @@ faked one would be publishing a picture of a thing that had not happened.
 | the black screen after `loginctl terminate-user` | nothing at all | `16` |
 | the polkit password dialogue over the studio | polkit's agent | `31`, `37` |
 | a session standing up, a program closing under it | the compositor | `03`, `04`, `05`, `12`, `19`, `27` |
+| a site refused by the managed policy, and the same site opening once the package is gone | Chromium | `44`, `46` |
+| **Nova janela anônima** greyed out in Chromium's own menu, and back a minute later | Chromium | `45`, `47` |
 
 And these are the studio itself, in a real session — the same screens as §1 with
 the machine's real theme, a real `.desktop` catalogue and a real day behind

@@ -301,6 +301,17 @@ the `.install`. The install script creates `/etc/omahouse` and
 `/var/lib/omahouse`, adds the PAM line of §2, enables `omahouse.service`, and
 takes all of it out again on removal.
 
+**Removal is half the job, not an appendix.** Four things omahouse puts on a
+machine cannot be taken off it by a file list, and every one of them is a
+restriction: the PAM line, `/etc/omahouse/blocked`, the browser policy of §11,
+and the enabled service. A restriction that outlives the program that made it is
+worse than one that never existed, because nothing left on the disk knows how to
+lift it — a name still in `blocked` locks somebody out of their own machine with
+no tool to let them back in, and a policy still in `/etc/chromium` is a site that
+will not open and a browser that says "managed by your organisation" with nothing
+to ask. `post_remove` takes all four. The profiles and the ledgers stay, by the
+convention for a package's data, and the removal message names both paths.
+
 `Restart=always` matters: a stopped daemon is a rule switched off, and an
 account without privilege cannot stop a system service.
 
@@ -324,6 +335,146 @@ What the model does hold, because none of it depends on the goodwill of the
 session: the clock (changing it needs polkit `auth_admin`), the `loginctl`
 logout, the counting (the ledger is written by root), and the daemon
 (`Restart=always`).
+
+---
+
+## 11. The sites, and a policy that is per machine
+
+The web half of a profile is the app half with a domain where a scope id would
+be. Same three parts, same order of reading, same file:
+
+```json
+"web": {
+  "default": "allow",
+  "incognito": "deny",
+  "rules": [ { "match": "youtube.com", "verdict": "deny" } ]
+}
+```
+
+`omahouse web block kid youtube.com` is `omahouse deny kid steam` written
+about a site. `omahouse web kid --only-listed` is `profile default --deny`
+said in the words §8 asks the studio to use. There is no second model here, and
+that is the point: **site filtering is a `Rule` with a different selector**, and
+`§2`'s three nouns carried it without a structural change, which is what
+[`proposal-network.md`](proposal-network.md) and
+[`proposal-browser.md`](proposal-browser.md) both predicted.
+
+A `web` that says nothing is not written into the file at all. That keeps *never
+had web rules* and *had them taken away* one state, which is what the whole of
+the undoing below rests on.
+
+**The operator's own sentence is not among what this delivers.** A blocked site
+shows Chromium's page, which says an administrator blocked it and nothing about
+who or why, and omahouse never learns the attempt happened at all: policy blocks
+inside the browser and reports nothing out. So there is no message to carry, and
+no count of tries for the day's report either. Both wait on the extension of
+[`proposal-browser.md`](proposal-browser.md), and until it exists this half
+blocks well and explains nothing.
+
+### The mechanism is one Chromium managed policy
+
+`chromiumPolicyFor` composes every profile into one document and
+`/etc/chromium/policies/managed/omahouse.json` is where it lands: `URLBlocklist`,
+`URLAllowlist`, `IncognitoModeAvailability`. Its own file name, beside whatever
+else is in that directory, because Chromium merges every file it finds there and
+Omarchy's `browser-policy.sh` already owns `policies.json`. Written atomically
+and 0644 — the browser reads it as whoever started it, never as root.
+
+The composition is pure and lives in `src/core/WebPolicy.cpp`; the writing is in
+`src/sys/Chromium.cpp`. Same line as `Policy` and `Proc`, and for the same
+reason: the interesting part is arithmetic over a list of profiles, and it is
+proved in microseconds with no browser, no root and no disk.
+
+**No extension.** This slice blocks and unblocks sites and switches incognito
+off, and nothing else. Time *per site* is what would need the extension of
+`proposal-browser.md`, and with it the new root IPC surface `.temp/spike-extension.md`
+§1 measured the cost of. That is not built and is not promised here.
+
+### The policy is per machine, and that was decided
+
+Chromium's policy directory is a compile-time constant —
+`proposal-browser.md` §3.1 reads it out of `policy_paths.cc` — so there is no
+per-account browser policy on Linux short of a managed cloud account, which is
+exactly what this project is not. **One file therefore decides for every account
+that opens Chromium on the machine, the operator's included.**
+
+That was weighed and taken, not overlooked. `proposal-browser.md` §3.2 offers
+the way round it — the child on Chromium, the operator on Brave — and §3.4 the
+heavier one, a `bwrap` bind mount per session, which is refused there for the
+same reason §5 refuses eBPF. Neither is built. What is built says the truth once:
+`omahouse web` prints it when it writes, `omahouse status` prints it under
+`SITES`, and neither says it twice. A tool that re-argues a settled decision
+every time it is used is a tool people stop reading.
+
+### Profiles that disagree compose to the most restrictive
+
+A domain opens on this machine only if **every** profile with web rules allows
+it. One profile blocking it blocks it for all of them; one profile's
+`--only-listed` puts `*` in front of everybody.
+
+The alternative was a precedence — first profile wins, most specific wins, the
+child's beats the adult's — and it was refused. A precedence means a rule an
+operator wrote, and can still read back in `profile show`, silently not
+happening, with nothing in that file to tell them why. Being more restrictive
+than one profile asked for is visible the moment somebody opens the site, and the
+verb names the profile that overruled them. The surprise is put where it will be
+noticed. Same choice as `onerr=succeed` in §2, made in the other direction and
+for the same reason: §4.3 of `proposal-browser.md` shows that the restriction
+here cannot lock anybody out of anything, because an incognito window and a
+blocked site both leave the session budget running exactly as it was.
+
+A domain that is blocked is never also in the allowlist. Chromium gives the
+allowlist the tie, so a domain in both lists is a domain that opens — which
+would turn "the most restrictive wins" into its exact opposite in the one case
+the rule exists for.
+
+**An allowlist with nothing blocked beside it is not a policy**, and no file is
+written for one. `URLAllowlist` is only ever an exception carved out of
+`URLBlocklist`. That is not a guess: `.temp/spike-extension.md` §7 measured the
+same trap one policy over, where a `NativeMessagingAllowlist` with no blocklist
+beside it let through exactly the host it was meant to keep out.
+
+### Undoing it is the same size as doing it
+
+A parental control that leaves a restriction behind after it is gone is worse
+than one that never existed: there is no longer anything on the machine that
+knows how to lift it. So there are two ways back and both of them are complete.
+
+**Without uninstalling.** Taking the last block back — or removing the last
+profile that had web rules — **removes** the file rather than emptying it. An
+empty managed policy left behind is a machine that still looks managed, and
+`chrome://policy` would go on saying "managed by your organisation" over a
+document that says nothing. Nothing has to remember to do this: every verb that
+writes a profile goes through `saveProfiles`, and `saveProfiles` reconciles the
+policy with what the profiles now say. Same discipline as `blocked` in §2, where
+the name comes out on its own.
+
+**By uninstalling.** `post_remove` in `packaging/omahouse.install` takes off
+everything omahouse put on the machine that a file list cannot: the PAM line, the
+`blocked` list it reads, this policy file, and the service. The profiles and the
+ledgers stay, and the removal message names both paths — a report is evidence,
+and neither of them does anything to the machine once the package is gone.
+
+### The refusal that protects the developer's own browser
+
+`/etc/chromium/policies/managed` is only written by a run whose configuration is
+also `/etc/omahouse`. A run pointed at a tree of its own — the end to end suite,
+somebody trying a profile out in `$TMPDIR` — writes its rule into its own
+`profiles.json`, says the browser policy was left alone, and touches nothing.
+`$OMAHOUSE_CHROMIUM_POLICY_DIR` is how the suite proves the file instead.
+
+This is the third refusal of its kind, after §7's cgroup root and configuration
+root, and it is the one with the shortest fuse: the suite runs on the
+developer's laptop with the developer's Chromium open, and a bug here is
+somebody's browser taken away in the middle of an afternoon.
+
+### What it is not
+
+Everything §10 says. Nothing in the browser stops a child opening a different
+browser; what stops them is the app allowlist, with the same hole — a released
+terminal launches anything. `proposal-browser.md` §3.5 is the honest reading:
+an account allowed to run two browsers is filtered in one of them, and the other
+is a door with no lock on it.
 
 ---
 
@@ -505,8 +656,16 @@ a structural change when the time comes.
 - **Ending on idle**, and wiping the account at logout (the kiosk case).
 - **Focus time** instead of running time. Fairer, and it needs IPC from Hyprland
   inside the fiscalised session, which that session can kill.
-- **Site filtering**, DNS, proxy — another problem, another program.
-  [`proposal-network.md`](proposal-network.md) argues the other way, per account
-  through `nft meta skuid`. It is a **proposal**: none of it is built.
+- **Site filtering by DNS or proxy** — another problem, another program.
+  [`proposal-network.md`](proposal-network.md) argues that way, per account
+  through `nft meta skuid`. It is a **proposal**: none of it is built. What *is*
+  built is §11, which blocks sites through the browser's own managed policy
+  instead, and pays for it by being per machine rather than per account.
+- **Time per site.** §11 blocks and unblocks; it does not count. Counting from
+  inside the browser needs the extension of
+  [`proposal-browser.md`](proposal-browser.md), and with it a new root IPC
+  surface in `watch` — `.temp/spike-extension.md` §1 measured that a native
+  messaging host runs as the child and has no path to root today. That half is a
+  **proposal**: none of it is built.
 - **Several machines on a network.** The model carries it; v1 is one machine.
 - **Credit that crosses days**, a time bank, time bought with a chore.

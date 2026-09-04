@@ -36,6 +36,9 @@ sudo omahouse limit kid --session 2h
 sudo omahouse profile default kid --deny       # only what is allowed runs
 sudo omahouse profile enforce kid --on         # after a day of the report
 
+sudo omahouse web block kid youtube.com        # and which sites open
+sudo omahouse web incognito kid --deny
+
 omahouse report kid
 sudo omahouse grant kid --session 10m          # with the game still open
 ```
@@ -44,6 +47,15 @@ A new profile is born **observing and allowing everything**: it counts and
 reports and closes nothing, which buys a day of evidence before the teeth go on.
 An account in `wheel` is refused a profile, because an administrator does not
 fiscalise themselves by accident.
+
+**The web rules hold for the whole machine.** Chromium has no per-account policy
+on Linux, so `omahouse web` writes one managed policy composed from every
+profile at once — a site blocked for the kid is blocked for you too, and
+profiles that disagree compose to the most restrictive with no precedence
+between them. That cost was weighed and taken;
+[`docs/design.md` §11](docs/design.md) says why, and the CLI says it once when
+you write the rule. Taking the last rule back, or removing the package, takes
+the file off the machine.
 
 Reading needs no privilege — the fiscalised person runs `omahouse status` and
 sees what is left of their own day. Writing needs root, and the window gets there
