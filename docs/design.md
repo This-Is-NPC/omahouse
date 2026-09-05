@@ -1,8 +1,8 @@
 # How it is built
 
 This page is for contributors. What the commands do belongs in
-[the guide](guide.md) and [the command line](cli.md); this one is the model, the
-measurements the model was changed by, and the gate that protects it.
+[the how-to pages](README.md) and [the command line](cli.md); this one is the
+model, the measurements the model was changed by, and the gate that protects it.
 
 The section numbers below are load-bearing. Comments across `src/`, `tests/`,
 `packaging/` and `vm/` cite them as `docs/design.md §N`, and §1 to §10 are the
@@ -272,13 +272,37 @@ them read every cycle by the daemon that is already root:
   session's `User`. logind is root's own service and the daemon already ends
   sessions through `loginctl`, so this is not a new door.
 
+**The cheapest candidate was measured dead, and it is worth writing down.**
+`loginctl`'s own `IdleHint` would have cost nothing at all — the root daemon
+already speaks to logind. Over **852 samples** on real Omarchy, `IdleHint=yes`
+came back **0 times** and `LockedHint=yes` came back **0 times**, through both
+the instant the shell locked the session and the instant the screen went dark.
+The shell knows: it takes idleness from `ext-idle-notify-v1` and locks on its
+own timer, and it tells logind none of it, because nothing in Omarchy calls
+`SetIdleHint` or `SetLockedHint`. `/run/systemd/sessions/<id>` has no
+`IDLE_HINT` and no `LOCKED_HINT` in it either, and its first line says it is
+private data and not to be parsed. Dead, and not because it is expensive.
+
 **What is deliberately not read is the fiscalised user's compositor.** Root
 could connect to `$XDG_RUNTIME_DIR/hypr/$HIS/.socket.sock` and ask `hyprctl
-monitors`; it works, and it costs 0.17 ms. It is refused because that socket
-lives in a directory the fiscalised user owns, and a child who kills her own
-Hyprland and puts her own program on that path is a child feeding bytes to a
-JSON parser running as root. The measurement of what that refusal costs, and of
-every candidate that lost, is `.temp/poc-presence.md`.
+monitors`; it works, and it costs 0.17 ms against the DRM attribute's 0.015 ms
+and `loginctl show-seat`'s 4.3 ms. It is refused because that socket lives in a
+directory the fiscalised user owns, and a child who kills her own Hyprland and
+puts her own program on that path is a child feeding bytes to a JSON parser
+running as root.
+
+**And the refusal costs almost nothing, which is why it is affordable.** Over
+those same 852 samples, Hyprland's own `dpmsStatus` and the kernel's `dpms`
+**never once disagreed**: the expensive candidate knows nothing about the screen
+that the cheap one does not. What it knows in addition is the lock — Omarchy
+4.0.2 has no `hyprlock` process to find, the lock is an `ext-session-lock` held
+by `quickshell`, and logind's `LockedHint` stays `no` right through it — so a
+session locked with the screen still lit reads as `Using` for the eight seconds
+until the display goes off. That is the whole price, it is named in the
+vocabulary as `Locked`, and `SeatPresenceSource` never returns it. The seat has
+to be read for a different reason: with the VT switched away, Hyprland went on
+answering `dpmsStatus=True` while somebody else's session was on the screen, and
+only logind saw it.
 
 **It is measured and reported, and it acts on nothing.** What an app is billed
 is its running time — the decision above, and published — and a screen going
@@ -809,7 +833,7 @@ is a door with no lock on it.
 
 ## Measured, and what it cost
 
-Seven rounds. Each one changed the design, or confirmed one against a machine,
+Eight rounds. Each one changed the design, or confirmed one against a machine,
 and each is cited by name from the comments in `vm/`.
 
 ### Round 1 — one session, twelve seconds, no root
