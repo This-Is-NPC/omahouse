@@ -57,6 +57,14 @@ between them. That cost was weighed and taken;
 you write the rule. Taking the last rule back, or removing the package, takes
 the file off the machine.
 
+**Time per site is counted and does nothing.** A Chromium extension reports the
+site in the front tab, and the daemon bills it only while the screen says
+somebody is really there — a browser answers "active" with the monitor
+physically off, which is measured. It shows up in `omahouse status` and
+`omahouse report` beside the budgets. There is no site limit, no warning and no
+block: this is the observing stage, the same place a new profile starts.
+[`docs/design.md` §5.2](docs/design.md) has the whole of it.
+
 Reading needs no privilege — the fiscalised person runs `omahouse status` and
 sees what is left of their own day. Writing needs root, and the window gets there
 through `pkexec`. `omahouse watch` is the loop that counts, warns and acts;

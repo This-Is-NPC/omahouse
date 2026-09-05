@@ -33,6 +33,7 @@ HEADERS += \
     Blocked.h \
     Chromium.h \
     Enforce.h \
+    FocusFile.h \
     Notify.h \
     Paths.h \
     Presence.h \
@@ -44,6 +45,7 @@ SOURCES += \
     Blocked.cpp \
     Chromium.cpp \
     Enforce.cpp \
+    FocusFile.cpp \
     Notify.cpp \
     Paths.cpp \
     Presence.cpp \

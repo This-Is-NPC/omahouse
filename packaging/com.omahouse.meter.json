@@ -1,0 +1,9 @@
+{
+  "name": "com.omahouse.meter",
+  "description": "omahouse: the site in the front tab, reported to the daemon that counts the day",
+  "path": "/usr/lib/omahouse/meter-host",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://ghiofeehkpcmfcpogcpjlpnfgnfaidjn/"
+  ]
+}

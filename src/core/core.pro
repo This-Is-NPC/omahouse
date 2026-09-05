@@ -19,6 +19,7 @@ TARGET    = omahousecore
 HEADERS += \
     AppScope.h \
     Duration.h \
+    Focus.h \
     Json.h \
     Ledger.h \
     Policy.h \
@@ -29,6 +30,7 @@ HEADERS += \
 SOURCES += \
     AppScope.cpp \
     Duration.cpp \
+    Focus.cpp \
     Json.cpp \
     Ledger.cpp \
     Policy.cpp \

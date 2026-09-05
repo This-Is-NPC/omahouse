@@ -66,6 +66,29 @@ package() {
   install -Dm644 packaging/omahouse.svg \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/omahouse.svg"
 
+  # The browser's half of docs/design.md §5.2, and only the half a package can
+  # honestly carry.
+  #
+  # The shim and the native messaging manifest are static files and they go in
+  # here: together they are what makes `com.omahouse.meter` a host Chromium can
+  # reach at all. The extension's own source goes in beside them so that whatever
+  # signs it is signing something with the package's version on it.
+  #
+  # What is NOT here is the signed `.crx`, its `updates.xml` and the
+  # force-install policy that names them. Producing those needs a browser to sign
+  # with and a private key to sign with, and neither belongs in a package build:
+  # a makedepends on chromium to build a parental control is a bad trade, and a
+  # signing key reachable by a build is a signing key. `extension/pack.sh` makes
+  # them, and `post_remove` takes them off whether or not this package ever put
+  # them there.
+  install -Dm755 packaging/omahouse-meter-host "$pkgdir/usr/lib/omahouse/meter-host"
+  install -Dm644 packaging/com.omahouse.meter.json \
+    "$pkgdir/etc/chromium/native-messaging-hosts/com.omahouse.meter.json"
+  install -Dm644 extension/manifest.json \
+    "$pkgdir/usr/share/omahouse/chromium/omahouse-meter/manifest.json"
+  install -Dm644 extension/background.js \
+    "$pkgdir/usr/share/omahouse/chromium/omahouse-meter/background.js"
+
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 docs/cli.md "$pkgdir/usr/share/doc/$pkgname/cli.md"

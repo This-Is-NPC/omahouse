@@ -117,6 +117,18 @@ void Ledger::addPresenceSeconds(const QString &reason, int amount)
     presence[reason] = presenceSecondsFor(reason) + amount;
 }
 
+int Ledger::siteSecondsFor(const QString &site) const
+{
+    return sites.value(site, 0);
+}
+
+void Ledger::addSiteSeconds(const QString &site, int amount)
+{
+    if (site.isEmpty() || amount == 0)
+        return;
+    sites[site] = siteSecondsFor(site) + amount;
+}
+
 int Ledger::grantedSeconds(const QString &budgetId) const
 {
     int total = 0;
@@ -204,6 +216,17 @@ QJsonObject Ledger::toJson() const
             presenceObject.insert(it.key(), it.value());
         document.insert(QStringLiteral("presence"), presenceObject);
     }
+
+    // The same discipline, and for the same reason: a machine where nobody has a
+    // browser extension on it writes exactly the file it has always written. An
+    // empty object here would rewrite every ledger on disk on the first tick
+    // after an upgrade to say nothing.
+    if (!sites.isEmpty()) {
+        QJsonObject siteObject;
+        for (auto it = sites.constBegin(); it != sites.constEnd(); ++it)
+            siteObject.insert(it.key(), it.value());
+        document.insert(QStringLiteral("sites"), siteObject);
+    }
     return document;
 }
 
@@ -265,6 +288,28 @@ bool Ledger::fromJson(const QJsonObject &object, Ledger *out, QString *error)
             return false;
         }
         ledger.presence.insert(it.key(), it.value().toInt());
+    }
+
+    // Absent in every ledger written before the browser was measured, and
+    // absent for good on a machine with no extension. Absent is empty and never
+    // an error.
+    const QJsonValue sitesValue = object.value(QStringLiteral("sites"));
+    if (!sitesValue.isUndefined() && !sitesValue.isObject()) {
+        if (error)
+            *error = QStringLiteral("a ledger has a sites field that is not an object");
+        return false;
+    }
+    const QJsonObject siteObject = sitesValue.toObject();
+    for (auto it = siteObject.constBegin(); it != siteObject.constEnd(); ++it) {
+        if (!it.value().isDouble()) {
+            if (error) {
+                *error = QStringLiteral("the ledger of %1 has a non-numeric site count "
+                                        "for %2")
+                             .arg(ledger.user, it.key());
+            }
+            return false;
+        }
+        ledger.sites.insert(it.key(), it.value().toInt());
     }
 
     const QJsonValue grantsValue = object.value(QStringLiteral("grants"));

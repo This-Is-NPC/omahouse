@@ -1,0 +1,9 @@
+{
+  "ExtensionSettings": {
+    "ghiofeehkpcmfcpogcpjlpnfgnfaidjn": {
+      "installation_mode": "force_installed",
+      "update_url": "file:///usr/share/omahouse/chromium/updates.xml",
+      "override_update_url": true
+    }
+  }
+}

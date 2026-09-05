@@ -115,6 +115,10 @@ in `sys`, on the other side of a line the gate can check.
 
 **The daemon is a subcommand, not a fourth binary.** systemd runs
 `omahouse watch`. No second process, no IPC, no second reader of the profiles.
+The browser's native messaging host is a subcommand too — `omahouse meter`, §5.2
+— and it keeps that promise rather than breaking it: it holds no state, reads no
+profile and writes no ledger, so there is still exactly one thing accumulating a
+day.
 
 **The studio is never root.** It links both libraries to read — everything it
 reads is world readable — and every write goes out as `pkexec omahouse <verb>`,
@@ -153,9 +157,11 @@ that opens the `grace` window, read from disk rather than from a counter in
 memory, so a daemon restarted mid-window resumes it instead of reopening it.
 
 Since §5.1 the day also carries a `presence` object: seconds of the day spent in
-each state of being in front of the machine, keyed by the state's name. It sits
-**beside** `budgets` and never inside it, and it is written only once there is
-something to say — a machine that has never measured presence goes on writing
+each state of being in front of the machine, keyed by the state's name. Since
+§5.2 it carries a `sites` object too: seconds spent with each registrable domain
+in the front tab of the browser. Both sit **beside** `budgets` and never inside
+it, and both are written only once there is something to say — a machine with
+neither a screen it can read nor a browser extension on it goes on writing
 exactly the file it has always written.
 
 The same schema with `default: "allow"` and a `deny` rule per distraction is a
@@ -256,7 +262,119 @@ every candidate that lost, is `.temp/poc-presence.md`.
 **It is measured and reported, and it acts on nothing.** What an app is billed
 is its running time — the decision above, and published — and a screen going
 dark does not change it. Presence appears in `status`, in the journal line, and
-in the day's ledger beside the budgets. What will use it is the time per site.
+in the day's ledger beside the budgets. What uses it is §5.2, the time per site,
+which is the one number in this program that a dark screen does change.
+
+### 5.2 Time per site, which is measured and does not act
+
+`proposal-browser.md` proposed a Chromium extension that reports the site in
+the front tab, and `.temp/spike-extension.md` measured its whole chain on real
+Omarchy. This is what shipped of it, and it is the **observing stage** — exactly
+what `enforce: false` is for the apps. It counts and it shows the number. There
+is no site budget, no warning and no block, and there will not be one until
+somebody has looked at a week of the number and decided it is worth having.
+
+Three parts, and the split is the point: **the extension is an eye, the engine is
+the brain.**
+
+```
+extension/            MV3, permissions ["tabs","nativeMessaging"], no content
+                      script, no host_permissions. Reports the registrable
+                      domain of the active tab of the focused window, every
+                      transition and every five seconds. Nothing else.
+omahouse meter        the native messaging host. Runs as the child, appends
+                      `<epoch> <site>` to /run/user/<uid>/omahouse/focus, and
+                      stops. No ledger, no budget, no accumulation, no privilege.
+omahouse watch        reads that file every cycle, crosses it with §5.1's
+                      presence, and debits the tick to the site in the ledger.
+```
+
+**Why a file and not a socket.** `proposal-browser.md` §8.1 called this "the
+largest single piece of unplanned work": the host is spawned by the browser as
+the child (`.temp/spike-extension.md` §1 measured uid 1001, in her session, with
+her bus in the environment) and the ledger is root's, so the proposal reached for
+a socket in the daemon, with framing and a second writer's worth of validation —
+against §3's "no second process, no IPC, no second reader of the profiles".
+
+The file is cheaper because the host is made **stupid** rather than trusted. The
+daemon is already root, already ticks every two seconds, and already knows
+whether anybody is in front of the screen; it reads this the way it reads
+`/sys/class/drm`. No endpoint, no protocol to version, nothing listening, and the
+accumulation stays in exactly one place — which is what §3 was protecting.
+
+**The crossing is what makes the number honest.** `.temp/spike-extension.md` §5
+asked `chrome.idle` ninety-four times through thirty minutes of an empty room and
+got `active` every time, including twenty-five minutes with the monitor
+physically off. A browser is a reliable witness to *what* is on the screen and a
+proven liar about *whether anybody is looking at it*. So the name comes from the
+browser and the presence comes from §5.1 — the kernel's DRM attributes and root's
+own logind — and **a second is billed only where the two agree**. A tab left on
+YouTube overnight adds nothing, and `status` and the journal say `not counted` in
+so many words when they disagree.
+
+**The file is untrusted input, and that is the design and not a caveat.** The
+child owns the directory. She can write anything into it, truncate it, delete it,
+or kill the host. So the daemon opens both components with `O_NOFOLLOW`, opens
+the file `O_NONBLOCK` so a fifo cannot hold the cycle, refuses anything that is
+not a regular file owned by that uid, reads a bounded tail, and looks at **only
+the last complete line** — not the last one that happens to parse, because
+scanning backwards for something usable is how a file full of rubbish still bills
+a site. Every way it can be wrong is one answer: nothing is billed this tick.
+
+What that costs her is worth naming precisely, because it is why this is safe to
+build at all: **she wins anonymity, not minutes.** The total time on the machine
+is held by the cgroup walk of §5 and by the PAM line of §2, and neither is
+reachable from that file. A child who kills the host has a short per-site table
+and a session that ends at exactly the same minute.
+
+**The privacy boundary is the registrable domain, and it is kept in the
+browser.** The URL never crosses the wire, so there is no bug, no compromised
+host and no readable file by which the page somebody was on can be read out of
+omahouse. The reduction to `youtube.com` is a short table and not the public
+suffix list, on both sides of the wire; being wrong about `bbc.co.uk` costs a row
+with an ugly name and never a minute in the wrong place, and carrying the public
+suffix list to fix one row is not a trade a household control should make.
+
+**Where it shows.** `sites` in the day's ledger, beside `budgets` and never
+inside it; `TIME PER SITE` in `status`, with what is in front right now and
+whether it is being counted; `TIME PER SITE` in `report`, and `TOTAL PER SITE`
+over a range. Written only when there is something to say, so a machine with no
+extension on it writes exactly the file it always wrote.
+
+### The signing key
+
+`proposal-browser.md` §6.3 named the custody of the key as a new problem and did
+not decide it. It is decided here.
+
+**The public half is committed**, in `extension/manifest.json` under `key`. That
+is what fixes the extension id — `ghiofeehkpcmfcpogcpjlpnfgnfaidjn` — across
+rebuilds, so `packaging/omahouse-meter-policy.json` can name it statically and a
+rebuilt package installs over the one before it rather than beside it under a new
+name. A public key is not a secret.
+
+**In development the private half lives at
+`~/.config/omahouse/omahouse-meter.pem`**, outside the repository, 0600, made by
+`extension/pack.sh` on first use and moved by `$OMAHOUSE_EXTENSION_KEY`.
+`.gitignore` refuses `*.pem` and `*.crx` as a second line of defence, because the
+failure is silent: a key committed once is a key somebody else can sign a
+force-installed extension with, on every machine that has the policy.
+
+**In production it would not be on a developer's machine at all** — the same
+shape as any release signing key, held by whoever cuts releases, passphrase
+protected or on a token, reachable by the release job and nothing else. Two
+properties matter: losing it means every installed policy names an extension that
+no longer exists, and leaking it means somebody else can sign something those
+policies will force-install. The development key is explicitly not it.
+
+**The package does not build the `.crx`.** Signing needs a browser and a private
+key, and a `makedepends` on chromium for a parental control, with a signing key
+reachable by a build, is a bad trade twice over. So `vm/PKGBUILD` ships the shim,
+the native messaging manifest and the extension's source; `extension/pack.sh`
+makes the archive, its `updates.xml` and nothing else; and `post_remove` takes
+the policy, the archive and the manifest off the machine whether or not the
+package put them there — the same argument §9 makes about the PAM line, because a
+force-install policy left behind is a browser installing an extension whose host
+is gone.
 
 ### Where the logic lives
 
@@ -423,10 +541,14 @@ The composition is pure and lives in `src/core/WebPolicy.cpp`; the writing is in
 reason: the interesting part is arithmetic over a list of profiles, and it is
 proved in microseconds with no browser, no root and no disk.
 
-**No extension.** This slice blocks and unblocks sites and switches incognito
-off, and nothing else. Time *per site* is what would need the extension of
-`proposal-browser.md`, and with it the new root IPC surface `.temp/spike-extension.md`
-§1 measured the cost of. That is not built and is not promised here.
+**Blocking is all this file does.** The managed policy blocks and unblocks sites
+and switches incognito off, and nothing else — it never learns that an attempt
+happened. Time *per site* is a separate mechanism with no file in common with
+this one: §5.2, an extension that reports and a daemon that counts, with no
+budget attached to what it counts. Neither half knows about the other, and that
+is deliberate — the day this grows a site budget it will be one `Rule` and one
+`Budget`, and until then the counting is allowed to be honest about a site the
+policy does not block.
 
 ### The policy is per machine, and that was decided
 
@@ -737,11 +859,12 @@ a structural change when the time comes.
   through `nft meta skuid`. It is a **proposal**: none of it is built. What *is*
   built is §11, which blocks sites through the browser's own managed policy
   instead, and pays for it by being per machine rather than per account.
-- **Time per site.** §11 blocks and unblocks; it does not count. Counting from
-  inside the browser needs the extension of
-  [`proposal-browser.md`](proposal-browser.md), and with it a new root IPC
-  surface in `watch` — `.temp/spike-extension.md` §1 measured that a native
-  messaging host runs as the child and has no path to root today. That half is a
-  **proposal**: none of it is built.
+- **A budget on a site.** §5.2 counts time per site and §11 blocks sites, and
+  nothing joins them: there is no site limit, no warning and no block on a
+  number running out. That is the observing stage on purpose, and it is where
+  `enforce: false` was for the apps. Joining them is one `Rule` with a domain
+  selector and one `Budget`, which is the work
+  [`proposal-network.md`](proposal-network.md) §8.1 to §8.3 already costed —
+  and it is not done until somebody has read a week of the number.
 - **Several machines on a network.** The model carries it; v1 is one machine.
 - **Credit that crosses days**, a time bank, time bought with a chore.

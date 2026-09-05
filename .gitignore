@@ -14,3 +14,14 @@ __pycache__/
 
 # Working notes, drafts and anything not meant for a reader of this repository.
 .temp/
+
+# The extension's signing key, and the signed archive it makes.
+#
+# The private key never lives in the tree -- `extension/pack.sh` keeps it at
+# ~/.config/omahouse/omahouse-meter.pem, outside the repository, 0600 -- and this
+# is the second line of defence rather than the first. The failure is silent:
+# a key committed once is a key somebody else can sign a force-installed
+# extension with, on every machine that has the policy. The public half is in
+# extension/manifest.json on purpose, and is what fixes the extension id.
+*.pem
+*.crx

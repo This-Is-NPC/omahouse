@@ -20,10 +20,13 @@ until somebody depends on it."""
 import grp
 import json
 import os
+import pty
 import pwd
 import re
 import subprocess
+import struct
 import tempfile
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -193,6 +196,13 @@ class Box:
         self.loginctl = self.root / "loginctl"
         self.screen("connected", "On")
         self.seat(uid=UID)
+        # The sixth root, and the newest: /run/user, where the browser's native
+        # messaging host writes the site in the front tab. Its own tree for the
+        # same reason the others have one -- this suite has to be able to drive a
+        # browser reporting a site without a browser, without a session, and
+        # without touching the real /run/user of whoever is running it.
+        self.runtime = self.root / "runtime"
+        self.runtime.mkdir()
 
     def screen(self, status, dpms, name="card0-Virtual-1"):
         """One DRM connector, in the shape the VM's really has.
@@ -234,6 +244,29 @@ class Box:
                     + refuse + "esac\n")
         self.loginctl.write_text("#!/bin/sh\n" + body)
         self.loginctl.chmod(0o755)
+
+    def focus_file(self):
+        return self.runtime / str(UID) / "omahouse" / "focus"
+
+    def browsing(self, site, seconds_ago=1, raw=None):
+        """The focus file, as the native messaging host would have left it.
+
+        `raw` writes bytes of its own instead, which is how the ways the file can
+        be wrong are exercised -- it is a file the person being measured owns and
+        can put anything at all into.
+        """
+        path = self.focus_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if raw is not None:
+            path.write_bytes(raw)
+            return
+        stamp = int(time.time()) - seconds_ago
+        path.write_text(f"{stamp} {site}\n")
+
+    def stopped_browsing(self):
+        path = self.focus_file()
+        if path.exists():
+            path.unlink()
 
     def policy(self):
         """The managed policy on this box, or None when there is no file.
@@ -319,6 +352,9 @@ class Box:
             # Presence: the screens and the seat, both of them the suite's own.
             "OMAHOUSE_DRM_ROOT": str(self.drm),
             "OMAHOUSE_LOGINCTL": str(self.loginctl),
+            # Time per site: the file the browser's host writes, and never the
+            # real one.
+            "OMAHOUSE_RUNTIME_ROOT": str(self.runtime),
         }
         env.pop("OMAHOUSE_JSON", None)
         # The roots put back where the machine keeps them, which is how the
@@ -1832,6 +1868,180 @@ def check_watch_counts_a_faster_tick(box):
     assert box.day(TODAY)["budgets"]["session"] == 5
 
 
+# -- time per site ------------------------------------------------------------
+#
+# docs/design.md §5.2, end to end, with no browser on the machine and no root.
+# The extension and the native messaging host are both driven here: the host is
+# `omahouse meter`, spoken to over a pipe the way Chromium speaks to it, and the
+# file it leaves is the same file `watch` then reads.
+
+
+def check_the_meter_writes_what_the_browser_told_it(box):
+    """The host's half: frames in on stdin, one line out per frame.
+
+    It is stupid on purpose. `.temp/spike-extension.md` §1 measured this process
+    running as the child with /var/lib/omahouse root's, so it has no path to the
+    ledger and is given none -- it appends to a file in her own runtime directory
+    and stops.
+    """
+    def frame(document):
+        payload = json.dumps(document).encode()
+        return struct.pack("=I", len(payload)) + payload
+
+    said = (frame({"site": "www.youtube.com"})
+            # Revalidated on this side and not trusted: a compromised extension
+            # must not be able to push a whole URL through by putting one in the
+            # field. Anything that is not a domain is written as `-`.
+            + frame({"site": "youtube.com/watch?v=dQw4w9WgXcQ"})
+            + frame({"site": "-"})
+            + frame({"nothing": "of ours"})
+            + frame({"site": "en.wikipedia.org"}))
+    ran = subprocess.run([str(CLI), "meter", "chrome-extension://whatever/"],
+                         input=said, cwd=str(ROOT),
+                         env={**os.environ, "OMAHOUSE_RUNTIME_ROOT": str(box.runtime)},
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+    assert ran.returncode == 0, ran.stderr
+
+    lines = box.focus_file().read_text().splitlines()
+    sites = [line.split(" ", 1)[1] for line in lines]
+    # Four lines for five frames: the one that was not a message of ours is
+    # dropped rather than written as anything.
+    assert sites == ["youtube.com", "-", "-", "wikipedia.org"], lines
+    # And it says nothing back. The extension does not read, and a host that
+    # chattered would be a host with a protocol to keep.
+    assert ran.stdout == b"", ran.stdout
+
+    # Typed by a person rather than started by a browser. Native messaging is
+    # always a pipe (`.temp/spike-extension.md` §1 measured `STDIN_ISATTY=False`),
+    # so a terminal here is somebody wondering what the verb does -- and what it
+    # would do is sit there silently for ever. A real pty, because the whole
+    # refusal is about what stdin is.
+    parent, child = pty.openpty()
+    try:
+        told = subprocess.run([str(CLI), "meter"], stdin=child, cwd=str(ROOT),
+                              env={**os.environ, "OMAHOUSE_RUNTIME_ROOT": str(box.runtime)},
+                              text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              timeout=30)
+    finally:
+        os.close(parent)
+        os.close(child)
+    assert told.returncode == 1, told.returncode
+    assert "native messaging host" in told.stderr, told.stderr
+
+
+def check_watch_counts_a_site_only_while_somebody_is_there(box):
+    """The crossing, and the case that decides whether this is worth having.
+
+    A browser is a witness to what is on the screen and a proven liar about
+    whether anybody is looking at it: `.temp/spike-extension.md` §5 asked
+    `chrome.idle` ninety-four times through half an hour of an empty room, with
+    the monitor off for twenty-five minutes of it, and got `active` every time.
+    So the name comes from the browser and the presence comes from the kernel,
+    and a second is billed only where the two agree.
+    """
+    box.write_profiles(watching_profile())
+    box.browsing("www.youtube.com")
+
+    lit = box.run("watch", "--once")
+    assert lit.returncode == 0, lit.stderr
+    day = box.day(TODAY)
+    assert day["sites"] == {"youtube.com": 2}, day
+    # The journal says it on the same line as the counting.
+    assert "youtube.com" in lit.stderr, lit.stderr
+
+    # The screen goes dark with the same tab in front, and the browser goes on
+    # saying so, because it does not know either.
+    box.screen("connected", "Off")
+    dark = box.run("watch", "--once")
+    assert dark.returncode == 0, dark.stderr
+    assert "youtube.com not counted" in dark.stderr, dark.stderr
+
+    day = box.day(TODAY)
+    assert day["sites"] == {"youtube.com": 2}, day
+    # And the app half is untouched by any of it. docs/design.md §5 bills running
+    # time, and a screen going dark does not change that.
+    assert day["budgets"]["chromium"] == 4, day
+
+    document = json.loads(box.run("watch", "--once", "--json").stdout)
+    assert document["users"][0]["site"]["now"] == "youtube.com"
+    assert document["users"][0]["site"]["counted"] is False
+
+
+def check_watch_bills_nothing_for_a_focus_file_that_is_wrong(box):
+    """The file is the person's own, and every way it can be wrong is one answer.
+
+    She can delete it, fill it with rubbish, date it into the future or leave it
+    to go stale. All of them come back as nothing billed, and none of them stops
+    the day being counted -- which is the half that makes evading this pointless.
+    She wins anonymity, not minutes.
+    """
+    box.write_profiles(watching_profile())
+    now = int(time.time())
+    wrong = {
+        "deleted": None,
+        "rubbish": b"nonsense\n",
+        "a whole URL": f"{now} youtube.com/watch?v=x\n".encode(),
+        "a name that is a sentence": f"{now} your time is up\n".encode(),
+        "an escape in the name": (f"{now} you".encode() + b"\x1b[2J" + b"tube.com\n"),
+        "stale": f"{now - 600} youtube.com\n".encode(),
+        "dated ahead": f"{now + 600} youtube.com\n".encode(),
+        "half written": f"{now} youtube.co".encode(),
+        "nothing in front": f"{now} -\n".encode(),
+    }
+    spent = 0
+    for what, raw in wrong.items():
+        if raw is None:
+            box.stopped_browsing()
+        else:
+            box.browsing(None, raw=raw)
+        ran = box.run("watch", "--once")
+        assert ran.returncode == 0, (what, ran.stderr)
+        spent += 2
+        day = box.day(TODAY)
+        assert "sites" not in day, (what, day)
+        # Counted throughout, whatever the file said.
+        assert day["budgets"]["session"] == spent, (what, day)
+
+
+def check_status_and_report_show_the_time_per_site(box):
+    """It appears where the budgets and the presence do, and says it has no teeth.
+
+    Somebody reading a table of sites beside a table of budgets will assume the
+    first one can take something away. It cannot: there is no site budget, no
+    warning and no block, and both screens say so.
+    """
+    box.write_profiles(watching_profile())
+    box.browsing("www.youtube.com")
+    box.run("watch", "--once")
+    box.browsing("en.wikipedia.org")
+    box.run("watch", "--once")
+    box.run("watch", "--once")
+
+    live = box.run("status", USER)
+    assert live.returncode == 0, live.stderr
+    assert "TIME PER SITE" in live.stdout, live.stdout
+    assert "wikipedia.org is in the front tab, and it is being counted" in live.stdout
+    assert "never billed to a" in live.stdout, live.stdout
+    assert "4m" not in below(live.stdout, "TIME PER SITE"), live.stdout
+
+    document = json.loads(box.run("status", USER, "--json").stdout)
+    assert document["sites"] == {
+        "now": "wikipedia.org", "counted": True,
+        "today": {"wikipedia.org": 4, "youtube.com": 2},
+    }, document["sites"]
+
+    reported = box.run("report", USER)
+    assert "TIME PER SITE" in reported.stdout, reported.stdout
+    assert row_for(reported.stdout, "youtube.com") == ["youtube.com", "2s"], reported.stdout
+    assert row_for(reported.stdout, "wikipedia.org") == ["wikipedia.org", "4s"]
+
+    # And a browser that is not open at all says so rather than saying nothing.
+    box.stopped_browsing()
+    quiet = box.run("status", USER)
+    assert "Nothing is being reported right now" in quiet.stdout, quiet.stdout
+    assert json.loads(box.run("status", USER, "--json").stdout)["sites"]["now"] is None
+
+
 # -- the promise of the stage -------------------------------------------------
 
 def check_the_reading_verbs_write_nothing(box):
@@ -1904,6 +2114,10 @@ def main():
         check_watch_dry_run_never_writes_the_block,
         check_watch_refuses_what_it_does_not_do,
         check_watch_counts_a_faster_tick,
+        check_the_meter_writes_what_the_browser_told_it,
+        check_watch_counts_a_site_only_while_somebody_is_there,
+        check_watch_bills_nothing_for_a_focus_file_that_is_wrong,
+        check_status_and_report_show_the_time_per_site,
         check_watch_writes_presence_beside_the_budgets_and_never_into_them,
         check_the_reading_verbs_write_nothing,
     ]

@@ -9,13 +9,14 @@
 # that already has the line has to come out of it unchanged -- including one
 # where somebody moved the line by hand, which is theirs to have done.
 #
-# And removal is not an afterthought here, it is half the job. omahouse puts four
+# And removal is not an afterthought here, it is half the job. omahouse puts
 # things on a machine that a file list cannot take back off it: the PAM line, the
-# `blocked` list that line reads, the browser policy of §11, and an enabled
-# service. Every one of them is a restriction, and a restriction that outlives
-# the program that made it is worse than one that never existed -- there is no
-# longer anything on the machine that knows how to lift it. `post_remove` below
-# takes all four, in that spirit, and says what it kept.
+# `blocked` list that line reads, the browser policy of §11, the force-install
+# policy and signed archive of the meter of §5.2, and an enabled service. Every
+# one of them is a restriction, and a restriction that outlives the program that
+# made it is worse than one that never existed -- there is no longer anything on
+# the machine that knows how to lift it. `post_remove` below takes all of them,
+# in that spirit, and says what it kept.
 
 _pam_file=/etc/pam.d/system-login
 _pam_marker='pam_listfile.so.*file=/etc/omahouse/blocked'
@@ -171,13 +172,38 @@ post_remove() {
     # before this package and it is not ours to take.
     rm -f /etc/chromium/policies/managed/omahouse.json
 
+    # And the meter of docs/design.md §5.2, which is the same argument again with
+    # a different file. A force-install policy left behind after the package is
+    # gone is a browser that goes on installing an extension whose native host is
+    # no longer on the disk: `chrome://extensions` says "managed by your
+    # organisation" over an extension that reports into nothing, and there is no
+    # program left that knows how to take it off. So the policy goes, the archive
+    # it names goes, and the manifest that let it reach the host goes.
+    #
+    # By name, again, and only by name. The three directories all belong to other
+    # things and none of them is removed.
+    rm -f /etc/chromium/policies/managed/omahouse-meter.json
+    rm -f /etc/chromium/native-messaging-hosts/com.omahouse.meter.json
+    rm -f /usr/share/omahouse/chromium/omahouse-meter.crx
+    rm -f /usr/share/omahouse/chromium/updates.xml
+    rmdir /usr/share/omahouse/chromium /usr/share/omahouse 2>/dev/null || true
+
+    # The focus files the browser's host left in each session's runtime
+    # directory. They go with the session anyway -- /run/user is a tmpfs systemd
+    # empties at logout -- but a machine that has not been rebooted since the
+    # uninstall would still have them, and they name sites somebody visited.
+    rm -f /run/user/*/omahouse/focus 2>/dev/null || true
+    rmdir /run/user/*/omahouse 2>/dev/null || true
+
     cat <<-'MESSAGE'
 	>>> omahouse: everything omahouse put on this machine is off it.
 	>>>
 	>>>           The login block is gone and everybody can log in again, the
 	>>>           browser policy in /etc/chromium/policies/managed/omahouse.json
-	>>>           is gone and every site opens again, and the service is stopped
-	>>>           and disabled. No rule omahouse wrote is still in force.
+	>>>           is gone and every site opens again, the meter extension is no
+	>>>           longer force-installed and its native host is gone, and the
+	>>>           service is stopped and disabled. No rule omahouse wrote is
+	>>>           still in force.
 	>>>
 	>>>           Two things were kept on purpose, and here is where they are:
 	>>>             /etc/omahouse/profiles.json   who was under rules

@@ -71,6 +71,25 @@ struct Ledger {
     /// couple of seconds and read by people, and a hash would shuffle the keys
     /// between two writes that mean the same thing.
     QMap<QString, int> presence;
+    /// Seconds of the day the front tab of the focused browser window was on
+    /// each site, by registrable domain -- docs/design.md §5.2.
+    ///
+    /// Beside the budgets, exactly as `presence` is, and for a stronger reason
+    /// than presence has: there is no budget here at all. Nothing runs out,
+    /// nothing warns and nothing closes. This is the observing stage, and the
+    /// number exists to be looked at before anybody decides whether it is worth
+    /// giving teeth to.
+    ///
+    /// A second only lands here if two things were true at once: the browser
+    /// said a site was in front, and omahouse's own presence said somebody was
+    /// in front of the screen. `.temp/spike-extension.md` §5 is why the second
+    /// half is not optional -- a browser reports `active` with the monitor
+    /// physically off, so a meter that trusted it would run all night beside a
+    /// sleeping child.
+    ///
+    /// A QMap for the same reason `seconds` is one: the file is written every
+    /// couple of seconds and read by people.
+    QMap<QString, int> sites;
     QVector<Grant> grants;
     QVector<Event> events;
 
@@ -79,6 +98,9 @@ struct Ledger {
 
     int presenceSecondsFor(const QString &reason) const;
     void addPresenceSeconds(const QString &reason, int amount);
+
+    int siteSecondsFor(const QString &site) const;
+    void addSiteSeconds(const QString &site, int amount);
 
     /// Minutes an operator added today, as seconds, for one budget. Grants are
     /// in the day's own file, so they expire by the file expiring.

@@ -1,6 +1,7 @@
 #include "Watch.h"
 
 #include "Blocked.h"
+#include "Focus.h"
 #include "Paths.h"
 #include "Users.h"
 
@@ -219,11 +220,12 @@ Words wordsFor(const Profile &profile, const Decision &decision, const QString &
 }
 
 Watch::Watch(const Proc *proc, Notifier *notifier, Enforcer *enforcer, PresenceSource *presence,
-             const Options &options)
+             FocusSource *focus, const Options &options)
     : m_proc(proc)
     , m_notifier(notifier)
     , m_enforcer(enforcer)
     , m_presence(presence)
+    , m_focus(focus)
     , m_options(options)
 {
 }
@@ -357,6 +359,28 @@ void Watch::observe(const Profile &profile, Watched *watched, const SeatReading 
     if (watched->presence.known())
         outcome.ledger.addPresenceSeconds(presenceReasonName(watched->presence.reason),
                                           m_options.tickSeconds);
+
+    // And the site in the front tab, crossed with that presence -- docs/design.md
+    // §5.2. Written after `evaluate` for the same reason presence is: this
+    // decides nothing, and putting it here is what makes that structural rather
+    // than a promise.
+    //
+    // The crossing is the whole of why the number is worth having. The browser
+    // is a witness to *what* is on the screen and is a proven liar about
+    // *whether anybody is looking*: `.temp/spike-extension.md` §5 asked
+    // `chrome.idle` ninety-four times through half an hour of an empty room, with
+    // the monitor physically off for twenty-five minutes of it, and got `active`
+    // every time. So the name comes from the browser and the presence comes from
+    // the kernel's DRM attributes and root's own logind, and a site is only
+    // billed where the two agree. A tab left open on YouTube overnight adds
+    // nothing.
+    if (m_focus) {
+        watched->site = siteInFrontOf(m_focus->tail(watched->uid), now);
+        if (!watched->site.isEmpty() && watched->presence.present) {
+            outcome.ledger.addSiteSeconds(watched->site, m_options.tickSeconds);
+            watched->siteCounted = true;
+        }
+    }
 
     watched->ledger = outcome.ledger;
     for (auto it = outcome.ledger.seconds.cbegin(); it != outcome.ledger.seconds.cend(); ++it) {
@@ -611,6 +635,11 @@ bool Watch::worthSaying(const Watched &watched)
         // the only way anybody reading the journal later can tell an hour of use
         // from an hour of an empty room.
         presenceReasonName(watched.presence.reason),
+        // The site, and whether it was billed. Both, because moving from
+        // counted to not counted without moving site is exactly what a screen
+        // going dark under an open tab looks like, and it is the change worth a
+        // line.
+        watched.site + (watched.siteCounted ? QStringLiteral("+") : QStringLiteral("-")),
         watched.apps.join(QLatin1Char(',')),
         QString::number(watched.unnamedScopes),
         watched.debited.join(QLatin1Char(',')),

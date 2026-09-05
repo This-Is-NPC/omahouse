@@ -2,6 +2,8 @@
 
 #include "Blocked.h"
 #include "Enforce.h"
+#include "Focus.h"
+#include "FocusFile.h"
 #include "Ledger.h"
 #include "Notify.h"
 #include "Paths.h"
@@ -140,6 +142,31 @@ public:
         reading.occupied = true;
         reading.uid = uid;
         reading.screen = ScreenState::On;
+    }
+};
+
+/// The browser's half of the eye, without a browser -- docs/design.md §5.2.
+///
+/// It hands back the bytes of a focus file, which is exactly what the real one
+/// does: the whole of the reasoning about what those bytes mean is pure and
+/// lives in `src/core/Focus.cpp`, so the only thing left to drive here is the
+/// crossing with presence.
+class Tabs : public FocusSource {
+public:
+    QByteArray blob;
+    int reads = 0;
+
+    QByteArray tail(uid_t) override
+    {
+        ++reads;
+        return blob;
+    }
+
+    /// One line, as the native messaging host would have appended it a moment
+    /// ago.
+    void saying(const QString &site, const QDateTime &now, int secondsAgo = 1)
+    {
+        blob = focusLineFor(now.addSecs(-secondsAgo), site);
     }
 };
 
@@ -303,7 +330,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
 
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         const Cycle cycle = watch.tick({profile()}, now);
@@ -347,7 +375,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {5, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {5, false});
 
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         watch.tick({profile()}, now);
@@ -369,7 +398,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
 
         const Cycle first = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(first.users.first().said.size(), 1);
@@ -408,8 +438,9 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
+        Tabs tabs;
         recorder.refuse = true;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
 
         const Cycle first = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(first.users.first().said.size(), 1);
@@ -442,7 +473,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const Cycle cycle = watch.tick({observing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
@@ -492,7 +524,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
@@ -537,7 +570,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
@@ -585,7 +619,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
 
         watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(blockedNames(), QStringList({m_user}));
@@ -628,7 +663,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
 
         watch.tick({enforcing}, QDateTime(day, QTime(23, 59, 58)));
         QCOMPARE(blockedNames(), QStringList({m_user}));
@@ -657,7 +693,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
 
         QVERIFY(!cycle.users.first().session);
@@ -683,7 +720,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(blockedNames(), QStringList({m_user}));
 
@@ -717,7 +755,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, true});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, true});
         const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
@@ -741,7 +780,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
 
         const QDate before(2026, 9, 3);
         const QDate after(2026, 9, 4);
@@ -768,7 +808,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, true});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, true});
         const Cycle cycle = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
 
         // It decided, and it wrote the decision down nowhere.
@@ -791,7 +832,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         const Cycle cycle = watch.tick({profile()}, now);
 
@@ -810,7 +852,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         const Cycle cycle = watch.tick({off}, now);
 
@@ -831,7 +874,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const Cycle cycle = watch.tick({orphan}, QDateTime(QDate(2026, 9, 3), QTime(19, 0, 0)));
 
         QVERIFY(!cycle.users.first().account);
@@ -851,8 +895,9 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
+        Tabs tabs;
         eyes.showing(m_uid);
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
 
         Profile second = profile();
         second.user = QStringLiteral("omahouse-nobody-4f8ae1c3");
@@ -878,8 +923,9 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
+        Tabs tabs;
         eyes.showing(m_uid);
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const QDate day(2026, 9, 3);
 
         watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
@@ -902,6 +948,108 @@ private slots:
         QCOMPARE(written.secondsFor(QStringLiteral("chromium")), 4);
     }
 
+    // The crossing of docs/design.md §5.2, and the case the whole browser half
+    // exists to be able to pass.
+    //
+    // `.temp/spike-extension.md` §5 measured a browser answering `active`
+    // ninety-four times through thirty minutes of an empty room, with the
+    // monitor physically off for twenty-five of them. A meter that trusted the
+    // browser would bill YouTube all night beside a sleeping child. So the name
+    // comes from the browser and the presence comes from the kernel, and a
+    // second is only billed where the two agree.
+    void aSiteInFrontOfADarkScreenDebitsNothing()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const QDate day(2026, 9, 3);
+
+        const QDateTime lit(day, QTime(19, 0, 0));
+        tabs.saying(QStringLiteral("youtube.com"), lit);
+        const Cycle watching = watch.tick({profile()}, lit);
+        QCOMPARE(watching.users.first().site, QStringLiteral("youtube.com"));
+        QVERIFY(watching.users.first().siteCounted);
+        QCOMPARE(readBack(day).siteSecondsFor(QStringLiteral("youtube.com")), 2);
+
+        // The screen goes dark with the same tab in front, and the browser goes
+        // on saying so -- because it does not know either.
+        eyes.reading.screen = ScreenState::Off;
+        const QDateTime dark(day, QTime(19, 0, 2));
+        tabs.saying(QStringLiteral("youtube.com"), dark);
+        const Cycle nobody = watch.tick({profile()}, dark);
+
+        // Still reported, so the journal can say `youtube.com not counted` and
+        // an operator can see that omahouse knows the difference. Not billed.
+        QCOMPARE(nobody.users.first().site, QStringLiteral("youtube.com"));
+        QVERIFY(!nobody.users.first().siteCounted);
+        QCOMPARE(readBack(day).siteSecondsFor(QStringLiteral("youtube.com")), 2);
+
+        // And the app half is untouched by any of it: the browser scope was
+        // running, so it was billed, screen or no screen. docs/design.md §5 bills
+        // running time and this step does not get to change that.
+        QCOMPARE(readBack(day).secondsFor(QStringLiteral("chromium")), 4);
+    }
+
+    // Every way the file can be wrong is one way: nothing is billed. The
+    // arithmetic of each is the pure suite's; what is asserted here is that the
+    // loop treats them all alike and goes on counting everything else.
+    void aFocusFileThatIsWrongInAnyWayBillsNothing()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const QDate day(2026, 9, 3);
+        QDateTime now(day, QTime(19, 0, 0));
+
+        const QVector<QByteArray> wrong {
+            QByteArray(),                                   // she deleted it
+            QByteArray("nonsense\n"),                        // she filled it with rubbish
+            focusLineFor(now.addSecs(-600), QStringLiteral("youtube.com")),  // it went stale
+            focusLineFor(now.addSecs(600), QStringLiteral("youtube.com")),   // she dated it ahead
+            focusLineFor(now, QString()),                   // nothing is in front
+        };
+        for (const QByteArray &blob : wrong) {
+            tabs.blob = blob;
+            const Cycle cycle = watch.tick({profile()}, now);
+            QVERIFY2(cycle.users.first().site.isEmpty(), blob.constData());
+            QVERIFY(!cycle.users.first().siteCounted);
+            now = now.addSecs(2);
+        }
+        QVERIFY(readBack(day).sites.isEmpty());
+        // And the day went on being counted throughout, which is the half that
+        // makes evading this pointless: she wins anonymity, not minutes.
+        QCOMPARE(readBack(day).secondsFor(QStringLiteral("session")), 10);
+    }
+
+    // A machine with no extension on it -- which is every machine today -- writes
+    // exactly the ledger it has always written.
+    void aCycleWithNoFocusSourceWritesNoSites()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, nullptr, Watch::Options {2, false});
+        const QDate day(2026, 9, 3);
+
+        const Cycle cycle = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
+        QVERIFY(cycle.users.first().site.isEmpty());
+        QVERIFY(readBack(day).sites.isEmpty());
+        QVERIFY(!readBack(day).toJson().contains(QStringLiteral("sites")));
+    }
+
     // A loop that was never given eyes must say it cannot see. Nothing is
     // written about presence at all, because an hour of `unknown` in the day's
     // file is an hour of somebody's afternoon described as a failure to look.
@@ -911,7 +1059,8 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, nullptr, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, nullptr, &tabs, Watch::Options {2, false});
         const QDate day(2026, 9, 3);
 
         const Cycle cycle = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
@@ -933,8 +1082,9 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
+        Tabs tabs;
         eyes.showing(m_uid);
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const QDate day(2026, 9, 3);
 
         QVERIFY(watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)))
@@ -964,7 +1114,8 @@ private slots:
         Recorder recorder;
         Bite teeth;
         Eyes eyes;
-        Watch watch(&reader, &recorder, &teeth, &eyes, Watch::Options {2, false});
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const QDate day(2026, 9, 3);
 
         QVERIFY(watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)))

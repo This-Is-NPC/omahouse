@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Enforce.h"
+#include "FocusFile.h"
 #include "Notify.h"
 #include "Policy.h"
 #include "Presence.h"
@@ -123,6 +124,21 @@ struct Watched {
     /// the budgets, and `status` says the state out loud, and that is all -- what
     /// will use it is the time per site.
     Presence presence;
+    /// The site the browser last said was in the front tab, or empty.
+    ///
+    /// Read out of the file the native messaging host writes -- docs/design.md
+    /// §5.2 -- and carried here whether or not it was billed, because the line
+    /// that says `youtube.com, not counted: screen-off` is the whole point of
+    /// crossing the two. A browser reporting a site into an empty room is
+    /// exactly what `.temp/spike-extension.md` §5 measured, and the journal is
+    /// where somebody can see that omahouse knows the difference.
+    QString site;
+    /// Whether that site really gained the tick.
+    ///
+    /// False for a site reported with nobody in front of the screen, which is
+    /// the crossing that keeps the number honest, and false for a cycle with no
+    /// site at all.
+    bool siteCounted = false;
     /// The ids of the live scopes, sorted and without repeats. Only the ones
     /// that have an id: a scope nothing could name has no word to put in a
     /// sentence, and an empty string in this list would print as a gap between
@@ -206,9 +222,10 @@ public:
     /// that only wants the accounting hands in. `presence` may be null too, and
     /// then every user's presence is `Unknown` and nothing about it is written:
     /// a loop that was never given eyes must say it cannot see, not that nobody
-    /// is there.
+    /// is there. `focus` may be null, and then no day gains a site -- which is
+    /// every machine with no browser extension on it, and is not a failure.
     Watch(const Proc *proc, Notifier *notifier, Enforcer *enforcer, PresenceSource *presence,
-          const Options &options);
+          FocusSource *focus, const Options &options);
 
     const Options &options() const { return m_options; }
 
@@ -236,6 +253,7 @@ private:
     Notifier *m_notifier;
     Enforcer *m_enforcer;
     PresenceSource *m_presence;
+    FocusSource *m_focus;
     Options m_options;
     /// What each user's cycle looked like last time, so that a cycle that says
     /// the same thing says nothing at all.

@@ -66,6 +66,10 @@ And it says whether anybody is in front of the machine, under `Presence`. `.temp
 
 It is measured and reported, and it takes nothing away. What an app is billed is its running time, which is `docs/design.md` §5 and does not change here, so a budget still being spent beside `away: every connected screen is off` is not omahouse having quietly stopped counting -- and `status` says so on the same screen, because that is the reading somebody would otherwise take.
 
+And it says which site is in the front tab of the browser, under `TIME PER SITE`, with what the day has come to per site beside it. The site comes from a Chromium extension that reports the registrable domain and nothing else, through a native messaging host that appends it to a file in that account's own runtime directory; the day's totals come from the ledger, which the daemon wrote. So an operator asking about somebody else sees the totals and not the live tab -- the ledger is 0644 and the file is not -- and that asymmetry is deliberate.
+
+This one has no teeth at all, one step beyond presence: there is no site budget, no warning and no block, and the screen says so. A site is counted only while the presence above says somebody is in front of the screen, and `status` prints `is NOT being counted` in so many words when the two disagree.
+
 ### Arguments
 - **`[user]`** — Whose session to look at; defaults to whoever ran it
 
@@ -80,6 +84,8 @@ What was spent per budget, the time an operator granted, and what the daemon alr
 A user with no ledger is not an error. It is somebody who has not been counted yet, and it is said in one line naming the file that is not there, rather than as an empty table.
 
 This verb does not ask whether the account exists. A profile, and the days it accumulated, can outlive the account it was written for, and a report is exactly what somebody would want in that case.
+
+A day with time per site in it gets a `TIME PER SITE` table beside the budgets, and a range gets a `TOTAL PER SITE` beside the total. Beside, and never among: a site is not a budget, and adding `youtube.com` to a sum of budgets would be a report saying the day was twice as long as it was.
 
 ### Arguments
 - **`<user>`**
@@ -345,6 +351,24 @@ An incognito window is not extra screen time. `docs/proposal-browser.md` §4.3: 
 - **`--allow`** — Incognito windows open
 - **`--deny`** — Incognito windows do not open
 
+## `omahouse meter`
+
+- **Usage:** `omahouse meter`
+
+Chromium's native messaging host, started by the browser and never by a person.
+
+It is stupid on purpose, and that is the whole design. Chromium spawns it as whoever opened the browser -- `.temp/spike-extension.md` §1 measured uid 1001, inside the child's session, with her bus in the environment -- so this half has no privilege and is given none. It reads native messaging frames on stdin, takes the one field it understands, and appends `<epoch seconds> <site>` to `/run/user/<uid>/omahouse/focus`. It reads no profile, knows nothing about a budget, accumulates nothing, and never touches the ledger -- which it could not write anyway, since `/var/lib/omahouse` is root's.
+
+`docs/proposal-browser.md` §8.1 reached instead for a socket in the root daemon, with framing and a second writer's worth of validation, and called it the largest single piece of unplanned work on that page. This is what replaced it: `omahouse watch` is already root, already ticks every two seconds, and already knows whether anybody is in front of the screen, so it reads that file the way it reads `/sys/class/drm`. There is no new endpoint and nothing listening, and the accumulation stays in exactly one place.
+
+It revalidates what the extension sent rather than trusting it. The extension is supposed to send a registrable domain and nothing more -- `youtube.com`, never `youtube.com/watch?v=...`, because the URL is not a thing this program should ever be able to learn -- and a compromised one must not be able to push a whole URL through by putting one in the field. Anything that is not a plausible domain is written as `-`, which is what the browser itself sends when there is no site in front. A message with no site field at all is dropped rather than written as anything, because a host that read a message it did not understand as "there is nothing on the screen" would be making a claim about the screen.
+
+The file is bounded: at a quarter of a megabyte it is started again, because nothing ever reads more than its last line and a file that grows without a ceiling in a tmpfs is a session that eventually cannot write anything at all. It goes away with the runtime directory at logout, which is exactly the lifetime it should have.
+
+Typing this verb at a terminal is refused. Native messaging is always a pipe, so a tty on stdin is somebody wondering what it does -- and what it would do is sit there silently for ever. What decides which extension may reach it is `allowed_origins` in `/etc/chromium/native-messaging-hosts/com.omahouse.meter.json`, which is root's file; the origin Chromium passes as an argument is not read, because a check over an argument the caller chose proves nothing.
+
+`$OMAHOUSE_RUNTIME_ROOT` moves the root it writes under, for the reason every other root here has a variable: the end to end suite drives this over a pipe with no browser on the machine.
+
 ## `omahouse watch`
 
 - **Usage:** `omahouse watch [FLAGS]`
@@ -378,6 +402,12 @@ Two files are all it writes -- the day's ledger and `/etc/omahouse/blocked` -- s
 With no profile anywhere it says so and comes back. A daemon spinning every two seconds over an empty list is a fan running for nothing.
 
 It reads the seat and the screens once per cycle -- not once per profile, because there is one seat and one set of monitors and they are facts about the machine -- and writes what it found into the day's ledger beside the budgets, under `presence`. Nothing acts on it. A cycle with no way to look says `unknown` and writes nothing at all about presence, because an hour of `unknown` in somebody's day is an hour described as a failure to look.
+
+And it reads the site in the front tab, out of `/run/user/<uid>/omahouse/focus`, which the browser's native messaging host (`omahouse meter`) appends to. It bills that site the tick **only where the presence above says somebody is really in front of the screen**: a browser is a witness to what is on the screen and a proven liar about whether anybody is looking at it, and `.temp/spike-extension.md` §5 measured one answering `active` ninety-four times through half an hour of an empty room with the monitor physically off for twenty-five minutes of it. So a tab left on YouTube overnight adds nothing.
+
+That file belongs to the person being measured and is treated as such: it is opened without following a symlink at either component, refused unless it is a regular file owned by that very account, read a bounded tail at a time, and only its last complete line is looked at. Every way it can be wrong -- deleted, truncated, filled with rubbish, dated into the future, gone stale -- is one answer, which is that nothing is billed for that tick. What evading it wins is anonymity and not minutes: the total time on the machine is held by the cgroup walk and by the PAM line, and neither is reachable from that file.
+
+The seconds land in the day's ledger beside the budgets, under `sites`. There is no site budget, no warning and no block. This is the observing stage, exactly as `enforce: false` is for the apps.
 
 It stops on SIGINT and SIGTERM after the cycle it is in, which is a `rename` away from being no cycle at all.
 

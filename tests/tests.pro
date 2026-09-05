@@ -17,6 +17,7 @@ SOURCES += \
     tst_scopename.cpp \
     tst_policy.cpp \
     tst_duration.cpp \
+    tst_focus.cpp \
     tst_ledger.cpp \
     tst_proc.cpp \
     tst_paths.cpp \

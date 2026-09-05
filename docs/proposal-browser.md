@@ -1,6 +1,6 @@
-# Proposal — time per site through a Chromium extension · **the extension is not built**
+# Proposal — time per site through a Chromium extension · **the reporting half now ships**
 
-> **Part of this page shipped. Most of it did not, and the split is exact.**
+> **Most of this page has now shipped, and the split is exact.**
 >
 > **Built, and described in [`design.md`](design.md) §11** — blocking and
 > unblocking a site by managed policy, and switching incognito off. The policy
@@ -12,14 +12,31 @@
 > the file back off the machine. §11 is what to read for what it does; this page
 > is the argument it was decided from, and where it disagrees with §11, §11 wins.
 >
-> **Not built, and still a proposal: everything about counting.** There is no
-> extension, no `.crx`, no signing key, no native messaging host, no ingestion
-> verb, no root IPC and no screen in the studio. Time *per site* does not exist.
-> The one thing that changed for that half is that it has now been measured
-> rather than only read about: `.temp/spike-extension.md` records a throwaway
-> extension and a throwaway native messaging host driven on a real Omarchy VM,
-> and it contradicts this page in three places, which are marked **[measured]**
-> where they occur.
+> **Built, and described in [`design.md`](design.md) §5.2** — the counting half,
+> as far as counting. There is an extension (`extension/`), a signing key with
+> its custody decided (§6.3 asked and did not answer; design.md's "The signing
+> key" answers), a native messaging host (`omahouse meter`), and time per site in
+> the ledger, in `status` and in `report`.
+>
+> **It shipped in a different shape from the one §2 and §8.1 propose, and that is
+> the largest disagreement between this page and what exists.** §8.1 says the
+> accumulation lives in the host and reaches the daemon through a socket, a
+> protocol and a second writer's worth of validation, and calls that "the largest
+> single piece of unplanned work on this page". There is no socket. The host is
+> stupid: it appends `<epoch> <site>` to a file in the child's own runtime
+> directory, and `omahouse watch` — already root, already ticking, already
+> holding the presence signal — reads it as one more fact about the machine. The
+> file is untrusted input and is read as such. Where this page and design.md §5.2
+> disagree, §5.2 wins.
+>
+> **Still not built, and not promised:** a budget on a site, a warning, a block,
+> a count of blocked attempts, and any screen in the studio. §5.2 is the
+> observing stage, which is where `enforce: false` was for the apps.
+>
+> The measurement that decided the shape is `.temp/spike-extension.md`: a
+> throwaway extension and a throwaway native messaging host driven on a real
+> Omarchy VM. It contradicts this page in three places, which are marked
+> **[measured]** where they occur.
 >
 > **This page was written with no measurement of its own mechanism.**
 > [`proposal-network.md`](proposal-network.md) is written on top of a proof of

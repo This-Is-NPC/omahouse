@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "omahouse meter",
+  "version": "1.0.0",
+  "description": "Tells omahouse which site is in the front tab. It reports, and it does nothing else.",
+  "permissions": ["tabs", "nativeMessaging"],
+  "host_permissions": [],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAutEmpRiYRYy7oJ1eTixOYF+wuxFRxS3rXJjDRfkn+jBFMeD2TPHec2GuRP85PTrz8sTiwkycOMlINHFqQpFMlKdnwxuK6PVPMNkHYFTiqK8AQlxED+KsED1ryXmOCrgVylGWh+kEdkyzjbs1cieY7YwkzqocK1YHMrbqsjFVbElDmWt6oEwjXT97OVRwxNUz/8o4uT30XwfotSZaq/7xt34oHfHGsWklJ2NVl1SE9F9fi5yeijIHgkJxQKuayvvuAqKWV3ZI4L+FuB0LIe16KdHgoNE3AmoePDYrP3P1pTAB1WnEP3DE92JJbYrAl+ZUNL58Et2os8E2gjw2AHwwuQIDAQAB"
+}

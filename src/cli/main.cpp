@@ -1,5 +1,7 @@
 #include "Chromium.h"
 #include "Duration.h"
+#include "Focus.h"
+#include "FocusFile.h"
 #include "Ledger.h"
 #include "Notify.h"
 #include "Paths.h"
@@ -17,6 +19,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonParseError>
 #include <QSocketNotifier>
 #include <QString>
 #include <QStringList>
@@ -27,6 +30,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <csignal>
 
 #ifndef OMAHOUSE_VERSION
@@ -497,6 +501,65 @@ void printPresence(const QString &user, const Presence &presence, const SeatRead
              "  running, screen or no screen (docs/design.md §5).\n";
 }
 
+// -- time per site -----------------------------------------------------------
+
+/// The day's per-site seconds, in the order the ledger holds them.
+QJsonObject sitesToJson(const Ledger &ledger)
+{
+    QJsonObject object;
+    for (auto it = ledger.sites.constBegin(); it != ledger.sites.constEnd(); ++it)
+        object.insert(it.key(), it.value());
+    return object;
+}
+
+/// What the day's sites add up to, in words: `12m youtube.com, 3m wikipedia.org`.
+///
+/// Longest first, because a table of a day is read for what the afternoon went
+/// on and not alphabetically.
+QString sitesToday(const Ledger &ledger)
+{
+    QVector<QPair<int, QString>> ordered;
+    for (auto it = ledger.sites.constBegin(); it != ledger.sites.constEnd(); ++it)
+        ordered.append({it.value(), it.key()});
+    std::sort(ordered.begin(), ordered.end(), [](const auto &a, const auto &b) {
+        return a.first != b.first ? a.first > b.first : a.second < b.second;
+    });
+    QStringList parts;
+    for (const auto &one : ordered)
+        parts.append(QStringLiteral("%1 %2").arg(humanDuration(one.first), one.second));
+    return parts.join(QStringLiteral(", "));
+}
+
+/// Time per site, on the screen an operator reads.
+///
+/// It is a count and nothing else: no budget, no warning, no block. That is the
+/// observing stage of docs/design.md §5.2, and it is said out loud on the same
+/// screen for the reason the presence block says its own last line -- somebody
+/// reading a table of sites beside a table of budgets will assume the first one
+/// can take something away, and it cannot.
+void printSites(const QString &user, const QString &now, bool counted, const Ledger &ledger)
+{
+    out() << "\nTIME PER SITE\n";
+    if (now.isEmpty()) {
+        out() << QStringLiteral("  Nothing is being reported right now: no browser with the "
+                                "meter in it is open,\n  or nobody has it installed.\n");
+    } else if (counted) {
+        out() << QStringLiteral("  %1 is in the front tab, and it is being counted.\n").arg(now);
+    } else {
+        // The crossing, said where it happens. This is the sentence the whole
+        // mechanism exists to be able to print.
+        out() << QStringLiteral("  %1 is in the front tab and is NOT being counted: %2 is "
+                                "not in front of\n  the screen.\n")
+                     .arg(now, user);
+    }
+    const QString today = sitesToday(ledger);
+    if (!today.isEmpty())
+        out() << QStringLiteral("  Today: %1.\n").arg(today);
+    out() << "  Counted only while the screen says somebody is there, and never billed to a\n"
+             "  budget: there is no site limit, no warning and no block "
+             "(docs/design.md §5.2).\n";
+}
+
 // -- the sites ---------------------------------------------------------------
 
 /// The reach of a browser policy, in three lines, written once.
@@ -804,6 +867,15 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
     SeatPresenceSource presenceSource;
     const SeatReading seat = presenceSource.readSeat();
     const Presence presence = presenceOf(uid, session, seat);
+    // And what the browser last said was in the front tab. World readable it is
+    // not -- the file lives in that user's own runtime directory -- so this
+    // answers for whoever runs `status` about themselves, and comes back empty
+    // for an operator asking about somebody else. That asymmetry is deliberate
+    // and is not a gap: the day's totals below come out of the ledger, which is
+    // 0644 and which the daemon wrote, so an operator sees the accounting
+    // without being able to read the child's live browsing.
+    FileFocusSource focusSource;
+    const QString siteNow = siteInFrontOf(focusSource.tail(uid), QDateTime::currentDateTime());
     QVector<AppScope> named;
     QVector<AppScope> unnamed;
     const QVector<AppScope> scopes = proc.scopesFor(uid);
@@ -908,6 +980,18 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
                                              : QJsonValue()},
                  {QStringLiteral("today"), presenceToJson(ledger)},
              }},
+            // Counted and never acted on, one step further than presence: there
+            // is no budget here at all, so nothing in `budgets` above is a
+            // consequence of anything in here.
+            {QStringLiteral("sites"),
+             QJsonObject {
+                 // Null and not an empty string: "there is no site in front" and
+                 // "nothing is reporting" are different answers, and only one of
+                 // them is about a browser that is open.
+                 {QStringLiteral("now"), siteNow.isEmpty() ? QJsonValue() : QJsonValue(siteNow)},
+                 {QStringLiteral("counted"), !siteNow.isEmpty() && presence.present},
+                 {QStringLiteral("today"), sitesToJson(ledger)},
+             }},
             {QStringLiteral("profile"), profile ? QJsonValue(profile->toJson()) : QJsonValue()},
             {QStringLiteral("scopes"), scopesJson},
             {QStringLiteral("unnamed"), unnamedJson},
@@ -998,6 +1082,7 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
     }
 
     printPresence(user, presence, seat, ledger);
+    printSites(user, siteNow, presence.present, ledger);
 
     if (profile)
         printWebRules(*profile, profiles.all);
@@ -1050,6 +1135,17 @@ void printDay(const Ledger &ledger)
             presenceRows.append({it.key(), humanDuration(it.value())});
         printTable({QStringLiteral("STATE"), QStringLiteral("FOR")}, presenceRows,
                    {false, true});
+    }
+
+    // Beside the budgets, like the presence above it, and for a stronger reason:
+    // there is no budget here to be beside. It is a count of what the afternoon
+    // went on, and nothing in the table above was billed by it.
+    if (!ledger.sites.isEmpty()) {
+        out() << "\nTIME PER SITE\n";
+        QVector<QStringList> siteRows;
+        for (auto it = ledger.sites.cbegin(); it != ledger.sites.cend(); ++it)
+            siteRows.append({it.key(), humanDuration(it.value())});
+        printTable({QStringLiteral("SITE"), QStringLiteral("FOR")}, siteRows, {false, true});
     }
 
     if (!ledger.grants.isEmpty()) {
@@ -1114,6 +1210,7 @@ int cmdReport(const Globals &g, const QStringList &positionals, const QString &s
 
     QVector<Ledger> days;
     QMap<QString, int> totals;
+    QMap<QString, int> siteTotals;
     for (QDate date = from; date <= today; date = date.addDays(1)) {
         Ledger ledger;
         bool missing = false;
@@ -1127,6 +1224,8 @@ int cmdReport(const Globals &g, const QStringList &positionals, const QString &s
             continue;
         for (auto it = ledger.seconds.cbegin(); it != ledger.seconds.cend(); ++it)
             totals[it.key()] += it.value();
+        for (auto it = ledger.sites.cbegin(); it != ledger.sites.cend(); ++it)
+            siteTotals[it.key()] += it.value();
         days.append(ledger);
     }
 
@@ -1143,12 +1242,19 @@ int cmdReport(const Globals &g, const QStringList &positionals, const QString &s
         QJsonObject totalsJson;
         for (auto it = totals.cbegin(); it != totals.cend(); ++it)
             totalsJson.insert(it.key(), it.value());
+        // Its own total and never folded into the one above. A site is not a
+        // budget, and adding `youtube.com` to a sum of budgets would be a
+        // document that says the day was twice as long as it was.
+        QJsonObject siteTotalsJson;
+        for (auto it = siteTotals.cbegin(); it != siteTotals.cend(); ++it)
+            siteTotalsJson.insert(it.key(), it.value());
         printJson(QJsonObject {
             {QStringLiteral("user"), user},
             {QStringLiteral("since"), from.toString(Qt::ISODate)},
             {QStringLiteral("until"), today.toString(Qt::ISODate)},
             {QStringLiteral("days"), daysJson},
             {QStringLiteral("totals"), totalsJson},
+            {QStringLiteral("siteTotals"), siteTotalsJson},
         });
         return kOk;
     }
@@ -1180,6 +1286,15 @@ int cmdReport(const Globals &g, const QStringList &positionals, const QString &s
         for (auto it = totals.cbegin(); it != totals.cend(); ++it)
             rows.append({it.key(), humanDuration(it.value())});
         printTable({QStringLiteral("BUDGET"), QStringLiteral("USED")}, rows, {false, true});
+
+        if (!siteTotals.isEmpty()) {
+            out() << "\nTOTAL PER SITE\n";
+            QVector<QStringList> siteRows;
+            for (auto it = siteTotals.cbegin(); it != siteTotals.cend(); ++it)
+                siteRows.append({it.key(), humanDuration(it.value())});
+            printTable({QStringLiteral("SITE"), QStringLiteral("FOR")}, siteRows,
+                       {false, true});
+        }
     }
     return kOk;
 }
@@ -2448,8 +2563,18 @@ QString whatHappened(const Watched &watched)
     // counting, deliberately: `screen-off, counting session` is the sentence
     // that tells an operator these two are not connected yet, and it is the
     // sentence the time per site exists to fix.
-    return QStringLiteral("%1, %2, %3")
-        .arg(apps, clock, presenceReasonName(watched.presence.reason));
+    //
+    // The site is on the same line for the same reason, and it carries whether
+    // it was billed. `youtube.com not counted` beside `screen-off` is the
+    // crossing of docs/design.md §5.2 visible in the journal: the browser said a
+    // site, the machine said the room was dark, and the site got nothing.
+    const QString site = watched.site.isEmpty()
+        ? QString()
+        : QStringLiteral(", %1%2")
+              .arg(watched.site,
+                   watched.siteCounted ? QString() : QStringLiteral(" not counted"));
+    return QStringLiteral("%1, %2, %3%4")
+        .arg(apps, clock, presenceReasonName(watched.presence.reason), site);
 }
 
 /// How a notification went, as a parenthesis after it.
@@ -2565,6 +2690,10 @@ void printCycle(const Cycle &cycle, const Profiles &profiles)
             out() << '\n';
             printBalances(balances);
         }
+        if (!watched.ledger.sites.isEmpty()) {
+            out() << QStringLiteral("\n  time per site: %1\n")
+                         .arg(sitesToday(watched.ledger));
+        }
         for (const Said &said : watched.said) {
             out() << QStringLiteral("\n  %1 — %2%3\n")
                          .arg(said.words.summary, said.words.body,
@@ -2629,6 +2758,16 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
                  {QStringLiteral("reason"), presenceReasonName(watched.presence.reason)},
                  {QStringLiteral("today"), presenceToJson(watched.ledger)},
              }},
+            // The site, and whether the crossing let it through. Both, because a
+            // reader that only saw `today` could not tell a quiet browser from a
+            // dark screen.
+            {QStringLiteral("site"),
+             QJsonObject {
+                 {QStringLiteral("now"),
+                  watched.site.isEmpty() ? QJsonValue() : QJsonValue(watched.site)},
+                 {QStringLiteral("counted"), watched.siteCounted},
+                 {QStringLiteral("today"), sitesToJson(watched.ledger)},
+             }},
             {QStringLiteral("apps"), QJsonArray::fromStringList(watched.apps)},
             // Not in `apps`, and not left out either: a scope with no id has no
             // word to go in that list and is counted like everything else.
@@ -2670,6 +2809,147 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
                     cycle.blockedError.isEmpty() ? QJsonValue()
                                                  : QJsonValue(cycle.blockedError));
     return document;
+}
+
+// -- the meter ---------------------------------------------------------------
+//
+// The native messaging host of docs/design.md §5.2, and it is stupid on purpose.
+//
+// Chromium spawns it as whoever opened the browser -- `.temp/spike-extension.md`
+// §1 measured uid 1001, cwd the host's own directory, stdin and stdout pipes,
+// and the child's whole session environment. So this half has no privilege and
+// is not given any: it appends `<epoch> <site>` to a file in that user's runtime
+// directory and does nothing else. It does not read a profile, does not know
+// what a budget is, does not accumulate, and never touches the ledger -- which
+// it could not write anyway, since /var/lib/omahouse is root's.
+//
+// `docs/proposal-browser.md` §8.1 reached instead for a socket in the root
+// daemon, and called the framing and the second writer's worth of validation
+// "the largest single piece of unplanned work on this page". This is what
+// replaced it. The accumulation stays in `watch`, which is already root, already
+// ticks every two seconds, and already knows whether anybody is in front of the
+// screen; there is no new endpoint and nothing listening.
+//
+// It revalidates what the extension sent rather than trusting it -- the one
+// thing `docs/proposal-browser.md` §2 says is worth stealing from the prior art:
+// a compromised extension must not be able to push a whole URL through the wire
+// by putting one in the field. Anything that is not a plausible registrable
+// domain is written as `-`, which is the same thing the browser says when there
+// is no site in front.
+
+/// The largest native messaging frame that will be read, in bytes.
+///
+/// A message from this extension is about forty. Chromium's own ceiling is a
+/// megabyte; this one is here so that a frame length read off a pipe cannot ask
+/// this process to allocate one.
+constexpr int kLongestFrame = 64 * 1024;
+
+/// Exactly `wanted` bytes, or false at the end of the stream.
+bool readExactly(char *into, int wanted)
+{
+    int got = 0;
+    while (got < wanted) {
+        const ssize_t some = ::read(STDIN_FILENO, into + got, static_cast<size_t>(wanted - got));
+        if (some == 0)
+            return false;
+        if (some < 0) {
+            if (errno == EINTR)
+                continue;
+            return false;
+        }
+        got += static_cast<int>(some);
+    }
+    return true;
+}
+
+int cmdMeter(const Globals &g, const QStringList &positionals)
+{
+    // Chromium passes the extension's origin as the first argument. It is not
+    // read: what decides which extension may reach this host is `allowed_origins`
+    // in the manifest under /etc/chromium/native-messaging-hosts, which is root's
+    // file, and a check here over an argument the caller chose would be a check
+    // that proves nothing.
+    static_cast<void>(positionals);
+
+    if (g.json) {
+        fail(QStringLiteral("meter: it speaks Chromium's native messaging on stdin and "
+                            "writes no document"));
+        return kUsage;
+    }
+
+    // A person, rather than a browser. Native messaging is always a pipe
+    // (`.temp/spike-extension.md` §1 measured `STDIN_ISATTY=False`), so a
+    // terminal here is somebody who typed the verb to see what it does -- and
+    // what it would do is sit there silently forever.
+    if (::isatty(STDIN_FILENO) == 1) {
+        fail(QStringLiteral("meter: this is the browser's native messaging host, not a "
+                            "command. Chromium starts it through "
+                            "/etc/chromium/native-messaging-hosts/com.omahouse.meter.json"));
+        return kUsage;
+    }
+
+    const QString path = focusFileFor(runtimeRoot(), ::getuid());
+    QString complaint;
+
+    while (true) {
+        quint32 length = 0;
+        // Native byte order, which is what the protocol says and what every
+        // machine this runs on spells little-endian.
+        if (!readExactly(reinterpret_cast<char *>(&length), sizeof(length)))
+            break;
+        if (length == 0 || length > kLongestFrame) {
+            fail(QStringLiteral("meter: a frame of %1 bytes is not one of ours; stopping")
+                     .arg(length));
+            return kUsage;
+        }
+        QByteArray frame(static_cast<int>(length), Qt::Uninitialized);
+        if (!readExactly(frame.data(), frame.size()))
+            break;
+
+        QJsonParseError problem {};
+        const QJsonDocument document = QJsonDocument::fromJson(frame, &problem);
+        if (problem.error != QJsonParseError::NoError || !document.isObject()) {
+            // Not fatal. A frame that will not parse is one message lost, and the
+            // port stays open: the alternative is a browser that stops being
+            // measured for the rest of the afternoon because of one bad message.
+            continue;
+        }
+
+        // A message with no `site` in it is not a message of ours, and it is
+        // dropped rather than written as anything. Writing `-` for it would be
+        // this host deciding that a message it did not understand meant "there
+        // is nothing in front", which is a claim about the screen it has no
+        // business making.
+        const QJsonValue said = document.object().value(QStringLiteral("site"));
+        if (!said.isString())
+            continue;
+
+        // The one field, reduced again on this side and refused if it is not a
+        // domain. `-` arrives here as "not a domain" and leaves as `-`, which is
+        // exactly right: it is the browser saying there is nothing in front.
+        QString site = registrableDomain(said.toString());
+        if (!isPlausibleDomain(site))
+            site.clear();
+
+        QString error;
+        if (!appendFocusLine(path, QDateTime::currentDateTime(), site, &error)) {
+            // Said once per distinct failure and not once per message. This runs
+            // for as long as a browser is open, and a full tmpfs would otherwise
+            // put a line in the journal every five seconds all evening.
+            if (error != complaint) {
+                complaint = error;
+                fail(QStringLiteral("meter: %1").arg(error));
+                err().flush();
+            }
+        } else if (!complaint.isEmpty()) {
+            complaint.clear();
+        }
+    }
+
+    // The browser closed the port, which is the ordinary end. Nothing is written
+    // to say so: `watch` finds the file stale within fifteen seconds and stops
+    // billing, which is the same answer by a shorter road.
+    return kOk;
 }
 
 // -- stopping when told ------------------------------------------------------
@@ -2773,10 +3053,15 @@ int cmdWatch(const Globals &g, const QStringList &positionals, const Options &op
     // logind, never the fiscalised user's compositor, so a run on a machine with
     // no seat and no screen says `unknown` and carries on counting.
     SeatPresenceSource presence;
+    // And the browser's half of the eye -- docs/design.md §5.2. Handed in like
+    // the rest, and it needs nothing of its own: it reads a file in each
+    // fiscalised user's runtime directory, treats every way that file can be
+    // wrong as "nothing to bill", and writes nothing anywhere.
+    FileFocusSource focus;
     Watch::Options watching;
     watching.tickSeconds = interval;
     watching.dryRun = options.dryRun;
-    Watch watch(&proc, &notifier, &enforcer, &presence, watching);
+    Watch watch(&proc, &notifier, &enforcer, &presence, &focus, watching);
 
     const auto cycle = [&](const Profiles &current) {
         // The clock enters here and nowhere else. `evaluate` takes `now` by
@@ -2882,12 +3167,24 @@ The loop, which is the only verb that keeps running:
                            time is out, and then close it. --dry-run decides
                            and touches nothing, and --once is a single cycle
 
+Started by the browser, and never by a person:
+  meter                    Chromium's native messaging host. It appends the site
+                           in the front tab to a file in the caller's own runtime
+                           directory, and does nothing else — no ledger, no
+                           budget, no privilege. `watch` is what counts it
+
 An app is named by the id of its scope: `chromium`, `org.freedesktop.Platform`.
 `omahouse status` lists the ones that are open, and says when a scope holds
 something other than what its name says.
 
 A length of time is 45m, 2h, 1h30m, or a bare 90 for minutes. Anything else is
 refused rather than taken for minutes.
+
+Time per site is counted and never acted on. There is no site budget, no warning
+and no block: the browser extension reports the site in the front tab, `watch`
+bills it only while the screen says somebody is there, and `status` and `report`
+show the total. A day with no extension on the machine looks exactly as it always
+did.
 
 A site is named by its bare domain — `youtube.com` — and that covers its
 subdomains. The web rules of every profile are composed into one Chromium
@@ -2911,6 +3208,8 @@ Files:
   notify-send                          how a warning is said (OMAHOUSE_NOTIFY_SEND)
   systemd-run                          how it reaches a session (OMAHOUSE_SYSTEMD_RUN)
   loginctl                             how a session is ended (OMAHOUSE_LOGINCTL)
+  /sys/class/drm                       whether a screen is lit (OMAHOUSE_DRM_ROOT)
+  /run/user/<uid>/omahouse/focus       the site in the front tab (OMAHOUSE_RUNTIME_ROOT)
 
 `watch` counts, warns, and then acts. Closing is SIGTERM into the app's scope
 and then its cgroup.kill; `session.slice` is never touched, so the compositor
@@ -2974,6 +3273,12 @@ int dispatch(const Globals &g, const QStringList &args)
             return kUsage;
         return cmdGrant(g, positionals, options);
     }
+    if (verb == QLatin1String("meter")) {
+        if (!onlyTheseOptions(options, {}, verb))
+            return kUsage;
+        return cmdMeter(g, positionals);
+    }
+
     if (verb == QLatin1String("watch")) {
         if (!onlyTheseOptions(options,
                               {QStringLiteral("--interval"), QStringLiteral("--once"),
