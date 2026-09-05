@@ -81,21 +81,31 @@ class VM:
     Failed = Failed
     Blocked = Blocked
 
-    def __init__(self, manifest, pace):
+    def __init__(self, manifest, machine, pace):
         self.manifest = manifest
+        # Which of the two machines this run is about. `poc` is disposable and is
+        # where the teeth are exercised; `omarchy` is the owner's demonstration
+        # machine and is put back exactly as it was found.
+        self.machine = machine
+        self.about = manifest["machines"][machine]
         # Every second this run is willing to wait, and every second of budget it
         # will seed. One dictionary, chosen once by `--pace`, and no case holds a
         # duration of its own.
         self.pace = pace
-        self.domain = manifest["domain"]["name"]
-        self.uri = manifest["domain"]["uri"]
-        self.hostname = manifest["domain"]["hostname"]
-        self.key = str(Path(manifest["access"]["key"]).expanduser())
-        self.operator = manifest["access"]["operator"]
-        self.subject = manifest["subject"]["user"]
-        self.uid = manifest["subject"]["uid"]
+        self.domain = self.about["name"]
+        self.uri = self.about["uri"]
+        self.hostname = self.about["hostname"]
+        self.key = str(Path(self.about["key"]).expanduser())
+        self.operator = self.about["operator"]
+        self.subject = self.about["subject"]
+        self.uid = self.about["uid"]
+        self.disposable = self.about["disposable"]
         self.address = None
         self.log = []
+        # What was on the machine before this run touched it, for a machine that
+        # is not disposable. Filled by `remember_the_state` and undone by
+        # `put_the_state_back`.
+        self.remembered = None
 
     # -- libvirt ------------------------------------------------------------
 
@@ -116,7 +126,7 @@ class VM:
                 "        script that built it.")
 
         disks = self.virsh("domblklist", self.domain)
-        expected = self.manifest["domain"]["disk"]
+        expected = self.about["disk"]
         if expected not in disks:
             raise Blocked(
                 f"{self.domain} is not running from {expected}.\n"
@@ -350,6 +360,13 @@ class VM:
         case that left a name in it would be a case that stopped the next one
         from ever logging in.
         """
+        if not self.disposable:
+            # The owner's machine. Its profile is the one it demonstrates from
+            # and its ledger is a record; neither is this suite's to empty. What
+            # a case leaves behind here is undone by `put_the_state_back`, from a
+            # copy taken before anything ran.
+            raise Blocked(f"{self.domain} is not disposable, and reset() empties "
+                          "/etc/omahouse and /var/lib/omahouse")
         self.stop_daemon()
         self.root("rm -f /etc/omahouse/blocked /etc/omahouse/profiles.json")
         self.root("rm -rf /var/lib/omahouse/*")
@@ -436,6 +453,96 @@ class VM:
         self.root("tee /var/lib/omahouse/%s/%s.json > /dev/null <<'OMAHOUSE_LEDGER'\n%s\n"
                   "OMAHOUSE_LEDGER" % (self.subject, day, document))
 
+    # -- putting a machine that is not disposable back ----------------------
+
+    def remember_the_state(self):
+        """Everything this run is about to change, as bytes, before it changes.
+
+        Only for a machine that is not disposable. `.temp/docs/vm-runbook.md` §7
+        restores the demonstration VM by retyping the verbs that made it, which
+        is a restoration of what somebody remembered to write down; this is the
+        file. A profile put back byte for byte is a profile that cannot come back
+        subtly different from the one the owner demonstrates with.
+        """
+        self.remembered = {
+            "profiles": self.root("cat /etc/omahouse/profiles.json 2>/dev/null || true",
+                                  check=False)[1],
+            "ledger": self.root(
+                f"cat /var/lib/omahouse/{self.subject}/{self.today()}.json 2>/dev/null "
+                "|| true", check=False)[1],
+            "sddm": self.root("cat /var/lib/sddm/state.conf 2>/dev/null || true",
+                              check=False)[1],
+        }
+
+    def put_the_state_back(self):
+        """The copy above, and everything this run installed, taken off again.
+
+        Best effort and loud about what it could not do: a machine left half
+        restored is worse than one nobody touched, so what failed has to be
+        readable rather than swallowed.
+        """
+        if self.remembered is None:
+            return
+        say("  putting the machine back")
+        self.stop_daemon()
+
+        # The browser half of docs/design.md §5.2: the force-install policy, the
+        # archive it names, the native messaging manifest and the extension in
+        # the subject's own profile. Every one of them is a restriction or a
+        # thing that reports, and none of them may outlive this run.
+        self.root("rm -f /etc/chromium/policies/managed/omahouse-meter.json "
+                  "/etc/chromium/native-messaging-hosts/com.omahouse.meter.json "
+                  "/usr/share/omahouse/chromium/omahouse-meter.crx "
+                  "/usr/share/omahouse/chromium/updates.xml", check=False)
+        self.root("rmdir /usr/share/omahouse/chromium /usr/share/omahouse "
+                  "/etc/chromium/native-messaging-hosts 2>/dev/null || true", check=False)
+        self.root(f"pkill -u {self.subject} -x chromium || true", check=False)
+        self.root(f"rm -rf /home/{self.subject}/.config/chromium/Default/Extensions "
+                  f"/run/user/{self.uid}/omahouse", check=False)
+
+        # The virtual keyboard, which is a test tool and does not stay.
+        self.root("systemctl stop ydotoold; systemctl reset-failed ydotoold; "
+                  "rm -f /run/ydotoold.socket", check=False)
+        self.root("pacman -Rns --noconfirm ydotool", check=False)
+
+        # And the state, from the copy. `blocked` goes first, because a name left
+        # in it is somebody locked out of the machine.
+        self.root("rm -f /etc/omahouse/blocked", check=False)
+        for what, path in (
+                ("profiles", "/etc/omahouse/profiles.json"),
+                ("ledger", f"/var/lib/omahouse/{self.subject}/{self.today()}.json"),
+                ("sddm", "/var/lib/sddm/state.conf"),
+        ):
+            was = self.remembered.get(what, "")
+            if was.strip():
+                self.root("tee %s > /dev/null <<'OMAHOUSE_WAS'\n%s\nOMAHOUSE_WAS"
+                          % (path, was.rstrip("\n")), check=False)
+            else:
+                self.root(f"rm -f {path}", check=False)
+
+        # The session this run logged in, ended, so the greeter is what the next
+        # person sees -- which is where the machine was found.
+        self.root(f"loginctl terminate-user {self.subject} || true", check=False)
+        self.root("systemctl restart sddm", check=False)
+
+    # -- typing at it -------------------------------------------------------
+    #
+    # Only the machine with a greeter has these, and only because there is no
+    # keyboard on the far side of an ssh. `.temp/docs/vm-runbook.md` §5 is where
+    # the key codes come from: `<keycode>:<1 down|0 up>`, modifier down first and
+    # up last, nesting closing from the inside out.
+
+    def press(self, keys):
+        self.root("env YDOTOOL_SOCKET=/run/ydotoold.socket ydotool key " + keys,
+                  check=False)
+
+    def type_text(self, text):
+        # `--key-delay 25` because the default sends events faster than some text
+        # boxes read them, and 25 ms was measured getting through SDDM's whole
+        # password field without losing a key.
+        self.root("env YDOTOOL_SOCKET=/run/ydotoold.socket ydotool type --key-delay 25 "
+                  + shlex.quote(text), check=False)
+
     def wait_for(self, predicate, seconds, what):
         deadline = time.time() + seconds
         while time.time() < deadline:
@@ -452,6 +559,8 @@ class VM:
 
 
 def deploy(vm):
+    if vm.machine == "omarchy":
+        return deploy_on_omarchy(vm)
     binary = ROOT / "build/bin/omahouse"
     if not binary.exists():
         raise Blocked(f"{binary} is not built. Run `mise run build` first.")
@@ -500,6 +609,9 @@ def deploy(vm):
 
 
 def wait_for_the_session(vm, timeout=None):
+    if vm.machine == "omarchy":
+        return log_in_on_omarchy(vm)
+
     """Hyprland up, and the notification daemon with it.
 
     `sudo modprobe vkms` after every boot: it is the virtual GPU Hyprland draws
@@ -538,7 +650,133 @@ def wait_for_the_session(vm, timeout=None):
 # -- the cases ----------------------------------------------------------------
 
 
-def load_cases(wanted):
+
+
+# -- the machine with a browser on it -----------------------------------------
+#
+# Real Omarchy, SDDM instead of an autologin, and a `bochs` framebuffer the VNC
+# and `virsh screenshot` can both see. The browser case of docs/design.md §5.2
+# needs all three and the disposable machine has none of them.
+#
+# Everything below installs something or logs somebody in, and every one of them
+# is undone by `VM.put_the_state_back`.
+
+
+def keyboard(vm):
+    """A virtual keyboard on the guest's own seat, through `uinput`.
+
+    There is no keyboard on the far side of an ssh, and SDDM wants a password.
+    `ydotool` makes an input device the guest's `seat0` accepts like any other,
+    which both the greeter and Hyprland then receive. It is a test tool and it
+    does not stay: `put_the_state_back` removes the package and the unit.
+
+    `--socket-path` is not a flourish. Without it the daemon puts its socket in
+    /tmp with mode 0600 and the client under `sudo` looks somewhere else, and the
+    failure mode is `ydotool` exiting 0 with nothing happening on the screen --
+    which reads as the keystroke being wrong rather than the socket being missing.
+    """
+    vm.root("pacman -S --noconfirm --needed ydotool", check=False)
+    if vm.ssh("pgrep -x ydotoold", check=False)[0] != 0:
+        vm.root("systemd-run --unit=ydotoold --description='ydotool (omahouse suite)' "
+                "/usr/bin/ydotoold --socket-path=/run/ydotoold.socket", check=False)
+        vm.wait_for(lambda: vm.ssh("pgrep -x ydotoold", check=False)[0] == 0,
+                    vm.pace["patience_seconds"], "ydotoold to come up")
+    # The device really on the seat, and not merely a daemon that started. This
+    # is the check that turns the expensive silent failure into a `blocked`.
+    vm.wait_for(
+        lambda: "ydotoold virtual device" in vm.root("loginctl seat-status seat0",
+                                                     check=False)[1],
+        vm.pace["patience_seconds"], "the virtual keyboard to appear on seat0")
+
+
+def log_in_on_omarchy(vm):
+    """The subject's real session, entered through the greeter with a password.
+
+    Not an autologin. This is the machine the owner demonstrates from and it asks
+    for a password like anybody's would, so the suite types one -- which is also
+    what makes the session under test the same session a person would get.
+    """
+    keyboard(vm)
+    if vm.pid_of("Hyprland"):
+        return
+
+    # SDDM's `state.conf` decides whose name the greeter is asking about, and the
+    # greeter does not show it. It is checked rather than assumed: typing julia's
+    # password at a greeter asking about howl is a failed login and a confusing
+    # screenshot.
+    state = vm.root("cat /var/lib/sddm/state.conf", check=False)[1]
+    if f"User={vm.subject}" not in state:
+        raise Blocked(f"SDDM is asking about somebody other than {vm.subject}:\n{state}")
+
+    vm.type_text(vm.about["password"])
+    vm.press("28:1 28:0")
+    deadline = time.time() + vm.pace["boot_seconds"]
+    while time.time() < deadline:
+        if vm.pid_of("Hyprland"):
+            break
+        time.sleep(2)
+    else:
+        raise Blocked("the greeter never let the session through. Look at "
+                      "`journalctl -u sddm` on the guest, and at a screenshot.")
+    if not vm.sessions():
+        raise Blocked(f"{vm.subject} has no logind session")
+    # The bar, the notification daemon and the rest of a real session, which take
+    # a few seconds after the compositor.
+    vm.wait_for(lambda: vm.ssh(f"pgrep -u {vm.subject} -x quickshell", check=False)[0] == 0,
+                vm.pace["patience_seconds"], "the Omarchy shell to come up")
+
+
+def deploy_on_omarchy(vm):
+    """The build, and the browser half of docs/design.md §5.2.
+
+    The `.crx` is signed **on this machine** and copied over, so the private key
+    never leaves the developer's laptop -- `extension/pack.sh` says where it
+    lives and what it would be in production. The guest gets an archive and a
+    public id, which is all a machine ever needs.
+    """
+    binary = ROOT / "build/bin/omahouse"
+    if not binary.exists():
+        raise Blocked(f"{binary} is not built. Run `mise run build` first.")
+    guest_qt = vm.ssh("pacman -Q qt6-base 2>/dev/null || true", check=False)[1].split()
+    host_qt = run(["pacman", "-Q", "qt6-base"]).stdout.split()
+    if guest_qt and host_qt and guest_qt[1].split("-")[0] != host_qt[1].split("-")[0]:
+        raise Blocked(f"qt6-base is {host_qt[1]} here and {guest_qt[1]} there")
+
+    say("  installing the build")
+    vm.put(binary, "/tmp/omahouse")
+    vm.root("install -Dm755 /tmp/omahouse /usr/bin/omahouse")
+    vm.put(ROOT / "packaging/omahouse.service",
+           "/tmp/omahouse.service")
+    vm.root("install -Dm644 /tmp/omahouse.service "
+            "/usr/lib/systemd/system/omahouse.service")
+    vm.root("systemctl daemon-reload")
+
+    say("  signing the meter and putting it on the machine")
+    packed = Path(run(["mktemp", "-d", "/tmp/omahouse-meter-out.XXXXXX"]).stdout.strip())
+    done = run([str(ROOT / "extension/pack.sh"), str(packed)])
+    if done.returncode != 0:
+        raise Blocked("extension/pack.sh: " + (done.stderr.strip() or done.stdout.strip()))
+    say("    " + " · ".join(line.strip() for line in done.stdout.splitlines()))
+
+    vm.put(packed / "omahouse-meter.crx", "/tmp/omahouse-meter.crx")
+    vm.put(packed / "updates.xml", "/tmp/updates.xml")
+    vm.root("install -Dm644 /tmp/omahouse-meter.crx "
+            "/usr/share/omahouse/chromium/omahouse-meter.crx")
+    vm.root("install -Dm644 /tmp/updates.xml /usr/share/omahouse/chromium/updates.xml")
+
+    for name, target in (
+            ("omahouse-meter-host", "/usr/lib/omahouse/meter-host"),
+            ("com.omahouse.meter.json",
+             "/etc/chromium/native-messaging-hosts/com.omahouse.meter.json"),
+            ("omahouse-meter-policy.json",
+             "/etc/chromium/policies/managed/omahouse-meter.json"),
+    ):
+        vm.put(ROOT / "packaging" / name, f"/tmp/{name}")
+        mode = "0755" if name == "omahouse-meter-host" else "0644"
+        vm.root(f"install -Dm{mode} /tmp/{name} {target}")
+
+
+def load_cases(wanted, machine):
     import importlib.util
 
     cases = []
@@ -550,9 +788,16 @@ def load_cases(wanted):
         spec = importlib.util.spec_from_file_location(path.stem, path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        # A case says which machine it needs, and one that does not say is a
+        # `poc` case. This is what makes it impossible to run the cases that
+        # empty /var/lib/omahouse and end a login against the owner's own VM: the
+        # filter is here, before a single one of them is even imported into a run
+        # that is pointed at it.
+        if getattr(module, "MACHINE", "poc") != machine:
+            continue
         cases.append((path.stem, module))
     if not cases:
-        raise Blocked(f"no case matches {wanted!r}")
+        raise Blocked(f"no case matches {wanted!r} on {machine}")
     return cases
 
 
@@ -567,6 +812,13 @@ def main():
     # manifest.
     parser.add_argument("--pace", default="quick", choices=("quick", "long"),
                         help="quick (the default, for iterating) or long (for publishing)")
+    # Which machine, and so which cases. The two are one choice: a case declares
+    # the machine it needs and is not loaded for the other, so there is no way to
+    # run the disposable machine's cases -- which empty /var/lib/omahouse and end
+    # a login -- against the owner's demonstration VM.
+    parser.add_argument("--machine", default="poc", choices=("poc", "omarchy"),
+                        help="poc (the default, disposable) or omarchy (real Omarchy, "
+                             "with a browser, put back as it was found)")
     options = parser.parse_args()
 
     with open(HERE / "manifest.toml", "rb") as file:
@@ -574,10 +826,11 @@ def main():
 
     pace = manifest["pace"][options.pace]
 
-    os.environ.setdefault("LIBVIRT_DEFAULT_URI", manifest["domain"]["uri"])
-    vm = VM(manifest, pace)
+    os.environ.setdefault("LIBVIRT_DEFAULT_URI",
+                          manifest["machines"][options.machine]["uri"])
+    vm = VM(manifest, options.machine, pace)
 
-    say(f"omahouse — the VM suite, {manifest['domain']['name']}, {pace['label']} pace")
+    say(f"omahouse — the VM suite, {vm.domain}, {pace['label']} pace")
     say()
 
     results = []
@@ -587,14 +840,20 @@ def main():
         vm.prove_it_is_the_right_machine()
         vm.start()
         started = True
+        # The copy first, before a single thing is installed or logged in. A
+        # machine that is not disposable is put back from this and never from
+        # what somebody remembered to write down.
+        if not vm.disposable:
+            vm.remember_the_state()
         wait_for_the_session(vm)
         deploy(vm)
         say()
 
-        for name, case in load_cases(options.case):
+        for name, case in load_cases(options.case, options.machine):
             say(f"  {name}")
             say(f"    {case.WHY}")
-            vm.reset()
+            if vm.disposable:
+                vm.reset()
             begin = time.time()
             try:
                 case.run(vm)
@@ -615,9 +874,12 @@ def main():
         # The report comes after the cleanup, never before.
         if started:
             try:
-                vm.reset()
+                if vm.disposable:
+                    vm.reset()
+                else:
+                    vm.put_the_state_back()
             except Exception as problem:  # noqa: BLE001 -- cleanup is best effort
-                say(f"  could not reset the machine: {problem}")
+                say(f"  could not put the machine back: {problem}")
             if options.keep:
                 say(f"  leaving {vm.domain} running at {vm.address}")
             else:

@@ -2026,7 +2026,7 @@ def check_status_and_report_show_the_time_per_site(box):
 
     document = json.loads(box.run("status", USER, "--json").stdout)
     assert document["sites"] == {
-        "now": "wikipedia.org", "counted": True,
+        "now": "wikipedia.org", "counted": True, "readable": True,
         "today": {"wikipedia.org": 4, "youtube.com": 2},
     }, document["sites"]
 

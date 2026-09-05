@@ -537,10 +537,22 @@ QString sitesToday(const Ledger &ledger)
 /// screen for the reason the presence block says its own last line -- somebody
 /// reading a table of sites beside a table of budgets will assume the first one
 /// can take something away, and it cannot.
-void printSites(const QString &user, const QString &now, bool counted, const Ledger &ledger)
+void printSites(const QString &user, const QString &now, bool counted, bool couldLook,
+                const Ledger &ledger)
 {
     out() << "\nTIME PER SITE\n";
-    if (now.isEmpty()) {
+    if (!couldLook) {
+        // Measured on the VM, and it read as the browser being shut: an operator
+        // asking about somebody else gets an empty answer here, because the file
+        // the browser's host writes is 0600 in that account's own runtime
+        // directory. The day's totals below still come out, because those are the
+        // ledger's and the ledger is 0644. Two different silences, and saying
+        // "no browser is open" about this one would be a lie.
+        out() << QStringLiteral("  Only %1 and root can see which tab is in front right now: "
+                                "the browser\n  writes it in %1's own runtime directory. The "
+                                "day below is from the ledger.\n")
+                     .arg(user);
+    } else if (now.isEmpty()) {
         out() << QStringLiteral("  Nothing is being reported right now: no browser with the "
                                 "meter in it is open,\n  or nobody has it installed.\n");
     } else if (counted) {
@@ -876,6 +888,10 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
     // without being able to read the child's live browsing.
     FileFocusSource focusSource;
     const QString siteNow = siteInFrontOf(focusSource.tail(uid), QDateTime::currentDateTime());
+    // Whether this run could have read that file at all. Without it an operator
+    // asking about somebody else is told the browser is shut, which is a
+    // different thing and is not true.
+    const bool couldLookAtTheTab = ::getuid() == 0 || ::getuid() == uid;
     QVector<AppScope> named;
     QVector<AppScope> unnamed;
     const QVector<AppScope> scopes = proc.scopesFor(uid);
@@ -990,6 +1006,10 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
                  // them is about a browser that is open.
                  {QStringLiteral("now"), siteNow.isEmpty() ? QJsonValue() : QJsonValue(siteNow)},
                  {QStringLiteral("counted"), !siteNow.isEmpty() && presence.present},
+                 // Whether this run could have read the live tab at all. Without
+                 // it a script cannot tell a browser that is shut from a browser
+                 // it was not allowed to look at.
+                 {QStringLiteral("readable"), couldLookAtTheTab},
                  {QStringLiteral("today"), sitesToJson(ledger)},
              }},
             {QStringLiteral("profile"), profile ? QJsonValue(profile->toJson()) : QJsonValue()},
@@ -1082,7 +1102,7 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
     }
 
     printPresence(user, presence, seat, ledger);
-    printSites(user, siteNow, presence.present, ledger);
+    printSites(user, siteNow, presence.present, couldLookAtTheTab, ledger);
 
     if (profile)
         printWebRules(*profile, profiles.all);

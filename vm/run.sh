@@ -14,8 +14,15 @@
 # over minutes of silence, a real idle cycle, a grace window a household would
 # actually set. docs/design.md, "The two regimes", says which to run when.
 #
+# There are two machines. `--machine poc` is the default and is disposable: its
+# cases empty /etc/omahouse, close processes and end a login. `--machine omarchy`
+# is the owner's demonstration VM, which has a real browser on it and is put back
+# byte for byte afterwards. A case declares which one it needs and is not even
+# imported for the other.
+#
 #     vm/run.sh                 every case, quick, then shut the machine down
 #     vm/run.sh --pace long     the same cases with the long windows
+#     vm/run.sh --machine omarchy   the browser case, on real Omarchy
 #     vm/run.sh --keep          leave it running, for looking at
 #     vm/run.sh --case grace    one case, by a piece of its name
 set -euo pipefail

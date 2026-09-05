@@ -56,3 +56,7 @@ run = "vm/run.sh"
 [tasks."test:vm:long"]
 description = "The VM suite, long: the windows that catch what only shows with time"
 run = "vm/run.sh --pace long"
+
+[tasks."test:vm:browser"]
+description = "The browser case, on real Omarchy, put back as it was found"
+run = "vm/run.sh --machine omarchy"

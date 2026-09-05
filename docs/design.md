@@ -640,8 +640,8 @@ is a door with no lock on it.
 
 ## Measured, and what it cost
 
-Four rounds. Each one changed the design, and each is cited by name from the
-comments in `vm/`.
+Five rounds. Each one changed the design, or confirmed one against a machine,
+and each is cited by name from the comments in `vm/`.
 
 ### Round 1 — one session, twelve seconds, no root
 
@@ -732,6 +732,52 @@ The same round found a second, distinct blind spot: 23 scopes under `app.slice`
 whose names the parser refuses (`tmux-spawn-<uuid>.scope`, 71 processes). Unlike
 `session.slice`, omahouse sees these and can close them; it has no id to match a
 rule with. `status` reports them separately.
+
+### Round 5 — the meter, against what was on the screen
+
+`omahouse-omarchy`, real Omarchy, `Chromium 152.0.7977.82`, 2026-09-04 between
+21:26 and 21:28. julia's real session through the SDDM greeter, the meter
+force-installed off-store by `ExtensionSettings` with a `file:` update URL, three
+sites in a known order, and the screen turned off with the last one still in the
+front tab. The whole chain crossed on the first attempt: the `.crx` installed,
+the service worker opened the port, Chromium spawned `omahouse meter` as julia,
+and the file appeared at `/run/user/1001/omahouse/focus`, `0600 julia:julia`.
+
+| | the screen | the report |
+|---|---|---|
+| `example.com` | 22s | **22s** |
+| `en.wikipedia.org` | 22s | **22s** — as `wikipedia.org` |
+| `archlinux.org`, lit | 22s + 12s | **34s** |
+| `archlinux.org`, screen off | 22s | **0s** |
+
+```
+2026-09-04T21:27:12 julia: 3 apps (chromium, org.chromium.Chromium, udiskie),
+                    counting chromium, org.chromium.Chromium, session, using, archlinux.org
+2026-09-04T21:27:32 julia: 3 apps (chromium, org.chromium.Chromium, udiskie),
+                    counting chromium, org.chromium.Chromium, session, screen-off,
+                    archlinux.org not counted
+2026-09-04T21:27:54 julia: 3 apps (chromium, org.chromium.Chromium, udiskie),
+                    counting chromium, org.chromium.Chromium, session, using, archlinux.org
+```
+
+The day, as written: `sites {archlinux.org: 34, example.com: 22, wikipedia.org:
+22}`, `presence {using: 78, screen-off: 22}`, `budgets {chromium: 100,
+org.chromium.Chromium: 100, session: 100}`. Every site is exact to the tick
+against the wall clock; the twenty-two dark seconds are in `presence` and in no
+site; and the app budgets gained the whole hundred seconds, screen or no screen,
+which is §5 unchanged.
+
+**Cost: none to the model, and one thing learned about the machine.**
+`hyprctl dispatch dpms off` is dead on this Hyprland — the dispatcher argument is
+Lua now and the working spelling is `hyprctl dispatch 'hl.dsp.dpms("off")'`. The
+old form fails with a parse error and an exit code nobody was checking, which
+would have turned the screen off in the log and not on the machine.
+
+**What this round did not answer.** A suspend and resume
+(`proposal-browser.md` §9, question 9) was not exercised, and neither was an
+incognito window nor a second browser profile. The keepalive over minutes of
+silence was measured by the spike and not again here: the quick regime's windows
+are seconds, which is what `mise run test:vm:long` exists for.
 
 ---
 
@@ -833,6 +879,29 @@ between them is the unit suite's job.
 **No case runs against the developer's machine.** omahouse closes processes and
 ends sessions; a run that confused the host with the guest would not be a red
 test, it would be a logout in the middle of somebody's afternoon.
+
+#### The second machine, and the one case on it
+
+```bash
+mise run test:vm:browser    # vm/run.sh --machine omarchy
+```
+
+`omahouse-poc` has no browser, no greeter and a `vkms` framebuffer nothing can
+photograph. The meter of §5.2 needs all three of the opposite, so its case runs
+on `omahouse-omarchy` — real Omarchy, SDDM, a `bochs` framebuffer, and a real
+Chromium.
+
+**That machine is not disposable**, and the harness knows it. `reset()` refuses
+to run there at all, because it empties `/etc/omahouse` and `/var/lib/omahouse`
+and that is the owner's demonstration profile. Instead the run takes a copy of
+`profiles.json`, the day's ledger and SDDM's `state.conf` before it touches
+anything, and puts them back byte for byte afterwards, along with removing the
+force-install policy, the signed archive, the native messaging manifest, the
+extension in julia's profile and the `ydotool` it installed to type with. Which
+cases exist on which machine is not a convention either: a case declares
+`MACHINE` and is not imported into a run pointed at the other one, so there is no
+path by which the cases that end a login can reach the machine that is
+demonstrated from.
 
 ### Docker does not serve here
 

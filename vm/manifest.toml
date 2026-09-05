@@ -1,12 +1,15 @@
-# The one machine this suite is allowed to touch, and how long it is given.
+# The machines this suite is allowed to touch, and how long each run is given.
 #
 # No case runs against the developer's machine. omahouse closes
 # processes and ends sessions, and a run that confused the host with the guest
 # would not be a red test -- it would be a logout in the middle of somebody's
 # afternoon. So every field below is checked before a single command is sent,
 # and a mismatch is `blocked`, never a case that quietly ran somewhere else.
+#
+# Two machines, and a case says which one it needs. `--machine` picks, `poc` by
+# default, and a case that does not name one is a `poc` case.
 
-[domain]
+[machines.poc]
 # The libvirt domain, and the disk it must be running from. A domain of the same
 # name with a different definition is somebody else's machine that happens to
 # share a name.
@@ -17,17 +20,40 @@ disk = "/var/lib/libvirt/images/omahouse-poc.qcow2"
 # the only one that is about the machine that will actually run the commands
 # rather than about the machine that was asked to start.
 hostname = "omahouse-poc"
-
-[access]
 key = "~/.ssh/id_vms"
 # The operator of docs/design.md §1: in wheel, with passwordless sudo, entering the way
 # an administrator would.
 operator = "arch"
-
-[subject]
 # The account under rules. No privilege, autologin on tty1, Hyprland under uwsm.
-user = "julia"
+subject = "julia"
 uid = 1001
+# Disposable. Every case resets it to a machine with no rules on it and nobody
+# shut out, and that is what makes it safe to close processes and end logins on.
+disposable = true
+
+[machines.omarchy]
+# The owner's demonstration machine, on real Omarchy: SDDM rather than an
+# autologin on tty1, a `bochs` framebuffer the VNC can see, and a real Chromium.
+# The browser case needs all three and the `poc` has none of them.
+#
+# **It is not disposable.** The julia profile on it is the one
+# `vm/OMARCHY-VM.md` §4 describes and the one the owner demonstrates from, so
+# nothing here empties /var/lib/omahouse or rewrites profiles.json: the harness
+# takes a copy of the state before it starts and puts it back byte for byte
+# afterwards, and everything it installed comes off.
+name = "omahouse-omarchy"
+uri = "qemu:///system"
+disk = "/var/lib/libvirt/images/omahouse-omarchy.qcow2"
+hostname = "omahouse-omarchy"
+key = "~/.ssh/id_vms"
+operator = "howl"
+subject = "julia"
+uid = 1001
+# The password SDDM is typed at through the virtual keyboard. It is a
+# demonstration VM and this is written down in `.temp/docs/vm-runbook.md`
+# already; there is no secret here to keep.
+password = "julia"
+disposable = false
 
 # -- the two regimes ----------------------------------------------------------
 #
