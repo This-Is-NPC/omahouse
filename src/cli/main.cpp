@@ -1063,9 +1063,9 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
                                              : QJsonValue()},
                  {QStringLiteral("today"), presenceToJson(ledger)},
              }},
-            // Counted and never acted on, one step further than presence: there
-            // is no budget here at all, so nothing in `budgets` above is a
-            // consequence of anything in here.
+            // Unlike `presence` above, this one can be spent: a budget in
+            // `budgets` whose `kind` is `site` is billed from exactly what is
+            // reported here, and running it out is what shuts the site.
             {QStringLiteral("sites"),
              QJsonObject {
                  // Null and not an empty string: "there is no site in front" and
@@ -3287,7 +3287,7 @@ Writing, and root needed — the studio gets there by pkexec:
   profile default <user> --allow | --deny
   allow <user> <app> [--limit 45m]   let it run, and put it on the clock
   deny  <user> <app>                 do not let it run
-  limit <user> --session 2h | --budget minecraft=45m
+  limit <user> --session 2h | --budget minecraft=45m | --site youtube.com=30m
   grant <user> --session 10m | --budget minecraft=15m
   web block <user> <domain>          do not let that site open
   web allow <user> <domain>          let it open through what is blocked
@@ -3313,11 +3313,12 @@ something other than what its name says.
 A length of time is 45m, 2h, 1h30m, or a bare 90 for minutes. Anything else is
 refused rather than taken for minutes.
 
-Time per site is counted and never acted on. There is no site budget, no warning
-and no block: the browser extension reports the site in the front tab, `watch`
-bills it only while the screen says somebody is there, and `status` and `report`
-show the total. A day with no extension on the machine looks exactly as it always
-did.
+Time per site is counted the way time per app is: the browser extension reports
+the site in the front tab, `watch` bills it only while the screen says somebody
+is there, and `status` and `report` show the total. `limit --site` puts a day's
+worth on it, and running out stops the site opening until the day turns. Without
+a limit it only counts, and a day with no extension on the machine looks exactly
+as it always did.
 
 A site is named by its bare domain — `youtube.com` — and that covers its
 subdomains. The web rules of every profile are composed into one Chromium

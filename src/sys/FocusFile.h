@@ -21,7 +21,7 @@ namespace omahouse {
 // piece of unplanned work on this page": the host runs as the child
 // (`.temp/spike-extension.md` §1 measured uid 1001, inside her session, with her
 // bus in the environment) and the ledger is root's, so the two have to meet
-// somewhere -- and the shape the proposal reached for was a socket in the root
+// somewhere -- and the shape the argument there reached for was a socket in the root
 // daemon, with framing, and a second writer's worth of validation, against
 // docs/design.md §3's "no second process, no IPC, no second reader".
 //

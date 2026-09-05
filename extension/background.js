@@ -13,11 +13,15 @@
 //   whether anybody is in front          the daemon reads the kernel's DRM
 //                                        attributes and root's own logind
 //   how much of the day has gone         the daemon writes the ledger
-//   whether any of it is allowed         nothing here; this half has no teeth
+//   whether any of it is allowed         nothing here; see below
 //
-// This is the observing stage, on purpose, exactly as `enforce: false` was for
-// the apps. It measures and shows, and the number is looked at before anything
-// is given teeth. There is no blocking here, no closing a tab, no acting.
+// Nothing in this file acts, and that is not because nothing acts. A site
+// budget that runs out does shut the site -- by the daemon rewriting Chromium's
+// managed policy, which the browser enforces itself. So the teeth exist and
+// none of them are here: this file is never told a verdict, never asked for
+// one, and could not carry one out if it were. It reports a name and stops,
+// which is what keeps it small enough to read in one sitting and worth
+// force-installing into somebody else's browser.
 //
 // -- what is deliberately not in the manifest ---------------------------------
 //
