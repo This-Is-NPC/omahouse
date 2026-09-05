@@ -252,6 +252,30 @@ post_remove() {
     # outlives its own program.
     rm -rf /etc/omahouse/meter
 
+    # And any meter host that is **still running**, which is not a file and is
+    # the one thing on this list a file list could never have suggested.
+    #
+    # A native messaging host lives as long as the pipe the browser gave it, and
+    # a browser that was open through the removal still holds that pipe. Nothing
+    # else on the machine would end it: the process is the child's, it holds a
+    # `/usr/bin/omahouse` that no longer has a name, and it goes on appending to
+    # the focus file the next two lines delete -- so the file comes back within
+    # five seconds, naming the sites she is visiting, on a machine with no
+    # omahouse on it and nothing left to explain either. That is precisely the
+    # failure the whole of this function refuses, and it is not a file, which is
+    # why nothing before this line caught it.
+    #
+    # By exact command line and not by name: `omahouse` alone would take a
+    # `status` somebody is reading in another terminal. The native messaging
+    # manifest was removed a few lines above, so nothing can spawn another one
+    # after this, and `/usr/bin/omahouse` is not on the disk any more either.
+    pkill -f '^/usr/bin/omahouse meter' 2>/dev/null || true
+    pkill -f '^/bin/sh /usr/lib/omahouse/meter-host' 2>/dev/null || true
+    # And the same process named by the one argument only a browser ever passes
+    # it, whatever path it was reached through. Nothing but a native messaging
+    # host is ever called with an extension origin on its command line.
+    pkill -f 'omahouse meter chrome-extension://' 2>/dev/null || true
+
     # The focus files the browser's host left in each session's runtime
     # directory. They go with the session anyway -- /run/user is a tmpfs systemd
     # empties at logout -- but a machine that has not been rebooted since the
