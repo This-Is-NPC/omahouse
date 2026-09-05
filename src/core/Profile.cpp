@@ -166,6 +166,8 @@ QString onExhaustedName(OnExhausted action)
         return QStringLiteral("close");
     case OnExhausted::Logout:
         return QStringLiteral("logout");
+    case OnExhausted::Block:
+        return QStringLiteral("block");
     case OnExhausted::Warn:
         break;
     }
@@ -185,6 +187,42 @@ bool onExhaustedFromName(const QString &name, OnExhausted *out)
     if (name == QStringLiteral("logout")) {
         *out = OnExhausted::Logout;
         return true;
+    }
+    if (name == QStringLiteral("block")) {
+        *out = OnExhausted::Block;
+        return true;
+    }
+    return false;
+}
+
+QString selectsName(Selects selects)
+{
+    return selects == Selects::Site ? QStringLiteral("site") : QStringLiteral("app");
+}
+
+bool selectsFromName(const QString &name, Selects *out)
+{
+    if (name == QStringLiteral("app")) {
+        *out = Selects::App;
+        return true;
+    }
+    if (name == QStringLiteral("site")) {
+        *out = Selects::Site;
+        return true;
+    }
+    return false;
+}
+
+bool actionFits(Selects selects, OnExhausted action)
+{
+    switch (action) {
+    case OnExhausted::Warn:
+        return true;
+    case OnExhausted::Block:
+        return selects == Selects::Site;
+    case OnExhausted::Close:
+    case OnExhausted::Logout:
+        return selects == Selects::App;
     }
     return false;
 }
@@ -232,6 +270,12 @@ QJsonObject Profile::toJson() const
             {QStringLiteral("id"), budget.id},
             {QStringLiteral("match"), budget.match},
         };
+        // Written only when it is `site`. Absent is `app`, which is every budget
+        // written before sites had one, and putting `"kind": "app"` into all of
+        // them would rewrite every profiles.json there is to say what it already
+        // said -- the same discipline `presence` and `sites` keep in the ledger.
+        if (budget.isSite())
+            object.insert(QStringLiteral("kind"), selectsName(budget.selects));
         // A budget with no limit leaves the field out rather than writing a
         // zero: zero minutes reads like "no time at all", which is the opposite
         // of what it means here.
@@ -367,6 +411,27 @@ bool Profile::fromJson(const QJsonObject &object, Profile *out, QString *error)
             return false;
         if (!wantsInt(entry, QStringLiteral("dailyMinutes"), named, &budget.dailyMinutes, error))
             return false;
+        // Read before `onExhausted`, because what a budget may do when it runs
+        // out depends on what it is a budget for.
+        QString kindText;
+        if (!wantsString(entry, QStringLiteral("kind"), named, &kindText, false, error))
+            return false;
+        if (!kindText.isEmpty() && !selectsFromName(kindText, &budget.selects)) {
+            if (error) {
+                *error = QStringLiteral("%1 has a budget with an unknown kind %2; it is app "
+                                        "or site")
+                             .arg(named, kindText);
+            }
+            return false;
+        }
+        // A site budget's default action is to block, an app's is to warn.
+        // Different defaults because they are the honest reading of a budget
+        // written without one: an app budget with no action named is the
+        // observing stage docs/design.md §5 describes, and there is no observing
+        // stage left for sites -- §5.2 was it, and a site given a limit is
+        // somebody asking for the stage after.
+        if (budget.isSite())
+            budget.onExhausted = OnExhausted::Block;
         QString actionText;
         if (!wantsString(entry, QStringLiteral("onExhausted"), named, &actionText, false, error))
             return false;
@@ -374,6 +439,20 @@ bool Profile::fromJson(const QJsonObject &object, Profile *out, QString *error)
             if (error) {
                 *error = QStringLiteral("%1 has a budget with an unknown onExhausted %2")
                              .arg(named, actionText);
+            }
+            return false;
+        }
+        // Refused, and not quietly repaired into something that would run. A
+        // `close` on a site names no cgroup and a `block` on an app names no
+        // domain, so either one is an instruction with nothing on the other end
+        // of it -- and a rule that reads back out of `profile show` and never
+        // fires is the exact failure §11 refuses when it refuses a precedence.
+        if (!actionFits(budget.selects, budget.onExhausted)) {
+            if (error) {
+                *error = QStringLiteral("%1 has a budget %2 about a %3 whose onExhausted is "
+                                        "%4, and %4 is not something that can happen to a %3")
+                             .arg(named, budget.id, selectsName(budget.selects),
+                                  onExhaustedName(budget.onExhausted));
             }
             return false;
         }

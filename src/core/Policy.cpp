@@ -41,7 +41,7 @@ bool anyLiveScopeMatches(const QVector<AppScope> &live, const QString &selector)
 } // namespace
 
 Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const Ledger &ledger,
-                 const QDateTime &now, int tickSeconds)
+                 const QDateTime &now, int tickSeconds, const QString &siteInFront)
 {
     Outcome outcome;
     outcome.ledger = ledger;
@@ -113,11 +113,30 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
     //    A negative tick is a caller with a bug, and it is floored rather than
     //    honoured: handing back time is how a loop that misfires turns into an
     //    afternoon nobody spent.
+    //    A site budget is spent by the other observation, and by that one only.
+    //    This is the first of the two places a `kind` has to be looked at, and
+    //    the reason is `*`: a site budget matching everything would be matched
+    //    by `anyLiveScopeMatches` against every scope on the machine and would
+    //    spend a day of browsing in an afternoon of anything at all. The two
+    //    namespaces are told apart here rather than by the shape of the string,
+    //    because there is no shape that tells `org.freedesktop.Platform` from
+    //    `youtube.com`.
     const int tick = qMax(0, tickSeconds);
+
+    // The site in front, beside the budgets and never inside them --
+    // docs/design.md §5.2. Written whether or not anything has a budget about
+    // it, because the observing number is the whole of what §5.2 shipped and it
+    // goes on being true for a machine that never grows a site limit.
+    if (!siteInFront.isEmpty())
+        outcome.ledger.addSiteSeconds(siteInFront, tick);
+
     for (const Budget &budget : profile.budgets) {
         if (budget.id.isEmpty())
             continue;
-        if (anyLiveScopeMatches(live, budget.match))
+        const bool spending = budget.isSite()
+            ? (!siteInFront.isEmpty() && selectorMatches(budget.match, siteInFront))
+            : anyLiveScopeMatches(live, budget.match);
+        if (spending)
             outcome.ledger.addSeconds(budget.id, tick);
     }
 
@@ -193,6 +212,26 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
         }
         if (!acts || elapsed < grace)
             continue;
+
+        // The second place a `kind` has to be looked at, and the one that would
+        // be expensive to get wrong. Below this line the app half reaches into
+        // the cgroup tree and into logind; a site budget must never arrive
+        // there. It is a branch and not a filter on purpose -- the two halves
+        // cannot fall through into each other, so a site budget matching `*`
+        // closes nothing and ends nobody's session, which is exactly what a
+        // shared loop with an `if` in the middle of it would eventually do.
+        if (budget.isSite()) {
+            Decision decision;
+            decision.kind = Decision::Kind::Block;
+            decision.reason = Decision::Reason::Exhausted;
+            decision.budgetId = budget.id;
+            // The selector, not the id: what the browser has to be told is the
+            // domain, and a budget called `web` matching `*` is a limit on
+            // browsing rather than on a site called web.
+            decision.site = budget.match;
+            outcome.decisions.append(decision);
+            continue;
+        }
 
         if (budget.onExhausted == OnExhausted::Logout) {
             Decision decision;

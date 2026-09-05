@@ -509,7 +509,13 @@ class VM:
         # archive it names, the native messaging manifest and the extension in
         # the subject's own profile. Every one of them is a restriction or a
         # thing that reports, and none of them may outlive this run.
+        # `omahouse.json` is in this list for a stronger reason than the rest:
+        # it is a **restriction**, and a site budget that ran out during a run
+        # would leave a domain in it that only a running daemon knows how to take
+        # back out. A machine put back with a site still blocked and no omahouse
+        # counting on it is exactly the failure docs/design.md §11 refuses.
         self.root("rm -f /etc/chromium/policies/managed/omahouse-meter.json "
+                  "/etc/chromium/policies/managed/omahouse.json "
                   "/etc/chromium/native-messaging-hosts/com.omahouse.meter.json "
                   "/usr/share/omahouse/chromium/omahouse-meter.crx "
                   "/usr/share/omahouse/chromium/updates.xml", check=False)

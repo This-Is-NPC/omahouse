@@ -15,12 +15,30 @@ namespace omahouse {
 // "the app's time", and so there is no branch for it anywhere below.
 
 enum class Verdict { Allow, Deny };
-enum class OnExhausted { Warn, Close, Logout };
+enum class OnExhausted { Warn, Close, Logout, Block };
+
+/// What a budget's selector is a name for.
+///
+/// The one field that had to be added for a site to have a budget, and it is
+/// here rather than in a second list because the ambiguity is real and cannot be
+/// resolved by looking at the string: `org.freedesktop.Platform` is a scope id
+/// with dots in it and `youtube.com` is a domain with dots in it, and there is
+/// no shape that tells them apart. `web.rules` gets away without this because it
+/// is a separate list; `budgets` is one list, and a budget that guessed which
+/// namespace it was in would eventually guess wrong about somebody's flatpak.
+///
+/// Absent is `app`, and `app` is not written into the file -- docs/design.md §4's
+/// discipline for `presence` and `sites`, for the same reason: writing
+/// `"kind": "app"` into every budget on every machine would rewrite every
+/// profile there is to say what they already said.
+enum class Selects { App, Site };
 
 QString verdictName(Verdict verdict);
 bool verdictFromName(const QString &name, Verdict *out);
 QString onExhaustedName(OnExhausted action);
 bool onExhaustedFromName(const QString &name, OnExhausted *out);
+QString selectsName(Selects selects);
+bool selectsFromName(const QString &name, Selects *out);
 
 /// Whether `selector` names the app `scopeId`. `*` is every app, which is what
 /// makes the session budget an ordinary budget; anything else is the id itself,
@@ -89,6 +107,15 @@ struct Web {
 struct Budget {
     QString id;
     QString match;
+    /// Whether `match` is an app's scope id or a site's registrable domain.
+    ///
+    /// The whole of what a site budget adds to the model. Everything else about
+    /// it -- the daily limit, the grants, `warnAt`, `grace`, the notification,
+    /// the ledger remembering what was already said -- is the machinery an app
+    /// budget already had, unchanged and unbranched. What differs is the two
+    /// ends: which observation spends it (a live scope, or the site in the front
+    /// tab crossed with presence) and what happens when it runs out.
+    Selects selects = Selects::App;
     /// Zero or less is a budget with no limit: it counts, and it never runs out.
     /// That is the honest reading of a missing `dailyMinutes`, and it is worth
     /// having -- an app somebody wants a number for at the end of the day but
@@ -97,7 +124,19 @@ struct Budget {
     OnExhausted onExhausted = OnExhausted::Warn;
 
     bool hasLimit() const { return dailyMinutes > 0; }
+    bool isSite() const { return selects == Selects::Site; }
 };
+
+/// Whether an action is one this kind of budget can carry out.
+///
+/// A site is not a cgroup and an app is not a domain, so `close` and `logout`
+/// mean nothing about a site and `block` means nothing about an app. Checked
+/// where the file is read, rather than left for the engine to work around,
+/// because a profile that names an action nobody will perform is a rule an
+/// operator wrote and can still read back and that silently does not happen --
+/// the failure docs/design.md §11 refuses for web precedence, refused here for
+/// the same reason. `warn` fits both: it is the observing stage of either.
+bool actionFits(Selects selects, OnExhausted action);
 
 struct Profile {
     QString user;

@@ -14,6 +14,9 @@
 
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 
 #include <unistd.h>
@@ -253,10 +256,12 @@ private:
         profile.warnAt = {10, 5, 1};
         profile.graceSeconds = 20;
         profile.budgets = {
-            Budget {QStringLiteral("session"), QStringLiteral("*"), 120, OnExhausted::Logout},
-            Budget {QStringLiteral("chromium"), QStringLiteral("chromium"), 45,
+            Budget {QStringLiteral("session"), QStringLiteral("*"), Selects::App, 120,
+                    OnExhausted::Logout},
+            Budget {QStringLiteral("chromium"), QStringLiteral("chromium"), Selects::App, 45,
                     OnExhausted::Close},
-            Budget {QStringLiteral("code"), QStringLiteral("code"), 0, OnExhausted::Warn},
+            Budget {QStringLiteral("code"), QStringLiteral("code"), Selects::App, 0,
+                    OnExhausted::Warn},
         };
         return profile;
     }
@@ -310,12 +315,21 @@ private slots:
         // and a suite that left this pointed at /etc would be a suite trying to
         // refuse whoever runs it a login.
         qputenv("OMAHOUSE_CONFIG_DIR", QFile::encodeName(m_box + QStringLiteral("/etc")));
+        // And the browser's policy directory, which since the site budget the
+        // loop writes to as well. docs/design.md §11 calls this the refusal with
+        // the shortest fuse: this suite runs on the developer's laptop with the
+        // developer's Chromium open, and a run pointed at /etc/chromium is
+        // somebody's browser taken away in the middle of an afternoon.
+        qputenv("OMAHOUSE_CHROMIUM_POLICY_DIR",
+                QFile::encodeName(m_box + QStringLiteral("/chromium")));
+        QVERIFY(QDir().mkpath(m_box + QStringLiteral("/chromium")));
     }
 
     void cleanupTestCase()
     {
         qunsetenv("OMAHOUSE_STATE_DIR");
         qunsetenv("OMAHOUSE_CONFIG_DIR");
+        qunsetenv("OMAHOUSE_CHROMIUM_POLICY_DIR");
     }
 
     // -- the cycle -----------------------------------------------------------
@@ -1048,6 +1062,198 @@ private slots:
         QVERIFY(cycle.users.first().site.isEmpty());
         QVERIFY(readBack(day).sites.isEmpty());
         QVERIFY(!readBack(day).toJson().contains(QStringLiteral("sites")));
+    }
+
+    // -- a site that runs out ------------------------------------------------
+
+    // The whole cycle of a site budget through the machine: it is spent by the
+    // site in front, it runs out, the domain lands in the browser's own policy
+    // file, and it comes back out at the turn of the day with nothing having
+    // remembered to take it out. That last half is the one worth having: it is
+    // the same discipline `/etc/omahouse/blocked` keeps in docs/design.md §2,
+    // and it is what makes a site limit safe to ship.
+    void aSiteThatRanOutIsBlockedInTheBrowserAndComesBackWithTheDay()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+
+        Profile withASite = profile();
+        withASite.enforce = true;
+        withASite.graceSeconds = 0;
+        Budget site;
+        site.id = QStringLiteral("youtube.com");
+        site.match = QStringLiteral("youtube.com");
+        site.selects = Selects::Site;
+        site.dailyMinutes = 1;
+        site.onExhausted = OnExhausted::Block;
+        withASite.budgets.append(site);
+
+        const QString policyFile = paths::chromiumPolicyFile();
+        const QDate day(2026, 9, 3);
+        seedLedger(day, {{QStringLiteral("youtube.com"), 56}});
+
+        // Nearly a minute already spent, and one more tick of it: two seconds
+        // left, which is time left and not time out.
+        const QDateTime lit(day, QTime(19, 0, 0));
+        tabs.saying(QStringLiteral("youtube.com"), lit);
+        Cycle cycle = watch.tick({withASite}, lit);
+        QCOMPARE(readBack(day).secondsFor(QStringLiteral("youtube.com")), 58);
+        QVERIFY2(!QFile::exists(policyFile), "a site with time left was already blocked");
+
+        // The tick that takes it past the minute. The last word goes out, and
+        // with a window of nothing the block lands in the same tick.
+        const QDateTime out(day, QTime(19, 0, 2));
+        tabs.saying(QStringLiteral("youtube.com"), out);
+        cycle = watch.tick({withASite}, out);
+        QCOMPARE(cycle.blockedSites, QStringList {QStringLiteral("youtube.com")});
+        QVERIFY2(QFile::exists(policyFile), "the site ran out and no policy was written");
+
+        QFile written(policyFile);
+        QVERIFY(written.open(QIODevice::ReadOnly));
+        const QJsonObject document =
+            QJsonDocument::fromJson(written.readAll()).object();
+        written.close();
+        QCOMPARE(document.value(QStringLiteral("URLBlocklist")).toArray().size(), 1);
+        QCOMPARE(document.value(QStringLiteral("URLBlocklist")).toArray().at(0).toString(),
+                 QStringLiteral("youtube.com"));
+
+        // Said once, to the person it is about, and in a sentence about a site
+        // rather than about a cgroup.
+        const Done *blocked = firstOf(cycle.users.first().done, Done::What::BlockSite);
+        QVERIFY(blocked);
+        QCOMPARE(blocked->site, QStringLiteral("youtube.com"));
+        QVERIFY(blocked->carriedOut);
+        bool saidIt = false;
+        for (const Recorder::Note &note : recorder.notes)
+            saidIt = saidIt || note.body.contains(QStringLiteral("youtube.com"));
+        QVERIFY2(saidIt, "nothing was said before the site stopped opening");
+
+        // The same cycle again says nothing new: the file is not rewritten and
+        // the journal is not filled with one sentence twelve hundred times an
+        // hour.
+        const QDateTime again(day, QTime(19, 0, 4));
+        tabs.saying(QStringLiteral("youtube.com"), again);
+        cycle = watch.tick({withASite}, again);
+        QVERIFY(!firstOf(cycle.users.first().done, Done::What::BlockSite));
+        QCOMPARE(cycle.blockedSites, QStringList {QStringLiteral("youtube.com")});
+
+        // And the turn of the day. Nothing was asked to undo anything: the
+        // balance resets, so no budget is out, so the file says nothing and is
+        // taken away rather than emptied.
+        const QDateTime tomorrow(QDate(2026, 9, 4), QTime(8, 0, 0));
+        tabs.saying(QStringLiteral("youtube.com"), tomorrow);
+        cycle = watch.tick({withASite}, tomorrow);
+        QVERIFY(cycle.blockedSites.isEmpty());
+        QVERIFY2(!QFile::exists(policyFile),
+                 "the day turned and the site was still blocked, with nothing on the "
+                 "machine that knew how to lift it");
+        const Done *back = firstOf(cycle.users.first().done, Done::What::UnblockSite);
+        QVERIFY(back);
+        QCOMPARE(back->site, QStringLiteral("youtube.com"));
+    }
+
+    // A grant is the other way back, and it is the operator's: ten minutes
+    // handed over with the tab still open, and the site opens again on the next
+    // cycle without anybody touching the browser.
+    void aGrantOpensASiteAgainWithoutTouchingTheBrowser()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+
+        Profile withASite = profile();
+        withASite.enforce = true;
+        withASite.graceSeconds = 0;
+        Budget site;
+        site.id = QStringLiteral("youtube.com");
+        site.match = QStringLiteral("youtube.com");
+        site.selects = Selects::Site;
+        site.dailyMinutes = 1;
+        site.onExhausted = OnExhausted::Block;
+        withASite.budgets.append(site);
+
+        const QDate day(2026, 9, 3);
+        seedLedger(day, {{QStringLiteral("youtube.com"), 60}});
+        const QDateTime out(day, QTime(19, 0, 0));
+        tabs.saying(QStringLiteral("youtube.com"), out);
+        watch.tick({withASite}, out);
+        QVERIFY(QFile::exists(paths::chromiumPolicyFile()));
+
+        // The operator hands over ten minutes, into the day's own file.
+        Ledger day3 = readBack(day);
+        Grant more;
+        more.at = out;
+        more.by = QStringLiteral("howl");
+        more.budget = QStringLiteral("youtube.com");
+        more.minutes = 10;
+        day3.grants.append(more);
+        QString error;
+        QVERIFY2(writeLedger(ledgerPath(day), day3, &error), qPrintable(error));
+
+        const QDateTime after(day, QTime(19, 0, 2));
+        tabs.saying(QStringLiteral("youtube.com"), after);
+        const Cycle cycle = watch.tick({withASite}, after);
+        QVERIFY(cycle.blockedSites.isEmpty());
+        QVERIFY2(!QFile::exists(paths::chromiumPolicyFile()),
+                 "ten minutes were handed over and the site was still shut");
+    }
+
+    // The refusal of docs/design.md §11, from the loop's side. A run whose
+    // configuration is a tree of its own does not rewrite the machine's own
+    // browser policy -- and it says so rather than failing quietly, because the
+    // suite that would find this is running on the developer's laptop with the
+    // developer's Chromium open.
+    void aBrowserPolicyThatIsNotThisRunsIsNeverWritten()
+    {
+        makeSession();
+        // The machine's own directory, with a configuration that is not the
+        // machine's own: the exact combination the refusal is for.
+        qunsetenv("OMAHOUSE_CHROMIUM_POLICY_DIR");
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+
+        Profile withASite = profile();
+        withASite.enforce = true;
+        withASite.graceSeconds = 0;
+        Budget site;
+        site.id = QStringLiteral("youtube.com");
+        site.match = QStringLiteral("youtube.com");
+        site.selects = Selects::Site;
+        site.dailyMinutes = 1;
+        site.onExhausted = OnExhausted::Block;
+        withASite.budgets.append(site);
+
+        const QDate day(2026, 9, 3);
+        seedLedger(day, {{QStringLiteral("youtube.com"), 60}});
+        const QDateTime out(day, QTime(19, 0, 0));
+        tabs.saying(QStringLiteral("youtube.com"), out);
+        const Cycle cycle = watch.tick({withASite}, out);
+
+        QVERIFY(cycle.blockedSites.isEmpty());
+        QVERIFY2(!cycle.blockedSitesError.isEmpty(),
+                 "the browser policy was left alone and nothing said so");
+        QVERIFY(cycle.blockedSitesError.contains(paths::chromiumPolicyDir()));
+        const Done *refused = firstOf(cycle.users.first().done, Done::What::BlockSite);
+        QVERIFY(refused);
+        QVERIFY(!refused->carriedOut);
+        qputenv("OMAHOUSE_CHROMIUM_POLICY_DIR",
+                QFile::encodeName(m_box + QStringLiteral("/chromium")));
     }
 
     // A loop that was never given eyes must say it cannot see. Nothing is

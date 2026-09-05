@@ -317,6 +317,172 @@ private slots:
         QVERIFY(!Profile::fromJson(unknownVerdict, &read, &error));
         QVERIFY(error.contains(QStringLiteral("sometimes")));
     }
+
+    // -- the sites that ran out today -----------------------------------------
+
+    // A site limit on a machine with no web rules at all. There is no policy
+    // file until the time runs out, there is one while it is out, and there is
+    // none again once it is not -- which is the same file appearing and going
+    // away that taking the last block back does, and it has to be, because a
+    // restriction left behind at midnight is one nothing on the machine knows
+    // how to lift.
+    void aSiteOutOfTimeIsAPolicyOnItsOwn()
+    {
+        const QVector<Profile> nobodyHasWebRules {person(QStringLiteral("julia"))};
+        QVERIFY(!chromiumPolicyFor(nobodyHasWebRules).needed());
+
+        const ChromiumPolicy out =
+            chromiumPolicyFor(nobodyHasWebRules, {QStringLiteral("youtube.com")});
+        QVERIFY(out.needed());
+        QCOMPARE(out.blocklist, QStringList {QStringLiteral("youtube.com")});
+        QVERIFY(out.allowlist.isEmpty());
+
+        QVERIFY(!chromiumPolicyFor(nobodyHasWebRules, {}).needed());
+    }
+
+    // The clock has the last word. A profile that allows a site is allowing it
+    // in general and not for the thirty-first minute, so a site that has run out
+    // is blocked -- and it is never also allowlisted, because Chromium gives the
+    // allowlist the tie and that would turn the block into its opposite.
+    void aSiteOutOfTimeIsBlockedEvenWhereAProfileAllowsIt()
+    {
+        const Profile julia =
+            person(QStringLiteral("julia"),
+                   webThat(Verdict::Deny, {open(QStringLiteral("youtube.com")),
+                                           open(QStringLiteral("wikipedia.org"))}));
+
+        const ChromiumPolicy lit = chromiumPolicyFor({julia});
+        QVERIFY(lit.allowlist.contains(QStringLiteral("youtube.com")));
+
+        const ChromiumPolicy spent =
+            chromiumPolicyFor({julia}, {QStringLiteral("youtube.com")});
+        QVERIFY(spent.blocklist.contains(QStringLiteral("youtube.com")));
+        QVERIFY2(!spent.allowlist.contains(QStringLiteral("youtube.com")),
+                 "a site that ran out was left in the allowlist, which opens it");
+        // And the rest of the profile is untouched: only the site that ran out
+        // moved.
+        QVERIFY(spent.allowlist.contains(QStringLiteral("wikipedia.org")));
+    }
+
+    // A budget on browsing at all, run out. `*` reaches the file the way
+    // `--only-listed` does and not as a domain called star.
+    void abudgetOnBrowsingItselfBlocksEverything()
+    {
+        const ChromiumPolicy spent =
+            chromiumPolicyFor({person(QStringLiteral("julia"))}, {QStringLiteral("*")});
+        QCOMPARE(spent.blocklist, QStringList {QStringLiteral("*")});
+    }
+
+    // The same set in any order is the same file, sites included -- which is
+    // what stops a two second loop rewriting the policy forever because two
+    // orderings of one decision compare unequal.
+    void theSameDayInAnyOrderIsStillTheSameFile()
+    {
+        const Profile julia = person(QStringLiteral("julia"),
+                                     webThat(Verdict::Allow, {block(QStringLiteral("tiktok.com"))}));
+        QVERIFY(chromiumPolicyFor({julia}, {QStringLiteral("youtube.com"),
+                                            QStringLiteral("archlinux.org")})
+                == chromiumPolicyFor({julia}, {QStringLiteral("archlinux.org"),
+                                               QStringLiteral("youtube.com")}));
+    }
+
+    // -- a budget about a site, in the file -----------------------------------
+
+    // `kind` survives the trip, and it is written only when it is `site`: a
+    // `"kind": "app"` on every budget would rewrite every profiles.json on every
+    // machine to say what it already said.
+    void aSiteBudgetSurvivesTheFileAndAnAppBudgetSaysNothingNew()
+    {
+        Profile julia = person(QStringLiteral("julia"));
+        Budget site;
+        site.id = QStringLiteral("youtube.com");
+        site.match = QStringLiteral("youtube.com");
+        site.selects = Selects::Site;
+        site.dailyMinutes = 30;
+        site.onExhausted = OnExhausted::Block;
+        Budget app;
+        app.id = QStringLiteral("chromium");
+        app.match = QStringLiteral("chromium");
+        app.dailyMinutes = 45;
+        app.onExhausted = OnExhausted::Close;
+        julia.budgets = {site, app};
+
+        const QJsonObject written = julia.toJson();
+        const QJsonArray budgets = written.value(QStringLiteral("budgets")).toArray();
+        QCOMPARE(budgets.at(0).toObject().value(QStringLiteral("kind")).toString(),
+                 QStringLiteral("site"));
+        QVERIFY2(!budgets.at(1).toObject().contains(QStringLiteral("kind")),
+                 "an app budget wrote a kind, which rewrites every file on every machine");
+
+        Profile read;
+        QString error;
+        QVERIFY2(Profile::fromJson(written, &read, &error), qPrintable(error));
+        QCOMPARE(read.budgets.at(0).selects, Selects::Site);
+        QCOMPARE(read.budgets.at(0).onExhausted, OnExhausted::Block);
+        QCOMPARE(read.budgets.at(1).selects, Selects::App);
+        QCOMPARE(read.budgets.at(1).onExhausted, OnExhausted::Close);
+    }
+
+    // A site with no action named blocks, an app with none warns. Different
+    // defaults because they are the honest reading of each: the observing stage
+    // for apps is `enforce: false`, and for sites it was the whole of §5.2.
+    void aSiteBudgetWithNoActionNamedBlocks()
+    {
+        const QJsonObject written {
+            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("budgets"),
+             QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("youtube.com")},
+                                      {QStringLiteral("match"), QStringLiteral("youtube.com")},
+                                      {QStringLiteral("kind"), QStringLiteral("site")},
+                                      {QStringLiteral("dailyMinutes"), 30}}}},
+        };
+        Profile read;
+        QString error;
+        QVERIFY2(Profile::fromJson(written, &read, &error), qPrintable(error));
+        QCOMPARE(read.budgets.at(0).onExhausted, OnExhausted::Block);
+    }
+
+    // An instruction with nothing on the other end of it is refused where the
+    // file is read, and not repaired into something that would run. A `close` on
+    // a site names no cgroup and a `block` on an app names no domain, and either
+    // one would read back out of `profile show` and never fire.
+    void anActionThatCannotHappenToThatKindIsRefused()
+    {
+        const auto budgetSaying = [](const QString &kind, const QString &action) {
+            QJsonObject entry {{QStringLiteral("id"), QStringLiteral("thing")},
+                               {QStringLiteral("match"), QStringLiteral("thing")},
+                               {QStringLiteral("onExhausted"), action}};
+            if (!kind.isEmpty())
+                entry.insert(QStringLiteral("kind"), kind);
+            return QJsonObject {{QStringLiteral("user"), QStringLiteral("julia")},
+                                {QStringLiteral("budgets"), QJsonArray {entry}}};
+        };
+
+        Profile read;
+        QString error;
+        QVERIFY(!Profile::fromJson(budgetSaying(QStringLiteral("site"),
+                                                QStringLiteral("close")),
+                                   &read, &error));
+        QVERIFY(error.contains(QStringLiteral("close")));
+        QVERIFY(!Profile::fromJson(budgetSaying(QStringLiteral("site"),
+                                                QStringLiteral("logout")),
+                                   &read, &error));
+        QVERIFY(!Profile::fromJson(budgetSaying(QString(), QStringLiteral("block")), &read,
+                                   &error));
+        QVERIFY(error.contains(QStringLiteral("block")));
+
+        // And an unknown kind is said rather than guessed at.
+        QVERIFY(!Profile::fromJson(budgetSaying(QStringLiteral("website"),
+                                                QStringLiteral("warn")),
+                                   &read, &error));
+        QVERIFY(error.contains(QStringLiteral("website")));
+
+        // `warn` fits both: it is the observing stage of either.
+        QVERIFY(Profile::fromJson(budgetSaying(QStringLiteral("site"), QStringLiteral("warn")),
+                                  &read, &error));
+        QVERIFY(Profile::fromJson(budgetSaying(QString(), QStringLiteral("warn")), &read,
+                                  &error));
+    }
 };
 
 #include "tst_webpolicy.moc"

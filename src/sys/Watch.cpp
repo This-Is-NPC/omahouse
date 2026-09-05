@@ -1,6 +1,7 @@
 #include "Watch.h"
 
 #include "Blocked.h"
+#include "Chromium.h"
 #include "Focus.h"
 #include "Paths.h"
 #include "Users.h"
@@ -104,6 +105,42 @@ QStringList sortedWithoutRepeats(QStringList values)
     return values;
 }
 
+/// Files one act under the user it was about.
+///
+/// A site block belongs to whoever's budget ran out, and not to the cycle: the
+/// file is one file for the whole machine, but "youtube.com is shut" is
+/// something that happened to a person, and a journal that could not say which
+/// person would be useless in a house with two profiles in it. A user who is no
+/// longer in the cycle -- the profile was removed, which is one of the ways a
+/// site comes back -- has nowhere to file it, and then `Cycle::blockedSites` is
+/// the whole of the record, which is the truth: there is no longer anybody it
+/// was about.
+/// Whose site budget names `domain`, or an empty string.
+///
+/// Asked when a site comes back, because the block was nobody's decision by
+/// then: there is no longer a `Block` to read the user off. The budget that put
+/// it there is still written down, and it is what stopped being out of time.
+QString whoseSiteBudget(const QVector<Profile> &profiles, const QString &domain)
+{
+    for (const Profile &profile : profiles) {
+        for (const Budget &budget : profile.budgets) {
+            if (budget.isSite() && budget.match == domain)
+                return profile.user;
+        }
+    }
+    return {};
+}
+
+void addTo(Cycle *cycle, const QString &user, const Done &done)
+{
+    for (Watched &watched : cycle->users) {
+        if (watched.user != user)
+            continue;
+        watched.done.append(done);
+        return;
+    }
+}
+
 } // namespace
 
 QString decisionKindName(Decision::Kind kind)
@@ -113,6 +150,8 @@ QString decisionKindName(Decision::Kind kind)
         return QStringLiteral("close");
     case Decision::Kind::Logout:
         return QStringLiteral("logout");
+    case Decision::Kind::Block:
+        return QStringLiteral("block");
     case Decision::Kind::Warn:
         break;
     }
@@ -130,6 +169,10 @@ QString doneWhatName(Done::What what)
         return QStringLiteral("unblock");
     case Done::What::EndSession:
         return QStringLiteral("end-session");
+    case Done::What::BlockSite:
+        return QStringLiteral("block-site");
+    case Done::What::UnblockSite:
+        return QStringLiteral("unblock-site");
     case Done::What::Terminate:
         break;
     }
@@ -164,6 +207,12 @@ Words wordsFor(const Profile &profile, const Decision &decision, const QString &
     const Budget *budget = budgetOf(profile, decision.budgetId);
     const bool acts = profile.enforce && budget && budget->onExhausted != OnExhausted::Warn;
     const bool logout = acts && budget->onExhausted == OnExhausted::Logout;
+    // A site does not close and it does not end anything: it stops opening. The
+    // verb matters more here than anywhere else in this function, because §11
+    // already says the browser's block page explains nothing and names nobody --
+    // so this notification is the only place the person ever finds out *why* a
+    // site that worked all afternoon has stopped.
+    const bool site = acts && budget->onExhausted == OnExhausted::Block;
     const QString phrase = budgetPhrase(budget ? budget->id : decision.budgetId);
 
     switch (decision.reason) {
@@ -187,8 +236,9 @@ Words wordsFor(const Profile &profile, const Decision &decision, const QString &
         words.body = QStringLiteral("%1 %2 at %3.")
                          .arg(phrase,
                               logout ? QStringLiteral("ends")
-                                     : (acts ? QStringLiteral("closes")
-                                             : QStringLiteral("runs out")),
+                                     : (site ? QStringLiteral("stops opening")
+                                             : (acts ? QStringLiteral("closes")
+                                                     : QStringLiteral("runs out"))),
                               now.addSecs(decision.secondsLeft)
                                   .toString(QStringLiteral("HH:mm")));
         break;
@@ -198,17 +248,24 @@ Words wordsFor(const Profile &profile, const Decision &decision, const QString &
         // gives a window of zero to a profile that is only observing, and a
         // window of zero comes back as `Exhausted`.
         words.summary = QStringLiteral("Time is up");
-        words.body = logout
-            ? QStringLiteral("You will be logged out in %1.")
-                  .arg(secondsPhrase(decision.secondsLeft))
-            : QStringLiteral("%1 closes in %2.")
-                  .arg(phrase, secondsPhrase(decision.secondsLeft));
+        if (logout) {
+            words.body = QStringLiteral("You will be logged out in %1.")
+                             .arg(secondsPhrase(decision.secondsLeft));
+        } else if (site) {
+            words.body = QStringLiteral("%1 stops opening in %2.")
+                             .arg(phrase, secondsPhrase(decision.secondsLeft));
+        } else {
+            words.body = QStringLiteral("%1 closes in %2.")
+                             .arg(phrase, secondsPhrase(decision.secondsLeft));
+        }
         break;
 
     case Decision::Reason::Exhausted:
         words.summary = QStringLiteral("Time is up");
         if (logout)
             words.body = QStringLiteral("The session is ending now.");
+        else if (site)
+            words.body = QStringLiteral("%1 will not open again today.").arg(phrase);
         else if (acts)
             words.body = QStringLiteral("%1 is closing now.").arg(phrase);
         else
@@ -270,6 +327,11 @@ Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now)
     // is in `blocked` is a session the tty1 autologin brings back before the next
     // cycle, which is exactly what round 2 measured.
     reconcileBlocked(&cycle);
+    // And the browser's file, worked out the same way: the whole answer every
+    // cycle, never a change to it. It is done for every cycle and not only for
+    // one that decided something, because a site coming back at midnight is a
+    // cycle that decided nothing and has to write the file anyway.
+    reconcileWebPolicy(profiles, &cycle);
     endSessions(&cycle);
 
     for (Watched &watched : cycle.users)
@@ -331,6 +393,13 @@ void Watch::observe(const Profile &profile, Watched *watched, const SeatReading 
         for (const Decision &decision : quiet.decisions) {
             if (decision.kind == Decision::Kind::Logout)
                 watched->logouts.append(decision);
+            // And which sites are still out of time, for the same reason and by
+            // the same zero-tick question. A site budget that ran out this
+            // morning goes on being blocked this afternoon whether or not the
+            // person is logged in -- the browser's policy is per machine
+            // (docs/design.md §11), and the day is what it belongs to.
+            if (decision.kind == Decision::Kind::Block)
+                watched->blocks.append(decision);
         }
         watched->ledger = before;
         return;
@@ -348,7 +417,31 @@ void Watch::observe(const Profile &profile, Watched *watched, const SeatReading 
     }
     watched->apps = sortedWithoutRepeats(apps);
 
-    Outcome outcome = evaluate(profile, scopes, before, now, m_options.tickSeconds);
+    // The site in the front tab, crossed with presence -- docs/design.md §5.2.
+    //
+    // The crossing is the whole of why the number is worth having, and it is why
+    // this is the one thing `evaluate` is told about the browser. The browser is
+    // a witness to *what* is on the screen and a proven liar about *whether
+    // anybody is looking*: `.temp/spike-extension.md` §5 asked `chrome.idle`
+    // ninety-four times through half an hour of an empty room, with the monitor
+    // physically off for twenty-five minutes of it, and got `active` every time.
+    // So the name comes from the browser and the presence comes from the
+    // kernel's DRM attributes and root's own logind, the two are crossed **here**
+    // -- in `sys`, where a screen is a thing that exists -- and what goes across
+    // the line is a domain or nothing at all. A tab left open on YouTube
+    // overnight is `nothing at all`, and the core never learns why.
+    //
+    // Handed to `evaluate` rather than added to the ledger after it, which is
+    // the one thing that changed when a site got a budget: the tick that bills a
+    // site is now also the tick that decides about it, and a number written
+    // after the decision would be a decision made on the tick before.
+    if (m_focus) {
+        watched->site = siteInFrontOf(m_focus->tail(watched->uid), now);
+        watched->siteCounted = !watched->site.isEmpty() && watched->presence.present;
+    }
+
+    Outcome outcome = evaluate(profile, scopes, before, now, m_options.tickSeconds,
+                               watched->siteCounted ? watched->site : QString());
 
     // The day's presence, beside the budgets and never inside them. `evaluate`
     // has already decided everything it is going to decide, and this is written
@@ -356,31 +449,14 @@ void Watch::observe(const Profile &profile, Watched *watched, const SeatReading 
     // bills an app for running, that is published behaviour, and changing it is
     // not this step's to hand out. Only a state that was really read is counted,
     // so a machine with no seat writes nothing rather than an hour of `unknown`.
+    //
+    // Still after, and still for that reason, even now that presence does reach
+    // one decision. What it reaches it through is the crossing above, which
+    // hands over a name and never a state -- so there is no budget anywhere that
+    // can be spent by a screen being on.
     if (watched->presence.known())
         outcome.ledger.addPresenceSeconds(presenceReasonName(watched->presence.reason),
                                           m_options.tickSeconds);
-
-    // And the site in the front tab, crossed with that presence -- docs/design.md
-    // §5.2. Written after `evaluate` for the same reason presence is: this
-    // decides nothing, and putting it here is what makes that structural rather
-    // than a promise.
-    //
-    // The crossing is the whole of why the number is worth having. The browser
-    // is a witness to *what* is on the screen and is a proven liar about
-    // *whether anybody is looking*: `.temp/spike-extension.md` §5 asked
-    // `chrome.idle` ninety-four times through half an hour of an empty room, with
-    // the monitor physically off for twenty-five minutes of it, and got `active`
-    // every time. So the name comes from the browser and the presence comes from
-    // the kernel's DRM attributes and root's own logind, and a site is only
-    // billed where the two agree. A tab left open on YouTube overnight adds
-    // nothing.
-    if (m_focus) {
-        watched->site = siteInFrontOf(m_focus->tail(watched->uid), now);
-        if (!watched->site.isEmpty() && watched->presence.present) {
-            outcome.ledger.addSiteSeconds(watched->site, m_options.tickSeconds);
-            watched->siteCounted = true;
-        }
-    }
 
     watched->ledger = outcome.ledger;
     for (auto it = outcome.ledger.seconds.cbegin(); it != outcome.ledger.seconds.cend(); ++it) {
@@ -444,6 +520,13 @@ void Watch::observe(const Profile &profile, Watched *watched, const SeatReading 
             // Held until after `blocked` has been written. The two halves of §2
             // are one action, and this is the half that has to go second.
             watched->logouts.append(decision);
+            break;
+        case Decision::Kind::Block:
+            // Held for the same reason and carried out the same way: the file is
+            // one file for the whole machine, so it is written once at the end
+            // of the cycle out of every profile's answer, and never once per
+            // profile in the middle of one.
+            watched->blocks.append(decision);
             break;
         }
     }
@@ -580,6 +663,104 @@ void Watch::reconcileBlocked(Cycle *cycle)
     }
 }
 
+void Watch::reconcileWebPolicy(const QVector<Profile> &profiles, Cycle *cycle)
+{
+    // The same discipline as `reconcileBlocked`, and it is the reason a site
+    // ever comes unblocked. The content of the file is the whole answer and
+    // never a change to it: every cycle works out which sites are out of time
+    // right now, composes that with what the profiles' web rules say, and makes
+    // the file say exactly that. The turn of the day empties the ledger, so
+    // nothing is out of time, so nothing is written -- and a grant, an
+    // `enforce --off` and a profile removed all land in the same place without
+    // any of them knowing this file exists.
+    QHash<QString, QString> wanted;
+    QHash<QString, Decision> why;
+    for (const Watched &watched : cycle->users) {
+        for (const Decision &decision : watched.blocks) {
+            if (decision.site.isEmpty())
+                continue;
+            wanted.insert(decision.site, watched.user);
+            why.insert(decision.site, decision);
+        }
+    }
+    const QStringList outOfTime = sortedWithoutRepeats(wanted.keys());
+
+    const ChromiumPolicy policy = chromiumPolicyFor(profiles, outOfTime);
+    const QString path = paths::chromiumPolicyFile();
+
+    // What the file already says because of the clock: everything in its
+    // `URLBlocklist` that the rules alone would not have put there. Read off the
+    // disk and never remembered, which is what makes `omahouse watch --once`, a
+    // loop that has been up all day and a daemon restarted a second ago all say
+    // the same thing. A domain the rules block as well is not in here, because
+    // `youtube.com opens again` about a site that is still blocked by a rule
+    // would be a line that is not true.
+    const QStringList rulesAlone = chromiumPolicyFor(profiles).blocklist;
+    QStringList had;
+    for (const QString &domain : chromiumPolicyBlocklist(path)) {
+        if (!rulesAlone.contains(domain))
+            had.append(domain);
+    }
+
+    // Asked before the permission, exactly as the CLI asks it: a cycle where
+    // nothing about the web changed must be silent rather than explain a browser
+    // it was never going to touch. This is also what keeps a two second loop from
+    // rewriting a file every Chromium on the machine reads.
+    bool carriedOut = true;
+    if (!chromiumPolicyIsAlready(path, policy)) {
+        // The refusal of docs/design.md §11, and the shortest fuse of the three:
+        // the suite runs on the developer's laptop with the developer's Chromium
+        // open, and a bug here is somebody's browser taken away mid-afternoon.
+        const QString refusal = whyNotWriteTheBrowserPolicy();
+        if (!refusal.isEmpty() || m_options.dryRun) {
+            cycle->blockedSitesError = refusal;
+            carriedOut = false;
+        } else {
+            QString error;
+            // Removed and not emptied, for the reason §11 gives: an empty
+            // managed policy left behind is a machine that still looks managed.
+            // A site limit on a machine with no web rules puts the file there
+            // when the time runs out and takes it off again at midnight, and
+            // both halves have to be complete.
+            carriedOut = policy.needed() ? writeChromiumPolicy(path, policy, &error)
+                                         : removeChromiumPolicy(path, &error);
+            if (!carriedOut)
+                cycle->blockedSitesError = error;
+        }
+    }
+    if (carriedOut)
+        cycle->blockedSites = outOfTime;
+
+    // What changed, said once, against what the file said before this cycle.
+    for (const QString &site : outOfTime) {
+        if (had.contains(site))
+            continue;
+        Done done;
+        done.what = Done::What::BlockSite;
+        done.decision = why.value(site);
+        done.site = site;
+        done.carriedOut = carriedOut;
+        done.error = cycle->blockedSitesError;
+        addTo(cycle, wanted.value(site), done);
+    }
+    for (const QString &site : had) {
+        if (wanted.contains(site))
+            continue;
+        Done done;
+        // Nobody's decision, exactly as `Unblock` is nobody's: it is the block
+        // no longer standing, because the day turned or somebody was handed more
+        // time.
+        done.what = Done::What::UnblockSite;
+        done.site = site;
+        done.carriedOut = carriedOut;
+        done.error = cycle->blockedSitesError;
+        // Whose it was, worked out from the profiles rather than from anything
+        // kept: the budget that blocked it is still written down, and it is what
+        // stopped being out of time.
+        addTo(cycle, whoseSiteBudget(profiles, site), done);
+    }
+}
+
 void Watch::endSessions(Cycle *cycle)
 {
     for (Watched &watched : cycle->users) {
@@ -626,7 +807,7 @@ bool Watch::worthSaying(const Watched &watched)
     // being spent, a file stopped being readable.
     QStringList acts;
     for (const Done &done : watched.done)
-        acts.append(doneWhatName(done.what) + QLatin1Char(':') + done.unit);
+        acts.append(doneWhatName(done.what) + QLatin1Char(':') + done.unit + done.site);
     const QStringList parts {
         watched.enabled ? QStringLiteral("on") : QStringLiteral("off"),
         watched.account ? QStringLiteral("account") : QStringLiteral("no account"),

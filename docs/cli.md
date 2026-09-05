@@ -68,7 +68,9 @@ It is measured and reported, and it takes nothing away. What an app is billed is
 
 And it says which site is in the front tab of the browser, under `TIME PER SITE`, with what the day has come to per site beside it. The site comes from a Chromium extension that reports the registrable domain and nothing else, through a native messaging host that appends it to a file in that account's own runtime directory; the day's totals come from the ledger, which the daemon wrote. So an operator asking about somebody else sees the totals and not the live tab -- the ledger is 0644 and the file is not -- and that asymmetry is deliberate.
 
-This one has no teeth at all, one step beyond presence: there is no site budget, no warning and no block, and the screen says so. A site is counted only while the presence above says somebody is in front of the screen, and `status` prints `is NOT being counted` in so many words when the two disagree.
+A site is counted only while the presence above says somebody is in front of the screen, and `status` prints `is NOT being counted` in so many words when the two disagree.
+
+A site with a budget on it appears twice, and the two rows are two different things: the `TIME PER SITE` table is every domain that was in front, budget or no budget, and the budget table is what a limit has been spent. A site whose budget has run out is in the machine's blocklist until the day turns, and `SITES` above says so.
 
 ### Arguments
 - **`[user]`** — Whose session to look at; defaults to whoever ran it
@@ -234,13 +236,21 @@ A budget written for that app is left where it is. The rule and the clock are tw
 
 ## `omahouse limit`
 
-- **Usage:** `omahouse limit [--session <duration>] [--budget <id>=<duration>] <user>`
+- **Usage:** `omahouse limit [FLAGS] <user>`
 
-How long a day, for the session or for one app.
+How long a day, for the session, for one app or for one site.
 
-`--session` is the budget whose selector is `*`, which is the whole of what makes the session an ordinary budget -- `docs/design.md` §2, and the reason there is no branch for `the user's time` anywhere in the core. It logs the session out when it runs out. `--budget <id>=<duration>` is one app's, and it closes that app.
+`--session` is the budget whose selector is `*`, which is the whole of what makes the session an ordinary budget -- `docs/design.md` §2, and the reason there is no branch for `the user's time` anywhere in the core. It logs the session out when it runs out. `--budget <id>=<duration>` is one app's, and it closes that app. `--site <domain>=<duration>` is one site's, and it stops that site opening.
 
-A budget that is already there gets the new number and keeps everything else: what a budget does when it runs out is a decision somebody made once, and a new limit is not a reason to take it back.
+**A site budget is the same noun with the other kind of selector.** The warning marks, the grace window, the notification, the grant and the ledger that remembers what was already said are the ones an app budget already had, unchanged. What differs is the two ends: what spends it is the site in the front tab of the browser crossed with whether anybody is in front of the screen (`docs/design.md` §5.2), and what happens when it runs out is that the domain goes into the browser's `URLBlocklist` instead of a cgroup being closed.
+
+**It comes back on its own.** Nothing has to remember to unblock a site: every cycle works out from today's ledger which sites are out of time right now and makes the policy file say exactly that, so the turn of the local date lets it open again, and so does `omahouse grant`, and so does `omahouse profile enforce --off`. That is the same discipline `/etc/omahouse/blocked` keeps for the PAM refusal of `docs/design.md` §2.
+
+**And it holds for the whole machine**, exactly as `omahouse web block` does and for the same reason: Chromium's policy directory is a compile-time constant, so one file decides for every account that opens Chromium here. A site somebody has spent their thirty minutes on stops opening for the operator too, until the day turns.
+
+A site is named by its bare domain, and a bare domain covers its subdomains. A whole URL, a path or a scheme is refused rather than repaired into a rule about its host -- the same refusal `omahouse web block` makes, by the same routine, so that a site cannot be named one way in the budgets and another way in the report.
+
+A budget that is already there gets the new number and keeps everything else: what a budget does when it runs out is a decision somebody made once, and a new limit is not a reason to take it back. An id that already names a budget of the other kind is refused rather than converted -- `org.freedesktop.Platform` is a scope id with dots in it, so there is no shape that tells an app id from a domain, and one id meaning both would be two rows of the report that are the same row.
 
 A budget can be written for an app no rule names. That is a program somebody wants a number for at the end of the day, and it is a legitimate thing to ask for.
 
@@ -250,6 +260,7 @@ A budget can be written for an app no rule names. That is a program somebody wan
 ### Flags
 - **`--session <duration>`** — The whole session: 2h
 - **`--budget <id>=<duration>`** — One budget by id: minecraft=45m
+- **`--site <domain>=<duration>`** — One site by domain: youtube.com=30m
 
 ## `omahouse grant`
 
@@ -407,7 +418,9 @@ And it reads the site in the front tab, out of `/run/user/<uid>/omahouse/focus`,
 
 That file belongs to the person being measured and is treated as such: it is opened without following a symlink at either component, refused unless it is a regular file owned by that very account, read a bounded tail at a time, and only its last complete line is looked at. Every way it can be wrong -- deleted, truncated, filled with rubbish, dated into the future, gone stale -- is one answer, which is that nothing is billed for that tick. What evading it wins is anonymity and not minutes: the total time on the machine is held by the cgroup walk and by the PAM line, and neither is reachable from that file.
 
-The seconds land in the day's ledger beside the budgets, under `sites`. There is no site budget, no warning and no block. This is the observing stage, exactly as `enforce: false` is for the apps.
+The seconds land in the day's ledger beside the budgets, under `sites`, and they are also what spends a budget written with `omahouse limit --site` -- `docs/design.md` §5.3. Such a budget warns at the same marks, waits out the same grace and takes the same grants as one about an app; what differs is that running out puts the domain into the browser's managed policy rather than closing a cgroup.
+
+And it comes back out on its own, by the same path the name in `/etc/omahouse/blocked` does. Every cycle works out from today's ledger which sites are out of time right now and makes the policy file say exactly that, so the turn of the day, a grant and `profile enforce --off` each let a site open again without knowing that file exists -- and with nothing out of time the file is removed rather than emptied.
 
 It stops on SIGINT and SIGTERM after the cycle it is in, which is a `rename` away from being no cycle at all.
 

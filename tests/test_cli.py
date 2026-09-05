@@ -2003,6 +2003,174 @@ def check_watch_bills_nothing_for_a_focus_file_that_is_wrong(box):
         assert day["budgets"]["session"] == spent, (what, day)
 
 
+def check_limit_writes_a_budget_about_a_site(box):
+    """`--site` beside `--budget`, and the same noun underneath.
+
+    What has to come out of the file is a budget with `kind: "site"` on it and
+    nothing else new: the id, the match, the daily minutes and the action are the
+    fields an app budget already had. `kind` is there because there is no shape
+    that tells `org.freedesktop.Platform` from `youtube.com`.
+    """
+    box.run("profile", "add", "julia", "--name", "Júlia")
+    written = box.run("limit", "julia", "--site", "youtube.com=30m")
+    assert written.returncode == 0, written.stderr
+    assert "stops opening" in written.stdout, written.stdout
+    # Said once, where somebody is deciding it, and on stderr where every other
+    # note is: the browser's policy is one file for the whole machine.
+    assert "whole machine" in written.stderr, written.stderr
+
+    profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    budgets = {one["id"]: one for one in profile["budgets"]}
+    assert budgets["youtube.com"]["kind"] == "site", budgets
+    assert budgets["youtube.com"]["match"] == "youtube.com", budgets
+    assert budgets["youtube.com"]["dailyMinutes"] == 30, budgets
+    assert budgets["youtube.com"]["onExhausted"] == "block", budgets
+
+    # An app budget beside it, and it says nothing new about its kind: a
+    # `"kind": "app"` on every budget would rewrite every profiles.json there is.
+    box.run("limit", "julia", "--budget", "chromium=45m")
+    profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    budgets = {one["id"]: one for one in profile["budgets"]}
+    assert "kind" not in budgets["chromium"], budgets
+
+    # A domain read the way `web block` reads one, by the same routine, so that a
+    # site cannot be named one way here and another way there.
+    box.run("limit", "julia", "--site", "WWW.Reddit.com=10m")
+    profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    assert any(one["id"] == "www.reddit.com" for one in profile["budgets"]), profile
+
+
+def check_limit_refuses_what_it_cannot_do_about_a_site(box):
+    """The refusals, and the one that matters is the id that already means the
+    other thing."""
+    box.run("profile", "add", "julia", "--name", "Júlia")
+
+    both = box.run("limit", "julia", "--session", "2h", "--site", "youtube.com=30m")
+    assert both.returncode != 0
+    assert "One of them" in both.stderr, both.stderr
+
+    url = box.run("limit", "julia", "--site", "https://youtube.com/watch=30m")
+    assert url.returncode != 0
+    assert "not a domain" in url.stderr, url.stderr
+
+    nodot = box.run("limit", "julia", "--site", "youtube=30m")
+    assert nodot.returncode != 0
+    assert "no dot in it" in nodot.stderr, nodot.stderr
+
+    star = box.run("limit", "julia", "--site", "*=30m")
+    assert star.returncode != 0, star.stdout
+
+    # One id, one thing. There is no shape that tells an app id from a domain, so
+    # the same id meaning both would be two rows of the report that are one row.
+    box.run("limit", "julia", "--site", "youtube.com=30m")
+    clash = box.run("limit", "julia", "--budget", "youtube.com=45m")
+    assert clash.returncode != 0
+    assert "about a site" in clash.stderr, clash.stderr
+
+
+def check_a_site_that_ran_out_is_blocked_and_comes_back_on_its_own(box):
+    """The whole of the site budget through the machine, and back again.
+
+    It is spent by the site in front crossed with presence, it warns, it blocks,
+    and it comes back -- by the turn of the day and by a grant -- with nothing
+    on the machine having been asked to undo anything. That last half is the one
+    worth having: it is `/etc/omahouse/blocked` of docs/design.md §2, said about
+    a domain.
+    """
+    document = watching_profile(enforce=True, default="allow")
+    document["profiles"][0]["grace"] = 0
+    document["profiles"][0]["budgets"].append(
+        {"id": "youtube.com", "match": "youtube.com", "kind": "site",
+         "dailyMinutes": 1, "onExhausted": "block"})
+    box.write_profiles(document)
+    box.write_day(TODAY, {"youtube.com": 56})
+    box.browsing("www.youtube.com")
+
+    # Two seconds left: counted, warned about, and opening.
+    left = box.run("watch", "--once")
+    assert left.returncode == 0, left.stderr
+    assert box.day(TODAY)["budgets"]["youtube.com"] == 58, box.day(TODAY)
+    assert box.policy() is None, box.policy()
+    assert any("youtube.com" in " ".join(one) for one in box.said()), box.said()
+
+    # And out. The domain lands in the browser's own file, under the key
+    # Chromium reads.
+    out = box.run("watch", "--once")
+    assert out.returncode == 0, out.stderr
+    assert box.policy() == {"URLBlocklist": ["youtube.com"]}, box.policy()
+    assert "block-site" in out.stderr or "stopped opening" in out.stderr, out.stderr
+
+    # An operator hands over ten minutes with the tab still open, and the site
+    # opens again on the next cycle. Nothing was asked to unblock it.
+    granted = box.run("grant", USER, "--budget", "youtube.com=10m")
+    assert granted.returncode == 0, granted.stderr
+    # `grant` writes the day's own file and nothing else. The site opens again on
+    # the next cycle, and that is the mechanism rather than an omission: there is
+    # one place that works out what is blocked right now, it is the loop, and a
+    # verb that reached into the browser's policy itself would be a second
+    # answer to the same question -- which is exactly what `blocked` in
+    # docs/design.md §2 refuses to have.
+    back = box.run("watch", "--once")
+    assert back.returncode == 0, back.stderr
+    assert box.policy() is None, box.policy()
+    assert "unblock-site" in back.stderr or "opens again" in back.stderr, back.stderr
+
+    # And the turn of the day, which is the path that needs nobody at all. The
+    # ledger of a day that has run out is left where it is and `watch` is asked
+    # about tomorrow: the balance is a new file, so no budget is out, so the
+    # policy is removed rather than emptied.
+    ledger = box.state / USER / f"{TODAY.isoformat()}.json"
+    yesterday = box.state / USER / f"{(TODAY - timedelta(days=1)).isoformat()}.json"
+    spent = json.loads(ledger.read_text())
+    spent["grants"] = []
+    ledger.write_text(json.dumps(spent))
+    shut = box.run("watch", "--once")
+    assert shut.returncode == 0, shut.stderr
+    assert box.policy() == {"URLBlocklist": ["youtube.com"]}, box.policy()
+    # The same day's file, moved to yesterday: today has nothing spent on it.
+    yesterday.write_text(ledger.read_text())
+    ledger.unlink()
+    tomorrow = box.run("watch", "--once")
+    assert tomorrow.returncode == 0, tomorrow.stderr
+    assert box.policy() is None, box.policy()
+
+
+def check_a_site_budget_composes_with_the_web_rules(box):
+    """One file, and the clock has the last word in it.
+
+    A profile that allows a site is allowing it in general and not for the
+    thirty-first minute, so a site that has run out is blocked even where a rule
+    lets it through -- and it is never also allowlisted, because Chromium gives
+    the allowlist the tie.
+    """
+    document = watching_profile(enforce=True, default="allow")
+    document["profiles"][0]["grace"] = 0
+    document["profiles"][0]["web"] = {
+        "default": "deny",
+        "rules": [{"match": "youtube.com", "verdict": "allow"},
+                  {"match": "wikipedia.org", "verdict": "allow"}],
+    }
+    document["profiles"][0]["budgets"].append(
+        {"id": "youtube.com", "match": "youtube.com", "kind": "site",
+         "dailyMinutes": 1, "onExhausted": "block"})
+    box.write_profiles(document)
+    box.write_day(TODAY, {"youtube.com": 60})
+    box.browsing("www.youtube.com")
+
+    ran = box.run("watch", "--once")
+    assert ran.returncode == 0, ran.stderr
+    policy = box.policy()
+    assert "youtube.com" in policy["URLBlocklist"], policy
+    assert "youtube.com" not in policy.get("URLAllowlist", []), policy
+    assert "wikipedia.org" in policy["URLAllowlist"], policy
+    assert "*" in policy["URLBlocklist"], policy
+
+    # And `status` says the same thing, out of the composed policy rather than
+    # out of one profile's rules.
+    said = box.run("status", USER)
+    assert "youtube.com" in said.stdout, said.stdout
+
+
 def check_status_and_report_show_the_time_per_site(box):
     """It appears where the budgets and the presence do, and says it has no teeth.
 
@@ -2117,6 +2285,10 @@ def main():
         check_the_meter_writes_what_the_browser_told_it,
         check_watch_counts_a_site_only_while_somebody_is_there,
         check_watch_bills_nothing_for_a_focus_file_that_is_wrong,
+        check_limit_writes_a_budget_about_a_site,
+        check_limit_refuses_what_it_cannot_do_about_a_site,
+        check_a_site_that_ran_out_is_blocked_and_comes_back_on_its_own,
+        check_a_site_budget_composes_with_the_web_rules,
         check_status_and_report_show_the_time_per_site,
         check_watch_writes_presence_beside_the_budgets_and_never_into_them,
         check_the_reading_verbs_write_nothing,

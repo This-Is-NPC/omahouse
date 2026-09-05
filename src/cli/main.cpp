@@ -83,6 +83,11 @@ struct Options {
     QString limit;
     QString session;
     QString budget;
+    /// A domain and a length of time. `limit`'s third shape, beside `--session`
+    /// and `--budget`: the same verb, because a limit on YouTube and a limit on
+    /// Minecraft are the same thing an operator is doing -- docs/design.md §2's
+    /// Budget with the other kind of selector.
+    QString site;
     QString interval;
     bool createUser = false;
     bool keepAccount = false;
@@ -161,6 +166,7 @@ bool parseOptions(const QStringList &args, Options *options, QStringList *positi
         {"--limit", &Options::limit, "a length of time, like 45m"},
         {"--session", &Options::session, "a length of time, like 2h"},
         {"--budget", &Options::budget, "an id and a length of time, like minecraft=45m"},
+        {"--site", &Options::site, "a domain and a length of time, like youtube.com=30m"},
         {"--interval", &Options::interval, "a number of seconds, like 2"},
     };
     struct Flag {
@@ -273,6 +279,8 @@ QString whenOut(OnExhausted action)
         return QStringLiteral("closes");
     case OnExhausted::Logout:
         return QStringLiteral("logs out");
+    case OnExhausted::Block:
+        return QStringLiteral("stops opening");
     case OnExhausted::Warn:
         break;
     }
@@ -352,6 +360,45 @@ const Profile *profileFor(const Profiles &profiles, const QString &user)
             return &profile;
     }
     return nullptr;
+}
+
+/// The sites a budget has run out on today, across every profile.
+///
+/// Worked out exactly the way `watch` works it out -- `evaluate` over today's
+/// ledger with a tick of nothing, which is the same zero-tick question §2's
+/// `blocked` is re-derived by -- so that the CLI and the daemon cannot come to
+/// disagree about what the browser's policy file should say. Without it every
+/// verb that saves a profile would write a policy with today's blocks missing
+/// and the daemon would put them back two seconds later, which is a site that
+/// flickers open every time somebody types a command.
+///
+/// A ledger that will not parse is skipped and not guessed at, for the reason
+/// `Watch::observe` skips it: no block stands on a day nobody can read, and that
+/// is the recoverable direction.
+QStringList sitesOutOfTime(const QVector<Profile> &profiles)
+{
+    const QDateTime now = QDateTime::currentDateTime();
+    QStringList sites;
+    for (const Profile &profile : profiles) {
+        if (!profile.enabled)
+            continue;
+        Ledger ledger;
+        QString error;
+        bool missing = false;
+        if (!readLedger(paths::ledgerFile(profile.user, now.date()), &ledger, &error, &missing))
+            continue;
+        if (missing) {
+            ledger.user = profile.user;
+            ledger.date = now.date();
+        }
+        for (const Decision &decision : evaluate(profile, {}, ledger, now, 0).decisions) {
+            if (decision.kind == Decision::Kind::Block && !decision.site.isEmpty())
+                sites.append(decision.site);
+        }
+    }
+    sites.sort();
+    sites.erase(std::unique(sites.begin(), sites.end()), sites.end());
+    return sites;
 }
 
 /// One day of one user. `missing` is the ordinary state of a day nobody has
@@ -633,7 +680,7 @@ void printWebRules(const Profile &profile, const QVector<Profile> &profiles)
     // for -- WebPolicy.h, the most restrictive wins. Printed from the composed
     // policy rather than from this profile, because the composed one is the
     // thing the browser reads.
-    const ChromiumPolicy policy = chromiumPolicyFor(profiles);
+    const ChromiumPolicy policy = chromiumPolicyFor(profiles, sitesOutOfTime(profiles));
     if (!policy.needed()) {
         out() << QStringLiteral("  no %1 on this machine: nothing above asks for one.\n")
                      .arg(paths::chromiumPolicyFile());
@@ -924,7 +971,8 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
         balances = balancesOf(*profile, ledger);
     }
 
-    const ChromiumPolicy webPolicy = chromiumPolicyFor(profiles.all);
+    const ChromiumPolicy webPolicy =
+        chromiumPolicyFor(profiles.all, sitesOutOfTime(profiles.all));
 
     if (g.json) {
         QJsonArray scopesJson;
@@ -1536,7 +1584,7 @@ bool mayTouchTheBrowserPolicy()
 /// writable would lose the decision as well.
 void refreshWebPolicy(const QString &verb, const QVector<Profile> &profiles)
 {
-    const ChromiumPolicy policy = chromiumPolicyFor(profiles);
+    const ChromiumPolicy policy = chromiumPolicyFor(profiles, sitesOutOfTime(profiles));
     const QString path = paths::chromiumPolicyFile();
     // An unchanged decision is not written again: this file is read by every
     // Chromium that starts, and rewriting it for a verb that had nothing to do
@@ -2017,7 +2065,8 @@ int cmdRule(const Globals &g, const QString &verb, const QStringList &positional
             // The budget of an app closes that app when it runs out. The one
             // that logs the session out is the session's, and it is written by
             // `omahouse limit --session`.
-            profile->budgets.append(Budget {id, id, minutes, OnExhausted::Close});
+            profile->budgets.append(
+                Budget {id, id, Selects::App, minutes, OnExhausted::Close});
         } else {
             budget->dailyMinutes = minutes;
         }
@@ -2186,7 +2235,8 @@ int cmdWebRule(const Globals &g, const QString &verb, const QStringList &positio
     QString line;
     if (verdict == Verdict::Deny) {
         line = QStringLiteral("%1: %2 is blocked, and so are its subdomains.").arg(user, domain);
-    } else if (chromiumPolicyFor(profiles.all).blocklist.isEmpty()) {
+    } else if (chromiumPolicyFor(profiles.all, sitesOutOfTime(profiles.all))
+                   .blocklist.isEmpty()) {
         // The trap `.temp/spike-extension.md` §7 measured one policy over: an
         // allowlist with no blocklist beside it lets everything through,
         // including the thing it names. Saying "allowed" and stopping would read
@@ -2338,8 +2388,10 @@ int cmdLimit(const Globals &g, const QStringList &positionals, const Options &op
 
     const bool session = !options.session.isEmpty();
     const bool named = !options.budget.isEmpty();
-    if (session == named) {
-        fail(QStringLiteral("limit: --session 2h, or --budget minecraft=45m. One of them."));
+    const bool site = !options.site.isEmpty();
+    if (session + named + site != 1) {
+        fail(QStringLiteral("limit: --session 2h, or --budget minecraft=45m, or "
+                            "--site youtube.com=30m. One of them."));
         return kUsage;
     }
 
@@ -2350,19 +2402,33 @@ int cmdLimit(const Globals &g, const QStringList &positionals, const Options &op
     QString id = QStringLiteral("session");
     QString match = QStringLiteral("*");
     QString written = options.session;
+    Selects selects = Selects::App;
     OnExhausted whenGone = OnExhausted::Logout;
-    if (named) {
-        const int equals = options.budget.indexOf(QLatin1Char('='));
-        if (equals <= 0 || equals == options.budget.size() - 1) {
-            fail(QStringLiteral("limit: --budget wants an id and a length of time, like "
-                                "minecraft=45m, not '%1'")
-                     .arg(options.budget));
+    if (named || site) {
+        const QString typed = named ? options.budget : options.site;
+        const QString flag = named ? QStringLiteral("--budget") : QStringLiteral("--site");
+        const QString example = named ? QStringLiteral("minecraft=45m")
+                                      : QStringLiteral("youtube.com=30m");
+        const int equals = typed.indexOf(QLatin1Char('='));
+        if (equals <= 0 || equals == typed.size() - 1) {
+            fail(QStringLiteral("limit: %1 wants %2 and a length of time, like %3, not '%4'")
+                     .arg(flag,
+                          named ? QStringLiteral("an id") : QStringLiteral("a domain"),
+                          example, typed));
             return kUsage;
         }
-        id = options.budget.left(equals);
+        id = typed.left(equals);
+        written = typed.mid(equals + 1);
+        whenGone = named ? OnExhausted::Close : OnExhausted::Block;
+        selects = named ? Selects::App : Selects::Site;
+        // The same reading of a domain the web half has, and the same refusals:
+        // a whole URL, a path or a scheme is refused rather than repaired into a
+        // rule about its host. One routine for both, because a site a `limit`
+        // named differently from the way a `web block` names it would be two
+        // rows in the report and one site on the screen.
+        if (site && !domainFromWhatWasTyped(QStringLiteral("limit"), id, &id))
+            return kUsage;
         match = id;
-        written = options.budget.mid(equals + 1);
-        whenGone = OnExhausted::Close;
     }
 
     int minutes = 0;
@@ -2386,8 +2452,19 @@ int cmdLimit(const Globals &g, const QStringList &positionals, const Options &op
 
     Budget *budget = budgetFor(profile, id);
     if (!budget) {
-        profile->budgets.append(Budget {id, match, minutes, whenGone});
+        profile->budgets.append(Budget {id, match, selects, minutes, whenGone});
         budget = &profile->budgets.last();
+    } else if (budget->selects != selects) {
+        // One id, one thing. `org.freedesktop.Platform` is a scope id with dots
+        // in it, so an id that is also a domain is not a shape anybody can rule
+        // out -- and the same id meaning an app in the budgets and a site in the
+        // ledger is a report with two rows that are the same row.
+        fail(QStringLiteral("limit: %1 already has a budget called %2, and it is about %3 "
+                            "rather than %4")
+                 .arg(user, id, budget->isSite() ? QStringLiteral("a site")
+                                                 : QStringLiteral("an app"),
+                      site ? QStringLiteral("a site") : QStringLiteral("an app")));
+        return kUsage;
     } else {
         // Only the number. What a budget does when it runs out is a decision
         // somebody made once, and a new limit is not a reason to take it back.
@@ -2396,9 +2473,18 @@ int cmdLimit(const Globals &g, const QStringList &positionals, const Options &op
     if (!saveProfiles(QStringLiteral("limit"), profiles.all))
         return kUsage;
 
-    return wrote(g, *profile,
-                 QStringLiteral("%1: %2 %3 a day, and it %4 when the time is out.")
-                     .arg(user, id, durationFromMinutes(minutes), whenOut(budget->onExhausted)));
+    const int status2 = wrote(
+        g, *profile,
+        QStringLiteral("%1: %2 %3 a day, and it %4 when the time is out.")
+            .arg(user, id, durationFromMinutes(minutes), whenOut(budget->onExhausted)));
+    // Said once, here, where somebody is deciding it: the browser's policy is
+    // one file for the whole machine -- docs/design.md §11 -- so a site that
+    // runs out stops opening for every account on it, the operator's included.
+    // `omahouse web` says the same thing when it writes and `status` says it
+    // when it prints, and none of the three says it twice.
+    if (site && !g.json && budget->onExhausted == OnExhausted::Block)
+        sayTheReach();
+    return status2;
 }
 
 int cmdGrant(const Globals &g, const QStringList &positionals, const Options &options)
@@ -2636,6 +2722,14 @@ QString whatWasDone(const Done &done)
         break;
     case Done::What::EndSession:
         what = QStringLiteral("loginctl terminate-user");
+        break;
+    case Done::What::BlockSite:
+        what = QStringLiteral("%1 stopped opening (%2)")
+                   .arg(done.site, paths::chromiumPolicyFile());
+        break;
+    case Done::What::UnblockSite:
+        what = QStringLiteral("%1 opens again (%2)")
+                   .arg(done.site, paths::chromiumPolicyFile());
         break;
     }
     if (done.carriedOut)
@@ -3282,7 +3376,9 @@ int dispatch(const Globals &g, const QStringList &args)
     if (verb == QLatin1String("web"))
         return cmdWeb(g, positionals, options);
     if (verb == QLatin1String("limit")) {
-        if (!onlyTheseOptions(options, {QStringLiteral("--session"), QStringLiteral("--budget")},
+        if (!onlyTheseOptions(options,
+                              {QStringLiteral("--session"), QStringLiteral("--budget"),
+                               QStringLiteral("--site")},
                               verb))
             return kUsage;
         return cmdLimit(g, positionals, options);

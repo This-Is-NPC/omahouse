@@ -39,7 +39,7 @@ QJsonObject ChromiumPolicy::toJson() const
     return object;
 }
 
-ChromiumPolicy chromiumPolicyFor(const QVector<Profile> &profiles)
+ChromiumPolicy chromiumPolicyFor(const QVector<Profile> &profiles, const QStringList &outOfTime)
 {
     ChromiumPolicy policy;
 
@@ -49,7 +49,7 @@ ChromiumPolicy chromiumPolicyFor(const QVector<Profile> &profiles)
             continue;
         speaking.append(&profile);
     }
-    if (speaking.isEmpty())
+    if (speaking.isEmpty() && outOfTime.isEmpty())
         return policy;
 
     // Every domain any profile has an opinion about, once, in an order that
@@ -57,6 +57,27 @@ ChromiumPolicy chromiumPolicyFor(const QVector<Profile> &profiles)
     QStringList mentioned;
     QSet<QString> seen;
     bool everythingBlocked = false;
+    // The sites that have run out today, which no rule can talk back to. Held as
+    // a set beside the rules rather than folded into them, because a domain here
+    // is not a decision about the site -- it is a decision about the clock, and
+    // the two compose in only one direction.
+    QSet<QString> spent;
+    for (const QString &domain : outOfTime) {
+        if (domain.isEmpty())
+            continue;
+        if (domain == kEverything) {
+            // A budget on browsing at all, run out. Written the same way
+            // `--only-listed` is, and it has to mean the same thing rather than
+            // reaching the file as a literal `*` twice.
+            everythingBlocked = true;
+            continue;
+        }
+        spent.insert(domain);
+        if (!seen.contains(domain)) {
+            seen.insert(domain);
+            mentioned.append(domain);
+        }
+    }
     for (const Profile *profile : speaking) {
         if (profile->web.defaultVerdict == Verdict::Deny)
             everythingBlocked = true;
@@ -85,13 +106,16 @@ ChromiumPolicy chromiumPolicyFor(const QVector<Profile> &profiles)
     for (const QString &domain : mentioned) {
         // The composition rule of the header, and it is one line because it has
         // to be readable as one sentence: allowed here only if allowed by
-        // everybody who has a say.
-        bool allowedByAll = true;
+        // everybody who has a say -- and by the clock, which has the last word.
+        // A site somebody has spent their thirty minutes on is blocked because
+        // of the thirty minutes, and a profile that allows it is allowing it in
+        // general and not for the thirty-first.
+        bool allowedByAll = !spent.contains(domain);
         for (const Profile *profile : speaking) {
-            if (profile->web.verdictFor(domain) == Verdict::Deny) {
-                allowedByAll = false;
+            if (!allowedByAll)
                 break;
-            }
+            if (profile->web.verdictFor(domain) == Verdict::Deny)
+                allowedByAll = false;
         }
         // A blocked domain is never also allowlisted, and that is not tidiness.
         // Chromium's own precedence gives the allowlist the tie, so a domain in

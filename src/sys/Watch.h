@@ -75,15 +75,25 @@ struct Done {
         Unblock,
         /// `loginctl terminate-user`.
         EndSession,
+        /// The domain written into the browser's `URLBlocklist`, because a site
+        /// budget ran out. Its own word and not `Block`: one of them is a name
+        /// in a file PAM reads and the other is a domain in a file Chromium
+        /// reads, and a journal that called them the same thing would be a
+        /// journal that could not tell an evening ending from a site closing.
+        BlockSite,
+        /// And out of it again, by the same path and for the same four reasons.
+        UnblockSite,
     };
 
     What what = What::Terminate;
-    /// The decision this came of. Absent for `Unblock`, which is nobody's
-    /// decision: it is the block no longer standing.
+    /// The decision this came of. Absent for `Unblock` and `UnblockSite`, which
+    /// are nobody's decision: they are the block no longer standing.
     Decision decision;
     /// The id of the scope, where there is one, and its unit either way.
     QString app;
     QString unit;
+    /// The domain, for `BlockSite` and `UnblockSite`. Empty otherwise.
+    QString site;
     bool carriedOut = false;
     /// Why it was not done, when it was not. A refusal from `Enforce.h` and a
     /// failure of the act itself both land here, and the sentence says which.
@@ -172,6 +182,21 @@ struct Watched {
     /// what left them without one: a loop that stopped asking here would take
     /// the name back out on the very next cycle and let them straight back in.
     QVector<Decision> logouts;
+    /// The `Block` decisions that stand right now: the sites whose budget is out
+    /// of time today.
+    ///
+    /// Re-derived every cycle from today's ledger, exactly as `logouts` is, and
+    /// for exactly the same payoff: nothing has to remember to let a site back
+    /// through. The turn of the day resets the balance, so no site is out of
+    /// time, so no domain is written -- and the same goes for a grant, for
+    /// `enforce --off`, and for the profile being removed. None of those verbs
+    /// has to know the browser's policy file exists.
+    ///
+    /// Asked even of a user with no session, for a weaker version of the reason
+    /// `logouts` is: the block belongs to the day and not to whether anybody is
+    /// at the keyboard, and a browser opened by somebody else on this machine is
+    /// reading the same one file -- docs/design.md §11.
+    QVector<Decision> blocks;
     /// Whether the name really is in the file, after the cycle reconciled it.
     /// The session is only ended once this is true -- the lock goes on the door
     /// before anybody is put outside it.
@@ -198,6 +223,15 @@ struct Cycle {
     /// but it is the one thing about it worth saying out loud.
     QStringList blocked;
     QString blockedError;
+    /// The domains in the browser's `URLBlocklist` because a budget ran out,
+    /// after this cycle reconciled the policy file, and a sentence when the file
+    /// could not be written or the run was not allowed to touch it.
+    ///
+    /// The sites only. What the profiles' own web rules put in that file is
+    /// `chromiumPolicyFor`'s business and does not change from one cycle to the
+    /// next; what is worth reporting here is the part that is about today.
+    QStringList blockedSites;
+    QString blockedSitesError;
     /// The one look at the seat and the screens this cycle took, shared by every
     /// user in it. One machine, one seat, one set of monitors: asking per profile
     /// would be paying per profile for an answer that does not vary by profile.
@@ -246,6 +280,13 @@ private:
     void closeScope(const Profile &profile, Watched *watched, const Decision &decision,
                     const AppScope &scope, const QDateTime &now);
     void reconcileBlocked(Cycle *cycle);
+    /// The browser's managed policy, made to say what the profiles say **and**
+    /// what today says -- docs/design.md §11 and §5.2 joined.
+    ///
+    /// The same shape as `reconcileBlocked`, and it is the same shape on
+    /// purpose: the content of the file is the answer and never a change to it,
+    /// so no verb has to remember to take a site back out.
+    void reconcileWebPolicy(const QVector<Profile> &profiles, Cycle *cycle);
     void endSessions(Cycle *cycle);
     bool worthSaying(const Watched &watched);
 

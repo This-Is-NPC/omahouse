@@ -4,6 +4,7 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonObject>
 
 #include <cerrno>
@@ -41,6 +42,20 @@ bool chromiumPolicyIsAlready(const QString &path, const ChromiumPolicy &policy)
     if (missing)
         return !policy.needed();
     return root == policy.toJson();
+}
+
+QStringList chromiumPolicyBlocklist(const QString &path)
+{
+    QJsonObject root;
+    bool missing = false;
+    if (!readJsonObject(path, &root, nullptr, &missing) || missing)
+        return {};
+    QStringList blocked;
+    for (const QJsonValue &value : root.value(QStringLiteral("URLBlocklist")).toArray()) {
+        if (value.isString())
+            blocked.append(value.toString());
+    }
+    return blocked;
 }
 
 } // namespace omahouse

@@ -63,16 +63,37 @@ denylist.
 exhaustion.
 
 ```
-Budget { id, match, dailyMinutes, onExhausted }
+Budget { id, match, kind, dailyMinutes, onExhausted }
 
-  onExhausted:  close    closes the processes matching the selector
-                logout   ends the user's session
-                warn     says something, and records it
+  kind:         app      the selector is an app's scope identity (§5)
+                site     the selector is a site's registrable domain (§5.2)
+
+  onExhausted:  close    closes the processes matching the selector   (app)
+                logout   ends the user's session                      (app)
+                block    stops the site opening, until the day turns  (site)
+                warn     says something, and records it               (either)
 ```
 
 The generalisation that makes three nouns enough: **the session is the budget
 whose selector is `*`**. There is no separate concept of user time and app time.
 In the code there is no special case for the session.
+
+`kind` is the one field a site budget added, and it is here rather than in a
+second list because the ambiguity is real: `org.freedesktop.Platform` is a scope
+id with dots in it and `youtube.com` is a domain with dots in it, and there is no
+shape that tells them apart. The web *rules* of §11 get away without it by living
+in their own list; `budgets` is one list, and a budget that guessed which
+namespace it was in would eventually guess wrong about somebody's flatpak.
+
+Everything else about a site budget is the machinery an app budget already had,
+unbranched: the daily minutes, the grants, the `warnAt` marks, the `grace`
+window, the notification, and the ledger remembering what has already been said.
+What differs is the two ends — which observation spends it, and what happens when
+it runs out — and both of those are one branch on `kind` in `evaluate`, put there
+because `*` is a legitimate site selector and a shared loop would have a limit on
+browsing closing every app on the machine. An `onExhausted` that cannot happen to
+that kind is refused where the file is read, and not repaired into something that
+would run.
 
 ### `logout` is two things
 
@@ -265,14 +286,17 @@ dark does not change it. Presence appears in `status`, in the journal line, and
 in the day's ledger beside the budgets. What uses it is §5.2, the time per site,
 which is the one number in this program that a dark screen does change.
 
-### 5.2 Time per site, which is measured and does not act
+### 5.2 Time per site, and the budget on it
 
 `proposal-browser.md` proposed a Chromium extension that reports the site in
 the front tab, and `.temp/spike-extension.md` measured its whole chain on real
-Omarchy. This is what shipped of it, and it is the **observing stage** — exactly
-what `enforce: false` is for the apps. It counts and it shows the number. There
-is no site budget, no warning and no block, and there will not be one until
-somebody has looked at a week of the number and decided it is worth having.
+Omarchy. This is what shipped of it. It counts the number, and — since §5.3 — a
+number that runs out acts.
+
+The counting came first and on its own, which was the observing stage `enforce:
+false` is for the apps: a week of the number before anybody decided it was worth
+teeth. §5.3 is the teeth, and it added one field to §2's `Budget` and one variant
+to the decision, and nothing else.
 
 Three parts, and the split is the point: **the extension is an eye, the engine is
 the brain.**
@@ -340,6 +364,58 @@ inside it; `TIME PER SITE` in `status`, with what is in front right now and
 whether it is being counted; `TIME PER SITE` in `report`, and `TOTAL PER SITE`
 over a range. Written only when there is something to say, so a machine with no
 extension on it writes exactly the file it always wrote.
+
+A site that also has a budget appears twice, and the two rows are two different
+things: `sites` is every domain that was ever in front, budget or no budget, and
+`budgets` is what a limit has been spent. They cannot disagree, because one
+function writes both in the same statement.
+
+### 5.3 A budget on a site, which acts
+
+The step §5.2 was the observing stage for. A site budget is §2's `Budget` with
+`kind: "site"` on it, and the whole of what that changes is the two ends.
+
+**What spends it** is `siteInFront`, the one thing `evaluate` is told about the
+browser: a registrable domain, or nothing. The crossing of §5.2 happens in `sys`,
+where a screen is a thing that exists, and what goes across the line into the
+pure half is a name and never a state — so there is no budget anywhere that can
+be spent by a screen being on. A tab left on YouTube overnight spends nothing,
+which is the same sentence §5.2 already made true about the number and is now
+also true about the limit.
+
+**What happens when it runs out** is a fourth decision, `Block`, and it is its
+own kind rather than a `Close` with a domain in it because a site is not a
+cgroup. The domain goes into the `URLBlocklist` the web half of §11 already knows
+how to write, composed with whatever the profiles' own web rules say — and the
+clock has the last word in that composition: a profile that allows a site is
+allowing it in general and not for the thirty-first minute, so a site that has
+run out is blocked and is never also allowlisted.
+
+**It comes back on its own, and that is the half worth having.** Nothing
+remembers a blocked site. Every cycle works out from today's ledger which sites
+are out of time right now — the same zero-tick question `blocked` is re-derived
+by in §2 — and makes the policy file say exactly that. So the turn of the local
+date lets the site open again, and so does a `grant`, and so does
+`profile enforce --off`, and so does removing the profile, with none of those
+verbs knowing the browser's policy file exists. The file is **removed** and not
+emptied when nothing is out of time, for §11's reason: an empty managed policy
+left behind is a machine that still looks managed.
+
+**The warning, the marks and the grace come from the app half unchanged.**
+`warnAt`, `grace`, the notification of §6 and the ledger's memory of what has
+already been said are the same code paths; only the verb in the sentence differs,
+because a site stops opening rather than closing. That sentence is the only place
+anybody finds out *why*: §11 already says Chromium's block page names nobody and
+explains nothing, and omahouse never learns the attempt happened.
+
+**Two guards, and both are about `*`.** A site budget matching `*` is a limit on
+browsing at all, which is a coherent thing to ask for — and `*` is also the
+session budget's selector. So the debit is a branch on `kind` and not a shared
+loop with a filter, and so is the action: without the first, a limit on browsing
+would be spent by every app scope on the machine; without the second, it would
+close every one of them when it ran out.
+
+`omahouse limit <user> --site youtube.com=30m`, beside the `--budget` it mirrors.
 
 ### The signing key
 
@@ -543,12 +619,18 @@ proved in microseconds with no browser, no root and no disk.
 
 **Blocking is all this file does.** The managed policy blocks and unblocks sites
 and switches incognito off, and nothing else — it never learns that an attempt
-happened. Time *per site* is a separate mechanism with no file in common with
-this one: §5.2, an extension that reports and a daemon that counts, with no
-budget attached to what it counts. Neither half knows about the other, and that
-is deliberate — the day this grows a site budget it will be one `Rule` and one
-`Budget`, and until then the counting is allowed to be honest about a site the
-policy does not block.
+happened. Time *per site* is measured by a separate mechanism with no file in
+common with this one: §5.2, an extension that reports and a daemon that counts.
+
+The two meet in exactly one place, and it is the composition. Since §5.3 a site
+budget that runs out puts its domain in this file for the rest of the day, and
+what `chromiumPolicyFor` is handed is the profiles **and** the list of domains
+that are out of time right now. That list is not a rule and is never written into
+a profile: it is today, worked out afresh every cycle from the ledger, and it
+stops being true at midnight. Where the two disagree the clock wins — a site
+somebody has spent their thirty minutes on is blocked even where a rule allows
+it, and it is never also allowlisted, because Chromium gives the allowlist the
+tie and that would turn the block into its opposite.
 
 ### The policy is per machine, and that was decided
 
@@ -601,7 +683,8 @@ than one that never existed: there is no longer anything on the machine that
 knows how to lift it. So there are two ways back and both of them are complete.
 
 **Without uninstalling.** Taking the last block back — or removing the last
-profile that had web rules — **removes** the file rather than emptying it. An
+profile that had web rules, or the turn of the day on the last site budget that
+had run out — **removes** the file rather than emptying it. An
 empty managed policy left behind is a machine that still looks managed, and
 `chrome://policy` would go on saying "managed by your organisation" over a
 document that says nothing. Nothing has to remember to do this: every verb that
@@ -640,7 +723,7 @@ is a door with no lock on it.
 
 ## Measured, and what it cost
 
-Five rounds. Each one changed the design, or confirmed one against a machine,
+Seven rounds. Each one changed the design, or confirmed one against a machine,
 and each is cited by name from the comments in `vm/`.
 
 ### Round 1 — one session, twelve seconds, no root
@@ -779,6 +862,50 @@ incognito window nor a second browser profile. The keepalive over minutes of
 silence was measured by the spike and not again here: the quick regime's windows
 are seconds, which is what `mise run test:vm:long` exists for.
 
+### Round 6 — the same run, driven by the harness rather than by hand
+
+Round 5's comparison was hand-driven, and a measurement that only exists as prose
+is what the old `testing.md` was. So the case was run: `vm/e2e.py --machine
+omarchy --case sites`, quick pace, on the same machine. Every claim it makes held
+the first time it was asked automatically — the `.crx` installed under policy, the
+service worker opened the port, Chromium spawned `omahouse meter` as julia, three
+sites came back as three rows within a tick of the wall clock, and the dark
+window billed nothing.
+
+**Cost: none to the model, and one bug in the case's own bookkeeping.** The lit
+window after the screen came back was opened *before* the dispatch that turned it
+on, so two ssh round trips and a poll of dark screen were counted as seconds the
+site should have been billed for — and the shortfall read as the daemon losing
+time. It is the failure a hand run cannot have, because a hand cannot be two
+round trips early, and it is the reason the harness matters: an automated case
+has clocks of its own, and they are the first thing to doubt.
+
+### Round 7 — the teeth on the time per site
+
+`omahouse-omarchy`, quick pace, `vm/e2e.py --case a_site_budget`. A one minute
+budget on `example.com` with fifty seconds already spent, a real Chromium
+browsing until it ran out, and then a `grant`.
+
+| | |
+|---|---|
+| the domain reached `URLBlocklist` | 12s after the daemon started counting |
+| the warning | `grace: Time is up — example.com stops opening in 3 seconds.`, delivered |
+| Chromium stopped opening it | 10s after the policy file changed |
+| the `grant`, and the file taken off the machine | on the next cycle |
+| Chromium opened it again | 9s after that |
+| the app budgets over the whole of it | `chromium: 36, session: 36` — untouched |
+
+The window title is what proved the block, and it is the only thing on that
+machine that could: §11 means the browser blocks and reports nothing out, so
+omahouse never learns the attempt happened and cannot be asked. `Example Domain —
+Chromium` before, `example.com — Chromium` while it was shut.
+
+**Cost: none to the model.** What the round did name is the one number a quick
+regime cannot promise anything about: Chromium picks a changed managed policy up
+through its own file watcher, and the ten seconds above are that watcher and not
+omahouse. Both browser-side assertions are waits with the regime's patience on
+them, and the seconds they really took are printed on every run.
+
 ---
 
 ## Tests and the gate
@@ -856,6 +983,7 @@ three so that the cost of a run can be read off one file.
 | the allowlist held | 20s | 3 minutes |
 | the login refused for | 12s | 60s |
 | a site in the browser | 10s each | 45s each |
+| a site's budget | 10s, `grace` 3s | 45s, `grace` 20s |
 | the screen going dark | by an explicit `dpms` dispatch | by the real idle cycle, 7 minutes of it |
 
 **Which to run when.** Quick after every change, and it is what the default
@@ -887,9 +1015,19 @@ mise run test:vm:browser    # vm/run.sh --machine omarchy
 ```
 
 `omahouse-poc` has no browser, no greeter and a `vkms` framebuffer nothing can
-photograph. The meter of §5.2 needs all three of the opposite, so its case runs
+photograph. The meter of §5.2 needs all three of the opposite, so its cases run
 on `omahouse-omarchy` — real Omarchy, SDDM, a `bochs` framebuffer, and a real
-Chromium.
+Chromium. There are two of them: `sites_are_counted_only_with_somebody_there`
+proves the number against what was on the screen, and
+`a_site_budget_that_runs_out_stops_the_site` proves §5.3's teeth against what the
+browser then refused to open.
+
+**The binary is the one thing a run there does not put back.** It is the artefact
+under test and every run installs the build from the working tree over whatever
+was on the machine, exactly as the disposable machine's `deploy` does. What a run
+must not do is replace it in silence, so the version and the hash of what was
+found and of what is left are both printed — that silence is how the machine came
+to be carrying an unpackaged build nothing on it could name.
 
 **That machine is not disposable**, and the harness knows it. `reset()` refuses
 to run there at all, because it empties `/etc/omahouse` and `/var/lib/omahouse`
@@ -928,12 +1066,5 @@ a structural change when the time comes.
   through `nft meta skuid`. It is a **proposal**: none of it is built. What *is*
   built is §11, which blocks sites through the browser's own managed policy
   instead, and pays for it by being per machine rather than per account.
-- **A budget on a site.** §5.2 counts time per site and §11 blocks sites, and
-  nothing joins them: there is no site limit, no warning and no block on a
-  number running out. That is the observing stage on purpose, and it is where
-  `enforce: false` was for the apps. Joining them is one `Rule` with a domain
-  selector and one `Budget`, which is the work
-  [`proposal-network.md`](proposal-network.md) §8.1 to §8.3 already costed —
-  and it is not done until somebody has read a week of the number.
 - **Several machines on a network.** The model carries it; v1 is one machine.
 - **Credit that crosses days**, a time bank, time bought with a chore.

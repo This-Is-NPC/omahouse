@@ -3,6 +3,7 @@
 #include "WebPolicy.h"
 
 #include <QString>
+#include <QStringList>
 
 namespace omahouse {
 
@@ -57,5 +58,20 @@ bool removeChromiumPolicy(const QString &path, QString *error);
 /// something unexpected in it is to make it say what the profiles say, not to
 /// leave it alone and let the machine disagree with `omahouse status`.
 bool chromiumPolicyIsAlready(const QString &path, const ChromiumPolicy &policy);
+
+/// What `URLBlocklist` in the file says right now, or nothing.
+///
+/// Read rather than remembered, and that is the point of having it. A site
+/// blocked because a budget ran out is worked out from today's ledger every
+/// cycle, so nothing anywhere holds the list -- and the one thing left that
+/// wants to know what it *was* is the journal, which has to say `youtube.com
+/// opens again` exactly once. Asking the file makes `omahouse watch --once`, a
+/// daemon that has been up all day and a daemon restarted a second ago all say
+/// the same thing, which a counter in memory could not.
+///
+/// A file that is not there, or will not parse, is an empty list: both are a
+/// machine with nothing blocked as far as anybody can tell, and that is the
+/// answer the caller wants.
+QStringList chromiumPolicyBlocklist(const QString &path);
 
 } // namespace omahouse

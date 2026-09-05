@@ -84,6 +84,28 @@ struct ChromiumPolicy {
 /// A profile with `enabled: false` is not consulted. Switching a profile off has
 /// to switch off what it does to the machine, or "disabled" would be a word for
 /// something still in force.
-ChromiumPolicy chromiumPolicyFor(const QVector<Profile> &profiles);
+///
+/// **`outOfTime` is the sites a budget has run out on right now**, and it is a
+/// parameter rather than something read out of the profiles because it is not a
+/// rule -- it is today, and it stops being true tomorrow. Every one of them is
+/// blocked and none of them may end up in the allowlist, whatever any profile's
+/// rules say about it: a site somebody has spent their thirty minutes on is
+/// blocked *because* of the thirty minutes, and a profile that allows it is
+/// allowing it in general and not for the thirty-first.
+///
+/// Nothing here remembers them, and nothing has to remove them. The caller works
+/// the list out afresh from today's ledger every time -- which is the same
+/// discipline `/etc/omahouse/blocked` keeps in docs/design.md §2 -- so the turn
+/// of the day empties it, a grant empties it, `enforce --off` empties it, and
+/// removing the profile empties it, with no verb having to know this file
+/// exists.
+///
+/// A machine where the only thing to say is that something ran out still needs a
+/// file: `needed()` is true for an `outOfTime` on its own, and the file goes
+/// away again the moment nothing is out of time. That is what makes a site limit
+/// on a machine with no web rules at all still work, and still leave nothing
+/// behind at midnight.
+ChromiumPolicy chromiumPolicyFor(const QVector<Profile> &profiles,
+                                 const QStringList &outOfTime = {});
 
 } // namespace omahouse

@@ -80,6 +80,26 @@ QString whyNotCloseable(const QString &cgroupRoot, const QString &appSlicePath,
 /// what it would have ended, and ends nothing.
 QString whyNotBlockable(const QString &configDir);
 
+/// Why the browser's managed policy must not be written, or an empty string.
+///
+/// The third refusal of the same family, after the cgroup root and the
+/// configuration root, and docs/design.md §11 calls it the one with the shortest
+/// fuse: the end to end suite runs on the developer's laptop with the
+/// developer's Chromium open, and a bug here is somebody's browser taken away in
+/// the middle of an afternoon.
+///
+/// One question, and it is the same shape as `whyNotBlockable`'s: the machine's
+/// own `/etc/chromium/policies/managed` is written only by a run that is also
+/// managing the machine's own `/etc/omahouse`. A run pointed at a tree of its
+/// own writes its policy where it was pointed and says nothing.
+///
+/// Here rather than in the CLI because there are two callers now. `saveProfiles`
+/// reconciles the policy whenever a rule changes, and `watch` reconciles it
+/// every cycle for the sites that have run out today -- and a permission that
+/// existed in one of them and not the other would be exactly the hole this is
+/// for.
+QString whyNotWriteTheBrowserPolicy();
+
 // -- doing it -----------------------------------------------------------------
 
 /// The programs, and the doors that let a suite prove the command without the
