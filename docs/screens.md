@@ -44,10 +44,15 @@ omahouse allow nobody code --limit 45m
 omahouse allow nobody firefox --limit 1h
 omahouse allow nobody gtk-launch              # released with no clock of its own
 omahouse deny nobody steam
+omahouse web block nobody tiktok.com          # a site that does not open at all
+omahouse limit nobody --site youtube.com=30m  # a site with a clock on it
+omahouse web incognito nobody --deny
 ```
 
 with a day already partly spent (`1h10m` of the session, `25m` of Code, all of
-Firefox's hour), one grant of `10m` handed over at 09:12, and a session made of
+Firefox's hour, `25m` of YouTube's half hour), one grant of `10m` handed over at
+09:12, `8m` counted against `wikipedia.org` which has no rule and no clock at
+all, a presence of `1h10m using` and `40m screen-off`, and a session made of
 four cgroups: Code with two processes, a `gtk-launch` scope with three processes
 that are all really VS Code, a `tmux-spawn` scope nothing can name, and the
 compositor's own unit with seven.
@@ -101,6 +106,58 @@ then a budget per program, then the day's log newest first: a denial in the
 urgent colour, a budget running out, a warning that was delivered, and the grant
 in the accent colour. The whole thing is one list, so `j` and `k` walk it.
 
+A site budget is a budget and is on this list too — `youtube.com`, with *stops
+opening when it runs out*, which is the fourth thing running out can do
+([`design.md`](design.md) §5.3). What changes it is `m` here as well as on the
+sites view, and the verb underneath is `limit --site` rather than
+`limit --budget`: the CLI refuses the wrong one for a domain rather than
+guessing, so the window has to carry which namespace an id is in and never infer
+it from the shape of the string.
+
+### `4` · the sites
+
+What opens in a browser on this machine, and the minutes spent on each.
+`4`, or the **sites** chip.
+
+![The sites view: a line reading "Minutes here are counted only while somebody is in front of the screen. Today: 40m screen-off, 1h10m using.", under it the reach of a browser policy, then three rows — tiktok.com "does not open" in red with "blocked here, and so are its subdomains"; youtube.com "stops opening when the time is up" and "5m left of 30m" over a bar; wikipedia.org "no rule and no clock — the minutes are counted and nothing else" and "8m today". The chip bar reads open, back, block a site, let it open, minutes, more today, only listed, incognito on.](img/15-operator-sites.png)
+
+A view of its own rather than rows folded into `2`, and the reason is the same
+one the CLI gives for having `web block` beside `deny`: taking a program off
+somebody's list and changing what every browser on the machine will open are
+different enough acts that they should not be one word — and here they cannot be
+one list either, because not one command on the row is the same. `x` on a
+program writes `omahouse deny`; the nearest thing on a site is `omahouse web
+allow`, which is not a removal at all.
+
+Three rows and three different things: a site named and blocked, a site with a
+clock on it and five minutes left, and a site with no rule and no clock that the
+day counted minutes against anyway. The third is why this view is worth opening
+on a profile with no web rules at all — it is the afternoon's browsing, which
+had no screen in this window before.
+
+Two lines sit above the list and are about the whole view rather than any row, so
+`j` cannot walk past them and `/` cannot filter them away:
+
+**Presence, where it explains something.** An app is billed for running, screen
+or no screen — [`design.md`](design.md) §5.1 decided that and this window must
+not imply otherwise — but a site is billed only where the browser and the screen
+agree. So `25m` on YouTube in an afternoon somebody remembers as longer is
+answered on the line above it, by the `40m screen-off`. It is read out of the
+day's ledger and never measured here: the live answer is a `loginctl` and a walk
+of `/sys/class/drm` twice a second in a program that is only looking.
+
+**The reach, once.** The browser policy is one file for the whole machine, the
+operator's own account included. `omahouse web` says this when it writes and
+`omahouse status` says it when it prints; this is the window's one place, out of
+the same function in `src/core/WebPolicy.h`, so the three cannot come to say it
+differently. The sheets that open over this view deliberately do not repeat it —
+§11 records that the trade-off was weighed and taken, and a tool that re-argues a
+settled decision every time it is used is a tool people stop reading.
+
+The status bar carries the two facts that are about the profile and not about a
+row: whether only the listed sites open, and what was said about incognito —
+which is a three-state, because *nothing said* is not the same as *allowed*.
+
 ### `?` · the keys
 
 Every key this window answers, on the window. Any key closes it.
@@ -120,6 +177,16 @@ the **commands** chip.
 Only what is usable is listed: a menu of things that would refuse is a menu you
 stop reading.
 
+The same palette over the sites view is where the six site commands are read by
+name, which is the visible half of the promise that nothing arrived on only one
+of the two doors:
+
+![The command palette over the sites view: back to the people (h), stop a site opening (b), let this site open again (o), minutes a day on this site (m), let only the listed sites open (d), let incognito windows open (i).](img/16-operator-site-commands.png)
+
+**more time today** is missing from that list and that is the point of listing
+only what is usable: the cursor is on `tiktok.com`, which has no clock, and there
+is nothing to hand more of.
+
 ### `/` · the filter
 
 Narrows the list. `/`, or the **filter** chip; `Enter` keeps it, `Esc` clears it.
@@ -128,7 +195,7 @@ Narrows the list. `/`, or the **filter** chip; `Enter` keeps it, `Esc` clears it
 
 Worth knowing before reading this picture: the needle is `o`, and it has to be
 something that also matches the profile's own name. One filter is applied to all
-three lists at once, so a needle that misses the person on the people list
+four lists at once, so a needle that misses the person on the people list
 empties the people list — and then the programs view has nobody to be about and
 draws *nobody is under rules yet* over a household that is right there. The key
 sheet says `/ filter this list`. This is not yet that — it is §6.7 of the
@@ -186,13 +253,35 @@ ledger, expires with it, and adds to the limit rather than replacing it.
 Nothing else asks. A confirmation on an action that is its own undo is a
 keystroke charged for nothing.
 
+**Which site to block** — `b` on the sites view, or the **block a site** chip.
+
+![The "Which site should stop opening?" dialogue: "The site's name on its own, like youtube.com — not a whole address. A bare domain covers its subdomains too.", an empty field, and "Enter ok" greyed out.](img/17-operator-block-site.png)
+
+A domain and not an address, and the refusal for a whole URL is the CLI's own:
+Chromium's filter format would accept most of them and mean something slightly
+different by each, and an operator who typed an address and got a rule about its
+host would not find out until the day it did not fire. The field opens empty here
+because the row under the cursor is already blocked; on a row that is not, it
+opens with that row's domain in it.
+
+**Minutes a day on a site** — `m` on the sites view, or on a site budget in
+`3`.
+
+![The "Minutes a day on youtube.com" dialogue, pre-filled with 30m selected: "30m, 1h. Counted only while somebody is in front of the screen, and the site stops opening once it is spent — until the turn of the day, or until more time is handed over."](img/18-operator-site-minutes.png)
+
+Two things are said here that are not said about a program: the minutes are
+crossed with presence, and what running out does is stop the site opening rather
+than close anything. Both come back on their own — nothing remembers a blocked
+site, and the turn of the day, a grant and `enforce --off` each let it through
+again with no verb having to know the browser's policy file exists.
+
 ### When it is not the happy path
 
 **A refusal.** `n`, then an account that is in `wheel`. The CLI refuses — it is
 the program's one hard refusal — and the window says so on the status bar, in
 the urgent colour, rather than doing nothing.
 
-![The people view with the status bar reading, in red, "Take the account out of wheel first, or write the profile for somebody else."](img/15-operator-refusal.png)
+![The people view with the status bar reading, in red, "Take the account out of wheel first, or write the profile for somebody else."](img/19-operator-refusal.png)
 
 Only the last line of what the CLI printed reaches the bar. The sentence that
 says *what* was refused and why — `profile add: root is root, and an
@@ -202,23 +291,46 @@ the guide.
 
 **Nobody under rules yet.** A machine where the program has just been installed.
 
-![The people view empty: "nobody is under rules yet — press n, or click the chip". Only the "new profile" chip is lit.](img/16-operator-people-empty.png)
+![The people view empty: "nobody is under rules yet — press n, or click the chip". Only the "new profile" chip is lit.](img/20-operator-people-empty.png)
 
 **A profile with no programs named.** `2` on an account that has just been
 created.
 
-![The programs view empty: "no program has been named yet — press a, or click the chip", and the status bar says "everything runs but the listed".](img/17-operator-programs-empty.png)
+![The programs view empty: "no program has been named yet — press a, or click the chip", and the status bar says "everything runs but the listed".](img/21-operator-programs-empty.png)
 
 **A profile with no clock.** `3` on the same account.
 
-![The today view empty: "no clock has been set yet — press s for the day's total".](img/18-operator-today-empty.png)
+![The today view empty: "no clock has been set yet — press s for the day's total".](img/22-operator-today-empty.png)
 
-Three different sentences and not one, each naming the key that would fix it.
+**A profile with nothing said about sites.** `4` on the same account.
+
+![The sites view empty: "no site has been named yet — press b, or click the chip", the presence line reading "Nothing has been measured today", the reach still on the view, and the status bar saying "every site opens except the blocked ones · nothing said about incognito".](img/23-operator-sites-empty.png)
+
+Four different sentences and not one, each naming the key that would fix it. The
+two lines above the list stay on the empty sites view on purpose: somebody about
+to block their first site should read what a browser policy reaches *before*
+pressing `b`, not after.
 
 ### What has no screen
 
-Two things belong on this list by their absence, because somebody looking for
+Four things belong on this list by their absence, because somebody looking for
 them here should find out that there is nothing to find.
+
+**How many times a blocked site was tried.** There is no such number and there
+cannot be one. A managed policy blocks inside Chromium and reports nothing out —
+[`design.md`](design.md) §11 says so plainly — so omahouse never learns the
+attempt happened at all. A row reading *tried 4 times* would be the window making
+one up, and the same absence is why a blocked site has no message from the
+operator on it either: the browser's own page names nobody and explains nothing.
+
+**Which site is in the front tab right now.** `omahouse status` prints this and
+says whether it is being counted; the window does not. The browser's host writes
+it to `/run/user/<uid>/omahouse/focus`, 0600 in the fiscalised account's own
+runtime directory, and the studio is neither that account nor root. So the sites
+view says what the day counted and no row says *open now*, where a program row
+does — and the today view never marks a site budget *running now* either, because
+answering that from the app scopes would be a name that matched by coincidence
+rather than a browser.
 
 **polkit.** Every write this window makes goes out as `pkexec omahouse`, and on a
 real machine that raises a password dialogue and can come back with *cancelled at
@@ -247,38 +359,50 @@ in step.
 
 ### `1` · the people
 
-![The people view on the subject face: header "nobody · subject · under rules", chip bar cut to "open" and "back", and the same Kid row with "1h left of 2h10m".](img/19-subject-people.png)
+![The people view on the subject face: header "nobody · subject · under rules", chip bar cut to "open" and "back", and the same Kid row with "1h left of 2h10m".](img/24-subject-people.png)
 
 One row, their own. The rest of the household is not shown here — the file is
 world readable, but a window is not a reason to publish it.
 
 ### `2` · the programs
 
-![The programs view on the subject face: the same four rows, and the chip bar is "open" (dim) and "back".](img/20-subject-programs.png)
+![The programs view on the subject face: the same four rows, and the chip bar is "open" (dim) and "back".](img/25-subject-programs.png)
 
 The same information, including the red shim warning. What is missing is every
 way to change it.
 
 ### `3` · today
 
-![The today view on the subject face: the whole day, the two program budgets, and the day's log.](img/21-subject-today.png)
+![The today view on the subject face: the whole day, the three program budgets, the site budget, and the day's log.](img/26-subject-today.png)
 
 This is the screen [`design.md`](design.md) §8 is about: the fiscalised account
 is shown what is left, and the decisions are somebody else's.
 
+### `4` · the sites
+
+![The sites view on the subject face: the presence line, the reach, and the same three rows — tiktok.com does not open, youtube.com with 5m left of 30m, wikipedia.org with 8m today.](img/27-subject-sites.png)
+
+The same rows and the same two lines above them, which is deliberate on this
+face more than on the other one. This is the screen that answers *why will this
+site not open* and *where did the half hour go*, and both answers are on it: the
+rule, the clock, and the `40m screen-off` that explains why the number is smaller
+than the afternoon felt. The reach is here too, because a site somebody else
+blocked is blocked in this account's browser as well as in theirs, and being
+overruled without being told is the one thing that would make the rule dishonest.
+
 ### `?` · the keys
 
-![The key sheet on the subject face: move, go and window, and no "here, right now" group at all.](img/22-subject-keys.png)
+![The key sheet on the subject face: move, go and window, and no "here, right now" group at all.](img/28-subject-keys.png)
 
 Three groups instead of four. There is no fourth because there is nothing in it.
 
 ### `:` · the commands
 
-![The command palette on the subject face with exactly one line: "open this profile", key l.](img/23-subject-commands.png)
+![The command palette on the subject face with exactly one line: "open this profile", key l.](img/29-subject-commands.png)
 
 ### Nobody has put this account under rules
 
-![The people view on the subject face with no profile: "nobody has put this account under rules", header "nobody · subject · not under rules".](img/24-subject-nothing.png)
+![The people view on the subject face with no profile: "nobody has put this account under rules", header "nobody · subject · not under rules".](img/30-subject-nothing.png)
 
 A different sentence from the operator's empty list, because it is a different
 fact and there is nothing this reader could press about it.

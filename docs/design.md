@@ -533,9 +533,20 @@ the journal.
 
 One Qt Quick window, two faces, chosen by whoever opened it. Whoever is in
 `wheel` gets the operator's: the people under rules, the programs released to
-each of them, the day's balance live, and the chips to change all three.
-Everybody else gets the subject's, which is the same window with nothing to
-press.
+each of them, the day's balance live, the sites that open and the minutes on
+them, and the chips to change all four. Everybody else gets the subject's, which
+is the same window with nothing to press.
+
+**The sites are a view of their own and not rows inside the programs.** The same
+call §11 makes on the command line, for the same reason: taking a program off
+somebody's list and changing what every browser on the machine will open are
+different enough acts that they should not be one word — and they cannot be one
+list either, because not one command on the row is shared. `x` on a program
+writes `deny`; the nearest thing on a site is `web allow`, which is not a
+removal. What that view carries above its list is the two things that are about
+the whole view and never about a row: the day's presence of §5.1, because a site
+is counted only where the browser and the screen agree and that is why the number
+can be smaller than the afternoon felt; and the reach of §11, once.
 
 **It is not a generic rule editor.** The engine is generic; the interface talks
 about programs and minutes, which is how people think. `default: deny` with a
@@ -670,8 +681,12 @@ the way round it — the child on Chromium, the operator on Brave — and §3.4 
 heavier one, a `bwrap` bind mount per session, which is refused there for the
 same reason §5 refuses eBPF. Neither is built. What is built says the truth once:
 `omahouse web` prints it when it writes, `omahouse status` prints it under
-`SITES`, and neither says it twice. A tool that re-argues a settled decision
-every time it is used is a tool people stop reading.
+`SITES`, the studio prints it on its sites view, and none of the three says it
+twice. All three read it out of `webPolicyReach` in `src/core/WebPolicy.h`,
+which is where the sentence lives now that there are two front ends that owe
+it — a second copy in the window is exactly how the two would come to say it
+differently. A tool that re-argues a settled decision every time it is used is a
+tool people stop reading.
 
 ### Profiles that disagree compose to the most restrictive
 

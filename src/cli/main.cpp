@@ -621,23 +621,16 @@ void printSites(const QString &user, const QString &now, bool counted, bool coul
 
 // -- the sites ---------------------------------------------------------------
 
-/// The reach of a browser policy, in three lines, written once.
+/// The reach of a browser policy, in three lines, written once — and the once is
+/// `webPolicyReach` in `src/core/WebPolicy.h`.
 ///
-/// Every place that owes this sentence prints these lines and does not compose
-/// its own, so the CLI cannot come to say it two different ways. It is said once
-/// per run and never per rule: docs/design.md §11 records that the trade-off was
-/// weighed and taken, and a tool that re-argues a settled decision every time it
-/// is used is a tool people stop reading.
+/// It moved there when the studio grew a sites view, because there are now two
+/// front ends that owe the sentence and a second copy is exactly how the two
+/// would come to say it differently. This name stays as the short one the verbs
+/// below read with.
 QStringList theReach()
 {
-    return {
-        QStringLiteral("the browser policy is one file for the whole machine. A site blocked "
-                       "here is"),
-        QStringLiteral("blocked for everyone who opens Chromium on it, including you. Chromium "
-                       "has no"),
-        QStringLiteral("per-account policy on Linux (docs/proposal-browser.md §3.1), and that "
-                       "was accepted."),
-    };
+    return webPolicyReach();
 }
 
 /// The web half of one profile, in the shape the app half is printed in.

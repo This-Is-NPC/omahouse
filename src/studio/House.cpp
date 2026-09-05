@@ -5,13 +5,18 @@
 #include "Duration.h"
 #include "Ledger.h"
 #include "Paths.h"
+#include "Policy.h"
+#include "Presence.h"
 #include "Proc.h"
 #include "Profile.h"
 #include "Users.h"
+#include "WebPolicy.h"
 
 #include <QDate>
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QSet>
 
 #include <algorithm>
@@ -35,6 +40,14 @@ QString spellSeconds(int seconds)
     return durationFromMinutes(seconds / 60);
 }
 
+/// What running out does, in the words the window prints.
+///
+/// `Block` is here rather than falling through to the default, and the day it
+/// was not was a real defect: a site budget drawn on the today view read `only
+/// warns when it runs out` while the browser was in fact refusing to open the
+/// site. A switch over an enumeration whose fourth value lands in the default
+/// arm is a sentence that is wrong in exactly the case somebody is looking it
+/// up for.
 QString spellExhausted(OnExhausted action)
 {
     switch (action) {
@@ -42,6 +55,8 @@ QString spellExhausted(OnExhausted action)
         return QStringLiteral("closes");
     case OnExhausted::Logout:
         return QStringLiteral("ends the session");
+    case OnExhausted::Block:
+        return QStringLiteral("stops opening");
     case OnExhausted::Warn:
         break;
     }
@@ -86,10 +101,17 @@ bool anythingMatching(const QVector<AppScope> &scopes, const QString &selector)
     return false;
 }
 
-const Budget *budgetFor(const Profile &profile, const QString &id)
+/// The budget about `id` in that namespace, or none.
+///
+/// `selects` is not optional and never guessed. `org.freedesktop.Platform` is a
+/// scope id with dots in it and `youtube.com` is a domain with dots in it, and
+/// Profile.h says in so many words that there is no shape that tells them apart
+/// — so a lookup by name alone would eventually hand the programs view a budget
+/// that is about a site.
+const Budget *budgetFor(const Profile &profile, const QString &id, Selects selects)
 {
     for (const Budget &budget : profile.budgets) {
-        if (budget.match == id)
+        if (budget.match == id && budget.selects == selects)
             return &budget;
     }
     return nullptr;
@@ -169,7 +191,12 @@ QVariantList programsOf(const Profile &profile, const Ledger &ledger,
             ids << rule.match;
     }
     for (const Budget &budget : profile.budgets) {
-        if (budget.match == QLatin1String("*"))
+        // A site budget is not a program, and it used to land here: `youtube.com`
+        // drew a row on the programs view with a verdict taken from the app
+        // rules, an `x` that would have written `omahouse deny <user>
+        // youtube.com`, and no way to tell it from a flatpak with dots in its
+        // name. It belongs on the sites view, which is where `sitesOf` puts it.
+        if (budget.match == QLatin1String("*") || budget.isSite())
             continue;
         if (!ids.contains(budget.match))
             ids << budget.match;
@@ -177,7 +204,7 @@ QVariantList programsOf(const Profile &profile, const Ledger &ledger,
 
     QVariantList rows;
     for (const QString &id : std::as_const(ids)) {
-        const Budget *budget = budgetFor(profile, id);
+        const Budget *budget = budgetFor(profile, id, Selects::App);
         const Live live = liveFor(scopes, id);
 
         QVariantMap row = budget ? clockOf(*budget, ledger, live.pids > 0)
@@ -219,11 +246,22 @@ QVariantList todayOf(const Profile &profile, const Ledger &ledger,
     QVariantList rows;
     for (const Budget &budget : std::as_const(ordered)) {
         const bool session = budget.match == QLatin1String("*");
-        QVariantMap row = clockOf(budget, ledger, anythingMatching(scopes, budget.match));
+        // A site budget is never `running now`. What would make it so is the
+        // domain in the front tab, and that is `/run/user/<uid>/omahouse/focus`,
+        // 0600 in the fiscalised account's own runtime directory — this window
+        // is neither that account nor root, so it cannot look, and it says
+        // nothing rather than answering from the app scopes, where a name that
+        // happened to match would be a coincidence and not a browser.
+        QVariantMap row = clockOf(budget, ledger,
+                                  !budget.isSite() && anythingMatching(scopes, budget.match));
         row.insert(QStringLiteral("kind"), QStringLiteral("budget"));
         row.insert(QStringLiteral("id"), budget.id);
         row.insert(QStringLiteral("match"), budget.match);
         row.insert(QStringLiteral("session"), session);
+        // Which namespace the id is in, carried on the row because the verb that
+        // changes it differs: `limit --budget` for an app and `limit --site` for
+        // a domain, and the CLI refuses the wrong one rather than guessing.
+        row.insert(QStringLiteral("site"), budget.isSite());
         const QString named = catalogue.value(budget.match).name;
         row.insert(QStringLiteral("name"),
                    session ? QStringLiteral("the whole day")
@@ -276,6 +314,171 @@ QVariantList todayOf(const Profile &profile, const Ledger &ledger,
         rows.append(row);
     }
     return rows;
+}
+
+// -- the sites ---------------------------------------------------------------
+//
+// docs/design.md §11 for the rules, §5.2 for the minutes, §5.3 for the limit
+// that acts. Three things the CLI has done for a while and this window did not
+// know existed, which broke the promise §8 makes and `everyCommandIsBothAKeyAndAChip`
+// proves: an action that lives only in the CLI escapes that proof, because the
+// window never learns there is anything to prove about it.
+//
+// A view of its own, and not rows folded into the programs view. The CLI made
+// the same call for the same reason and says so where `web` is implemented:
+// taking a program off somebody's list and changing what every browser on the
+// machine will open are different enough acts that they should not share a
+// word — and here they cannot share a list either, because every command on the
+// row differs. `x` on a program writes `omahouse deny`; the nearest thing on a
+// site is `omahouse web allow`, which is not a removal at all.
+
+/// Whether the machine's one policy file stops `domain` opening right now.
+///
+/// Asked of the composed policy and never of one profile, because the composed
+/// one is what the browser reads. `*` in the blocklist is `--only-listed` from
+/// somebody, and then the allowlist is the whole of what still opens.
+bool machineBlocks(const ChromiumPolicy &policy, const QString &domain)
+{
+    if (policy.blocklist.contains(domain))
+        return true;
+    if (!policy.blocklist.contains(QStringLiteral("*")))
+        return false;
+    return !policy.allowlist.contains(domain);
+}
+
+/// The sites this profile has anything to say or to count about.
+///
+/// Three sources, in the order somebody reads them: the rules the operator
+/// wrote, in the order they wrote them; the domains a limit was set on; and the
+/// domains today's ledger counted minutes against, longest first. The third is
+/// why this view is worth having even on a profile with no web rules at all —
+/// it is the day's browsing, which until now had no screen in this window.
+///
+/// Nothing here is a guess about what the browser did. A blocked site produces
+/// no event of any kind: policy blocking happens inside Chromium and reports
+/// nothing out, and docs/design.md §11 says so plainly. So there is no `tried 4
+/// times` on any row and there cannot be one.
+QVariantList sitesOf(const Profile &profile, const Ledger &ledger,
+                     const ChromiumPolicy &machine, const QSet<QString> &outOfTime)
+{
+    const QString everything = QStringLiteral("*");
+
+    QStringList domains;
+    const auto mention = [&domains, &everything](const QString &domain) {
+        if (domain.isEmpty() || domain == everything || domains.contains(domain))
+            return;
+        domains << domain;
+    };
+    for (const Rule &rule : profile.web.rules)
+        mention(rule.match);
+    for (const Budget &budget : profile.budgets) {
+        if (budget.isSite())
+            mention(budget.match);
+    }
+    QVector<QPair<int, QString>> counted;
+    for (auto it = ledger.sites.constBegin(); it != ledger.sites.constEnd(); ++it)
+        counted.append({it.value(), it.key()});
+    std::sort(counted.begin(), counted.end(), [](const auto &a, const auto &b) {
+        return a.first != b.first ? a.first > b.first : a.second < b.second;
+    });
+    for (const auto &one : std::as_const(counted))
+        mention(one.second);
+
+    QVariantList rows;
+    for (const QString &domain : std::as_const(domains)) {
+        const Budget *budget = budgetFor(profile, domain, Selects::Site);
+        const int onIt = ledger.siteSecondsFor(domain);
+
+        QVariantMap row = budget ? clockOf(*budget, ledger, false) : noClock(onIt);
+        row.insert(QStringLiteral("kind"), QStringLiteral("site"));
+        row.insert(QStringLiteral("id"), domain);
+        row.insert(QStringLiteral("name"), domain);
+        row.insert(QStringLiteral("budgetId"), budget ? budget->id : QString());
+        row.insert(QStringLiteral("hasBudget"), budget != nullptr);
+        // The minutes in front of that tab today, which exist whether or not
+        // anything limits them: docs/design.md §5.2 counts every domain that was
+        // ever in front, and the observing stage is the point of it.
+        row.insert(QStringLiteral("todaySeconds"), onIt);
+        row.insert(QStringLiteral("today"), onIt > 0 ? spellSeconds(onIt) : QString());
+
+        bool named = false;
+        Verdict wanted = profile.web.defaultVerdict;
+        for (const Rule &rule : profile.web.rules) {
+            if (rule.match == domain) {
+                named = true;
+                wanted = rule.verdict;
+                break;
+            }
+        }
+        const bool spent = outOfTime.contains(domain);
+        const bool blocked = machineBlocks(machine, domain);
+        const bool asked = profile.web.saysAnything() && wanted == Verdict::Deny;
+
+        row.insert(QStringLiteral("named"), named);
+        row.insert(QStringLiteral("asked"), asked);
+        row.insert(QStringLiteral("blocked"), blocked);
+        row.insert(QStringLiteral("outOfTime"), spent);
+        // Blocked, but not by anything on this profile. The composition rule of
+        // WebPolicy.h seen from the row it lands on: the most restrictive wins,
+        // and there is no precedence, so an `open` here can be overruled — and
+        // being overruled silently is the one thing that would make the rule
+        // dishonest.
+        row.insert(QStringLiteral("overruled"), blocked && !asked && !spent);
+        row.insert(QStringLiteral("state"),
+                   blocked ? QStringLiteral("does not open") : QStringLiteral("opens"));
+
+        QString note;
+        if (spent) {
+            note = QStringLiteral("out of time today — it opens again at the turn of the day, "
+                                  "or when more time is handed over");
+        } else if (blocked && !asked) {
+            note = QStringLiteral("another profile blocks it, and the most restrictive of the "
+                                  "two is what the machine does");
+        } else if (budget && budget->hasLimit()) {
+            note = QStringLiteral("%1 when the time is up")
+                       .arg(spellExhausted(budget->onExhausted));
+        } else if (asked) {
+            note = QStringLiteral("blocked here, and so are its subdomains");
+        } else if (named && machine.blocklist.isEmpty()) {
+            // The trap `.temp/spike-extension.md` §7 measured one policy over,
+            // and the sentence `omahouse web allow` prints for it: an allowlist
+            // with nothing blocked beside it is inert.
+            note = QStringLiteral("on the allowed list — which blocks nothing on its own, "
+                                  "because nothing is blocked yet");
+        } else if (named) {
+            note = QStringLiteral("allowed through what is blocked");
+        } else if (onIt > 0) {
+            note = QStringLiteral("no rule and no clock — the minutes are counted and nothing "
+                                  "else");
+        } else {
+            note = QStringLiteral("no rule and no clock");
+        }
+        row.insert(QStringLiteral("note"), note);
+        rows.append(row);
+    }
+    return rows;
+}
+
+/// The day's presence, in the words `omahouse status` uses: `1h10m using,
+/// 40m screen-off`.
+///
+/// Read out of the ledger and never measured here. docs/design.md §5.1 puts
+/// presence in `status`, in the journal line and in the day's ledger, and the
+/// ledger is the copy a window may have: it is 0644 and already on disk, where
+/// the live answer is a `loginctl` fork and a walk of `/sys/class/drm` twice a
+/// second in a program that is only looking.
+///
+/// It is on the sites view because that is the one number it explains. An app is
+/// billed for running, screen or no screen — §5.1 says so and this window must
+/// not imply otherwise — but a site is billed only where the browser and the
+/// screen agree, so `25m on youtube.com` on an afternoon somebody remembers as
+/// longer is answered by `40m screen-off` on the line above it.
+QString spellPresence(const Ledger &ledger)
+{
+    QStringList parts;
+    for (auto it = ledger.presence.constBegin(); it != ledger.presence.constEnd(); ++it)
+        parts.append(QStringLiteral("%1 %2").arg(spellSeconds(it.value()), it.key()));
+    return parts.join(QStringLiteral(", "));
 }
 
 QVariantList catalogOf(const Profile &profile, const QVector<AppScope> &scopes,
@@ -397,6 +600,14 @@ House::House(QObject *parent)
     });
 }
 
+QString House::reach() const
+{
+    // Joined with spaces and wrapped by the label, where the CLI prints one
+    // fragment per line: `webPolicyReach` is broken for a terminal that wraps by
+    // hand, and this is the one caller that does not.
+    return webPolicyReach().join(QLatin1Char(' '));
+}
+
 void House::reload()
 {
     // The programs too. The window calls this the moment a write comes back,
@@ -447,12 +658,58 @@ void House::refresh()
         byId.insert(app.id, app);
 
     const Proc proc;
-    const QDate today = QDate::currentDate();
+    const QDateTime when = QDateTime::currentDateTime();
+    const QDate today = when.date();
+
+    // The day of every profile, and not only of the visible ones.
+    //
+    // What the browser really does about a site is the composition of *all* the
+    // profiles — WebPolicy.h, the most restrictive wins, no precedence — and the
+    // sites that have run out today are worked out afresh from each day's
+    // ledger, exactly as the daemon does it. A subject reading their own sites
+    // view has to be told the truth about what will open, and that answer is
+    // not derivable from their own profile alone. Nothing of anybody else's is
+    // published by it: the rows are this profile's domains, and the sentence a
+    // row carries names no other account.
+    QHash<QString, Ledger> days;
+    for (const Profile &profile : std::as_const(profiles)) {
+        Ledger ledger;
+        QString ledgerError;
+        bool noLedger = false;
+        const bool read = readLedger(paths::ledgerFile(profile.user, today), &ledger,
+                                     &ledgerError, &noLedger);
+        // A day that could not be read is only worth saying out loud about
+        // somebody this face is allowed to see. Naming another household
+        // member's file at somebody who cannot see their profile would be the
+        // window publishing the one thing `visible` exists to withhold.
+        if (!read && !noLedger && error.isEmpty()
+            && (administers || profile.user == m_user)) {
+            error = QStringLiteral("%1's day: %2").arg(profile.user, ledgerError);
+        }
+        days.insert(profile.user, ledger);
+    }
+
+    QStringList outOfTime;
+    for (const Profile &profile : std::as_const(profiles)) {
+        if (!profile.enabled)
+            continue;
+        for (const Decision &decision :
+             evaluate(profile, {}, days.value(profile.user), when, 0).decisions) {
+            if (decision.kind == Decision::Kind::Block && !decision.site.isEmpty()
+                && !outOfTime.contains(decision.site)) {
+                outOfTime.append(decision.site);
+            }
+        }
+    }
+    outOfTime.sort();
+    const ChromiumPolicy machine = chromiumPolicyFor(profiles, outOfTime);
+    const QSet<QString> spent(outOfTime.cbegin(), outOfTime.cend());
 
     QVariantList people;
     QVariantMap programs;
     QVariantMap todays;
     QVariantMap catalogs;
+    QVariantMap sites;
 
     for (const Profile &profile : std::as_const(visible)) {
         uid_t uid = 0;
@@ -473,18 +730,14 @@ void House::refresh()
             blind = proc.sessionSliceProcesses(uid);
         }
 
-        Ledger ledger;
-        QString ledgerError;
-        bool noLedger = false;
-        if (!readLedger(paths::ledgerFile(profile.user, today), &ledger, &ledgerError, &noLedger)
-            && !noLedger && error.isEmpty()) {
-            error = QStringLiteral("%1's day: %2").arg(profile.user, ledgerError);
-        }
+        const Ledger ledger = days.value(profile.user);
 
         const QVariantList programRows = programsOf(profile, ledger, scopes, byId);
         const QVariantList todayRows = todayOf(profile, ledger, scopes, byId);
+        const QVariantList siteRows = sitesOf(profile, ledger, machine, spent);
         programs.insert(profile.user, programRows);
         todays.insert(profile.user, todayRows);
+        sites.insert(profile.user, siteRows);
         catalogs.insert(profile.user, catalogOf(profile, scopes, m_installed));
 
         QVariantMap person;
@@ -505,6 +758,36 @@ void House::refresh()
         person.insert(QStringLiteral("teeth"),
                       profile.enforce ? QStringLiteral("closing and logging out")
                                       : QStringLiteral("watching only"));
+        // The sites, in the same shape the two lines above give the programs:
+        // what the rules do, said as what happens to sites rather than as a
+        // verdict and a default — docs/design.md §8, the same rule that turns
+        // `default: deny` into "only the listed programs run".
+        person.insert(QStringLiteral("onlyListedSites"),
+                      profile.web.defaultVerdict == Verdict::Deny);
+        person.insert(QStringLiteral("sitePolicy"),
+                      profile.web.defaultVerdict == Verdict::Deny
+                          ? QStringLiteral("only the listed sites open")
+                          : QStringLiteral("every site opens except the blocked ones"));
+        // Three states and not two. Not said at all is not the same as said
+        // `allow`: Profile.h refuses to write `IncognitoModeAvailability: 0`,
+        // because omahouse being *more* permissive than it was asked to be is
+        // the one direction this project never takes by default. The window has
+        // to be able to draw the difference or the chip would lie about what it
+        // had done.
+        person.insert(QStringLiteral("incognitoStated"), profile.web.incognitoStated);
+        person.insert(QStringLiteral("incognitoDenied"),
+                      profile.web.incognitoStated && profile.web.incognito == Verdict::Deny);
+        person.insert(QStringLiteral("incognito"),
+                      !profile.web.incognitoStated
+                          ? QStringLiteral("nothing said about incognito")
+                          : profile.web.incognito == Verdict::Deny
+                              ? QStringLiteral("incognito windows do not open")
+                              : QStringLiteral("incognito windows open"));
+        person.insert(QStringLiteral("siteCount"), siteRows.size());
+        // The day's presence, out of the ledger, for the line the sites view
+        // draws over its numbers — docs/design.md §5.1.
+        person.insert(QStringLiteral("presenceToday"), spellPresence(ledger));
+
         person.insert(QStringLiteral("exists"), exists);
         person.insert(QStringLiteral("online"), online);
         person.insert(QStringLiteral("programCount"), programRows.size());
@@ -530,6 +813,7 @@ void House::refresh()
     QVariantMap snapshot;
     snapshot.insert(QStringLiteral("people"), people);
     snapshot.insert(QStringLiteral("programs"), programs);
+    snapshot.insert(QStringLiteral("sites"), sites);
     snapshot.insert(QStringLiteral("today"), todays);
     snapshot.insert(QStringLiteral("catalog"), catalogs);
 

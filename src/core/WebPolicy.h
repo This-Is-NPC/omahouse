@@ -108,4 +108,22 @@ struct ChromiumPolicy {
 ChromiumPolicy chromiumPolicyFor(const QVector<Profile> &profiles,
                                  const QStringList &outOfTime = {});
 
+/// The reach of this file, in words, written in exactly one place.
+///
+/// One policy file decides for every account that opens Chromium on the machine,
+/// the operator's included, and docs/design.md §11 records that this was weighed
+/// and taken rather than overlooked. Everything that owes the sentence prints
+/// these lines and composes none of its own -- `omahouse web` when it writes,
+/// `omahouse status` under `SITES`, and the studio's sites view -- so the
+/// program cannot come to say it two different ways. It is said **once** per run
+/// and once per screen, never per rule: a tool that re-argues a settled decision
+/// every time it is used is a tool people stop reading.
+///
+/// Here rather than in the CLI because there are now two front ends that owe it,
+/// and a second copy in the window is exactly how the two would drift. Broken
+/// into fragments rather than handed over as one paragraph because a terminal
+/// wraps by hand and a window wraps by itself: the CLI prints one fragment per
+/// line, the studio joins them with spaces and lets the label wrap.
+QStringList webPolicyReach();
+
 } // namespace omahouse

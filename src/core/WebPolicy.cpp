@@ -142,4 +142,16 @@ ChromiumPolicy chromiumPolicyFor(const QVector<Profile> &profiles, const QString
     return policy;
 }
 
+QStringList webPolicyReach()
+{
+    return {
+        QStringLiteral("the browser policy is one file for the whole machine. A site blocked "
+                       "here is"),
+        QStringLiteral("blocked for everyone who opens Chromium on it, including you. Chromium "
+                       "has no"),
+        QStringLiteral("per-account policy on Linux (docs/proposal-browser.md §3.1), and that "
+                       "was accepted."),
+    };
+}
+
 } // namespace omahouse

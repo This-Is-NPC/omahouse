@@ -19,7 +19,7 @@ import omahouse
 //
 // The keyboard hub is the same idea. `root` holds the focus whenever the window
 // is not in a field or a sheet, and every key is decided in `handleKey` rather
-// than spread across the three views -- which is how a key ends up working in
+// than spread across the four views -- which is how a key ends up working in
 // one of them and not the others. The views own no keys at all.
 //
 // Two faces, and nobody chooses. `House.face` is `operator` for somebody in
@@ -44,6 +44,7 @@ Window {
     property int view: 1
     property int cursorPeople: 0
     property int cursorPrograms: 0
+    property int cursorSites: 0
     property int cursorToday: 0
     property string filter: ""
     property bool filtering: false
@@ -72,6 +73,7 @@ Window {
 
     readonly property int peopleCursor: win.clamp(win.cursorPeople, win.peopleRows.length)
     readonly property int programCursor: win.clamp(win.cursorPrograms, win.programRows.length)
+    readonly property int siteCursor: win.clamp(win.cursorSites, win.siteRows.length)
     readonly property int todayCursor: win.clamp(win.cursorToday, win.todayRows.length)
 
     // The profile the window is about follows the cursor of the first view, and
@@ -89,6 +91,8 @@ Window {
 
     readonly property var allPrograms: win.subject === "" ? []
         : (House.snapshot.programs[win.subject] || [])
+    readonly property var allSites: win.subject === "" ? []
+        : (House.snapshot.sites[win.subject] || [])
     readonly property var allToday: win.subject === "" ? []
         : (House.snapshot.today[win.subject] || [])
     readonly property var catalogue: win.subject === "" ? []
@@ -108,13 +112,16 @@ Window {
 
     readonly property var peopleRows: win.people.filter(win.matches)
     readonly property var programRows: win.allPrograms.filter(win.matches)
+    readonly property var siteRows: win.allSites.filter(win.matches)
     readonly property var todayRows: win.allToday.filter(win.matches)
 
     readonly property var rows: win.view === 1 ? win.peopleRows
                               : win.view === 2 ? win.programRows
+                              : win.view === 4 ? win.siteRows
                                                : win.todayRows
     readonly property int cursor: win.view === 1 ? win.peopleCursor
                                  : win.view === 2 ? win.programCursor
+                                 : win.view === 4 ? win.siteCursor
                                                   : win.todayCursor
     readonly property var currentRow: win.cursor < 0 || win.cursor >= win.rows.length
         ? null : (win.rows[win.cursor] || null)
@@ -174,6 +181,44 @@ Window {
             rows.push({ id: "drop", key: "x", hint: "off the list",
                         label: "take this program off the list",
                         usable: row !== null && row.released })
+        } else if (win.view === 4) {
+            // The web half of docs/design.md §11, and the two verbs are `block`
+            // and `allow` rather than the app half's `allow` and `deny` for the
+            // reason the CLI gives where they are implemented: taking a program
+            // off somebody's list and changing what every browser on the machine
+            // will open are different enough acts that they should not be one
+            // word.
+            rows.push({ id: "block", key: "b", hint: "block a site",
+                        label: "stop a site opening", usable: person !== null })
+            // Only where taking the block back would really let the site open.
+            // A site that is out of time today is blocked by the clock and no
+            // rule can talk back to it (WebPolicy.h: the clock has the last word
+            // in the composition), and a site another profile blocks stays
+            // blocked whatever this one says. A chip lit for either would be a
+            // chip that lies about what pressing it does.
+            rows.push({ id: "unblock", key: "o", hint: "let it open",
+                        label: "let this site open again",
+                        usable: row !== null && row.asked && !row.outOfTime })
+            rows.push({ id: "minutes", key: "m", hint: "minutes",
+                        label: "minutes a day on this site",
+                        usable: row !== null })
+            rows.push({ id: "grant", key: "+", hint: "more today",
+                        label: "more time today on this site",
+                        usable: row !== null && row.hasBudget })
+            rows.push({ id: "sites", key: "d",
+                        hint: person && person.onlyListedSites ? "all but blocked"
+                                                               : "only listed",
+                        label: person && person.onlyListedSites
+                               ? "let every site open except the blocked"
+                               : "let only the listed sites open",
+                        usable: person !== null })
+            rows.push({ id: "incognito", key: "i",
+                        hint: person && person.incognitoDenied ? "incognito on"
+                                                               : "incognito off",
+                        label: person && person.incognitoDenied
+                               ? "let incognito windows open"
+                               : "stop incognito windows opening",
+                        usable: person !== null })
         } else {
             rows.push({ id: "day", key: "s", hint: "the day",
                         label: "how long the whole day is",
@@ -217,7 +262,8 @@ Window {
             { key: "Esc", label: "back, or clear the filter, or leave a control" },
             { key: "1", label: "the people under rules" },
             { key: "2", label: "the programs of the one under the cursor" },
-            { key: "3", label: "their day: what is left, and what happened" }
+            { key: "3", label: "their day: what is left, and what happened" },
+            { key: "4", label: "their sites: what opens, and the minutes on it" }
         ]
         const window = [
             { key: "/", label: "filter this list" },
@@ -287,12 +333,16 @@ Window {
             win.cursorPeople = at
         else if (win.view === 2)
             win.cursorPrograms = at
+        else if (win.view === 4)
+            win.cursorSites = at
         else
             win.cursorToday = at
         if (win.view === 1)
             peopleList.positionViewAtIndex(at, ListView.Contain)
         else if (win.view === 2)
             programList.positionViewAtIndex(at, ListView.Contain)
+        else if (win.view === 4)
+            siteList.positionViewAtIndex(at, ListView.Contain)
         else
             todayList.positionViewAtIndex(at, ListView.Contain)
     }
@@ -368,9 +418,19 @@ Window {
                 return
             win.target = row.id
             win.targetKind = row.kind
-            prompt.ask("minutes", "Minutes a day for " + win.target,
-                       "45m, 2h, 1h30m. It is the whole day's allowance for this one "
-                       + "program; time an operator hands over today is on top of it.",
+            const aSite = row.kind === "site" || row.site === true
+            prompt.ask("minutes",
+                       (aSite ? "Minutes a day on " : "Minutes a day for ") + win.target,
+                       aSite
+                       // The crossing of docs/design.md §5.2, said where the
+                       // number is being decided: a site is billed only where
+                       // the browser and the screen agree, so the limit somebody
+                       // writes here is not wall clock time.
+                       ? "30m, 1h. Counted only while somebody is in front of the "
+                         + "screen, and the site stops opening once it is spent — "
+                         + "until the turn of the day, or until more time is handed over."
+                       : "45m, 2h, 1h30m. It is the whole day's allowance for this one "
+                         + "program; time an operator hands over today is on top of it.",
                        "", row.daily || "", false)
         } else if (id === "grant") {
             if (row === null)
@@ -388,6 +448,35 @@ Window {
             confirm.ask("drop", "Take " + row.id + " off the list?",
                         "Any limit written for it stays where it is: a program denied "
                         + "today may be allowed again tomorrow with the same number.")
+        } else if (id === "block") {
+            // Opened with the row's own domain when that row is not already
+            // blocked here, and empty otherwise. The same courtesy `m` does, and
+            // it costs nothing to be wrong about: the field is selected, so the
+            // first character typed replaces it.
+            //
+            // The reach of a browser policy is not said here. It is on the view
+            // this sheet is drawn over, once, which is where docs/design.md §11
+            // wants it: said once per screen and never per rule, because a tool
+            // that re-argues a settled decision every time it is used is a tool
+            // people stop reading.
+            prompt.ask("block", "Which site should stop opening?",
+                       "The site's name on its own, like youtube.com — not a whole "
+                       + "address. A bare domain covers its subdomains too.",
+                       "", row !== null && row.asked !== true ? row.id : "", false)
+        } else if (id === "unblock") {
+            if (row === null)
+                return
+            Admin.run("let " + row.id + " open", ["web", "allow", person.user, row.id])
+        } else if (id === "sites") {
+            Admin.run(person.onlyListedSites ? "every site but the blocked"
+                                             : "only the listed sites",
+                      ["web", person.user,
+                       person.onlyListedSites ? "--all-but-listed" : "--only-listed"])
+        } else if (id === "incognito") {
+            Admin.run(person.incognitoDenied ? "let incognito windows open"
+                                             : "stop incognito windows opening",
+                      ["web", "incognito", person.user,
+                       person.incognitoDenied ? "--allow" : "--deny"])
         } else if (id === "day") {
             prompt.ask("day", "How long is " + person.user + "'s day?",
                        "2h, 90m. This is the budget whose selector is everything, and it "
@@ -410,6 +499,16 @@ Window {
         if (topic === "day") {
             Admin.run("the day's total", ["limit", person.user, "--session", text])
         } else if (topic === "minutes") {
+            // `--site` and never `--budget`, and the CLI refuses the wrong one
+            // rather than guessing: Profile.h says there is no shape that tells
+            // a scope id with dots in it from a domain with dots in it, so which
+            // namespace an id is in has to be carried and not inferred. That is
+            // what `targetKind` and the row's own `site` are for.
+            if (win.targetKind === "site") {
+                Admin.run("minutes a day",
+                          ["limit", person.user, "--site", win.target + "=" + text])
+                return
+            }
             // The budget id is the CLI's handle, and a program that has none yet
             // gets its rule and its clock in one verb -- `allow --limit` is
             // sugar for exactly this, because they are one thought at the moment
@@ -419,7 +518,9 @@ Window {
             if (budget !== null)
                 Admin.run("minutes a day", budget.session
                           ? ["limit", person.user, "--session", text]
-                          : ["limit", person.user, "--budget", win.target + "=" + text])
+                          : budget.site === true
+                            ? ["limit", person.user, "--site", win.target + "=" + text]
+                            : ["limit", person.user, "--budget", win.target + "=" + text])
             else if (program !== null && program.hasBudget)
                 Admin.run("minutes a day",
                           ["limit", person.user, "--budget", program.budgetId + "=" + text])
@@ -435,6 +536,8 @@ Window {
         } else if (topic === "release") {
             Admin.run("release " + win.target,
                       ["allow", person.user, win.target])
+        } else if (topic === "block") {
+            Admin.run("stop " + text + " opening", ["web", "block", person.user, text])
         } else if (topic === "releaseLimit") {
             Admin.run("release " + win.target, text === ""
                       ? ["allow", person.user, win.target]
@@ -515,7 +618,7 @@ Window {
             event.accepted = true
             return
         }
-        if (text === "1" || text === "2" || text === "3") {
+        if (text === "1" || text === "2" || text === "3" || text === "4") {
             win.go(parseInt(text))
             event.accepted = true
             return
@@ -674,6 +777,15 @@ Window {
                         quiet: true
                         on: win.view === 3
                         onClicked: win.go(3)
+                    }
+                    Chip {
+                        anchors.verticalCenter: parent.verticalCenter
+                        objectName: "viewChip4"
+                        label: "sites"
+                        key: "4"
+                        quiet: true
+                        on: win.view === 4
+                        onClicked: win.go(4)
                     }
                     Rule {
                         vertical: true
@@ -1266,6 +1378,200 @@ Window {
                         }
                     }
                 }
+
+                // -------------------------------------------------- 4 · sites
+                //
+                // docs/design.md §11 for what opens, §5.2 for the minutes and
+                // §5.1 for the reason the minutes can be smaller than the
+                // afternoon felt.
+                //
+                // A view of its own rather than rows folded into the programs
+                // list. `House::sitesOf` gives the long reason; the short one is
+                // that not one command on the row is the same. `x` on a program
+                // writes `omahouse deny`, and the nearest thing on a site is
+                // `omahouse web allow`, which is not a removal at all.
+                Item {
+                    anchors.fill: parent
+                    visible: win.view === 4
+
+                    // Two sentences that are about the whole view and never
+                    // about a row, so they are drawn once above the list rather
+                    // than on every line: `j` cannot walk past them and `/`
+                    // cannot filter them away.
+                    Column {
+                        id: siteNotes
+                        anchors.top: parent.top
+                        anchors.topMargin: 10
+                        anchors.left: parent.left
+                        anchors.leftMargin: 16
+                        anchors.right: parent.right
+                        anchors.rightMargin: 16
+                        spacing: 4
+                        visible: win.person !== null
+
+                        // Presence, where it explains something. An app is
+                        // billed for running, screen or no screen -- §5.1 says
+                        // so and this window must not imply otherwise -- but a
+                        // site is billed only where the browser and the screen
+                        // agree, so a number that does not match somebody's
+                        // memory of the afternoon is answered on the line above
+                        // it rather than left to be worked out.
+                        Label {
+                            objectName: "sitePresence"
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            elide: Text.ElideNone
+                            quiet: true
+                            text: "Minutes here are counted only while somebody is in front "
+                                  + "of the screen. "
+                                  + (win.person === null
+                                     || win.person.presenceToday === ""
+                                     ? "Nothing has been measured today."
+                                     : "Today: " + win.person.presenceToday + ".")
+                        }
+                        // And the reach, once. `omahouse web` says it once when
+                        // it writes and `omahouse status` once when it prints;
+                        // this is the window's one place, and the sheets that
+                        // open over this view deliberately do not repeat it.
+                        Label {
+                            objectName: "siteReach"
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            elide: Text.ElideNone
+                            quiet: true
+                            text: House.reach
+                        }
+                    }
+
+                    Label {
+                        anchors.centerIn: parent
+                        visible: win.siteRows.length === 0
+                        quiet: true
+                        width: parent.width - 80
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
+                        elide: Text.ElideNone
+                        text: win.subject === "" ? "nobody is under rules yet"
+                            : win.filter !== "" ? "no site here answers to that"
+                            : win.operating
+                              ? "no site has been named yet — press b, or click the chip"
+                              : "no site has been named yet"
+                    }
+
+                    ListView {
+                        id: siteList
+                        objectName: "siteList"
+                        anchors.top: siteNotes.visible ? siteNotes.bottom : parent.top
+                        anchors.topMargin: 10
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        clip: true
+                        model: win.siteRows
+                        currentIndex: win.siteCursor
+                        boundsBehavior: Flickable.StopAtBounds
+                        Accessible.role: Accessible.List
+
+                        delegate: Rectangle {
+                            id: siteRow
+                            required property var modelData
+                            required property int index
+                            readonly property var place: siteRow.modelData
+                            width: siteList.width
+                            height: 56
+                            color: siteList.currentIndex === siteRow.index
+                                   ? Theme.fill(Theme.accent, 0.16) : "transparent"
+
+                            Accessible.role: Accessible.ListItem
+                            Accessible.name: siteRow.place.id + ", " + siteRow.place.state
+
+                            Rectangle {
+                                width: 2
+                                height: parent.height
+                                color: siteList.currentIndex === siteRow.index
+                                       ? Theme.accent : "transparent"
+                            }
+
+                            Column {
+                                anchors.left: parent.left
+                                anchors.leftMargin: 16
+                                anchors.right: siteClock.left
+                                anchors.rightMargin: 16
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 3
+
+                                Row {
+                                    spacing: 8
+                                    Label {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: siteRow.place.name
+                                        font.pixelSize: 13
+                                    }
+                                    Label {
+                                        objectName: "siteState"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: siteRow.place.blocked
+                                        quiet: true
+                                        color: Theme.urgent
+                                        text: siteRow.place.state
+                                    }
+                                }
+                                Label {
+                                    quiet: true
+                                    color: siteRow.place.outOfTime
+                                           || siteRow.place.overruled ? Theme.urgent
+                                                                      : Theme.dim
+                                    text: siteRow.place.note
+                                }
+                            }
+
+                            Column {
+                                id: siteClock
+                                anchors.right: parent.right
+                                anchors.rightMargin: 16
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 190
+                                spacing: 4
+
+                                Label {
+                                    width: parent.width
+                                    horizontalAlignment: Text.AlignRight
+                                    color: siteRow.place.exhausted ? Theme.urgent
+                                                                   : Theme.foreground
+                                    // The day's minutes on that site when there
+                                    // is no clock on it, and the balance when
+                                    // there is. Never both: two numbers about
+                                    // the same afternoon, one of them a
+                                    // subtraction of the other, is a row nobody
+                                    // reads twice the same way.
+                                    text: siteRow.place.limited
+                                          ? siteRow.place.left + " left of "
+                                            + siteRow.place.limit
+                                          : siteRow.place.today
+                                            ? siteRow.place.today + " today" : ""
+                                }
+                                Meter {
+                                    width: parent.width
+                                    limited: siteRow.place.limited
+                                    spentSeconds: siteRow.place.spentSeconds
+                                    allowanceSeconds: siteRow.place.allowanceSeconds
+                                }
+                                Label {
+                                    width: parent.width
+                                    horizontalAlignment: Text.AlignRight
+                                    visible: siteRow.place.granted !== ""
+                                    quiet: true
+                                    color: Theme.accent
+                                    text: "+" + siteRow.place.granted + " handed over today"
+                                }
+                            }
+
+                            TapHandler {
+                                onTapped: win.setCursor(siteRow.index)
+                            }
+                        }
+                    }
+                }
             }
 
             Rule {}
@@ -1277,6 +1583,12 @@ Window {
                 total: win.rows.length
                 note: win.person === null ? House.faceReason
                     : win.view === 1 ? win.people.length + " under rules"
+                    // The two profile-wide facts about sites, on the line the
+                    // programs view puts the two profile-wide facts about
+                    // programs on. Both are things `d` and `i` change and
+                    // neither belongs on a row.
+                    : win.view === 4 ? win.person.name + " · " + win.person.sitePolicy
+                                       + " · " + win.person.incognito
                                      : win.person.name + " · " + win.person.policy
                 blind: win.person === null ? 0 : win.person.blindProcesses
                 message: House.error !== "" ? House.error : Admin.message

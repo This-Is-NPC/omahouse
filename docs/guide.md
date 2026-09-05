@@ -284,8 +284,13 @@ it was accepted rather than worked around — `docs/design.md` §11 says why, an
 also says what the way out would be if the household wants one: the kid on
 Chromium and the operator on a different browser.
 
-It is said once, when you write the rule, and again under `SITES` in
-`omahouse status`. It is not repeated per site.
+It is said once, when you write the rule; again under `SITES` in
+`omahouse status`; and once on the studio's sites view, which is `4`. All three
+print the same sentence out of the same function. It is not repeated per site.
+
+Everything in this section is on that view as well as on this command line —
+`b` blocks, `o` lets it open, `d` switches between only-the-listed and
+everything-but-the-blocked, and `i` is incognito. See [§5](#5-the-studio-from-the-keyboard).
 
 ![The site refused, in the child's session](../vm/shots/44-chromium-site-bloqueado.png)
 
@@ -581,18 +586,42 @@ no `n`, no `a`, no `+`, no **here, right now** section:
 The palette (`:`) obeys the same table: in the fiscalised person's session it
 holds one command, `back to the people`.
 
+There are **four views**, and `1` to `4` reach them: the people under rules, the
+programs of the one under the cursor, their day, and their sites.
+
 The writing keys, all of them going through `pkexec`:
 
-| key | what it does |
-|---|---|
-| `n` | put an account under rules |
-| `e` | teeth in, teeth out (`enforce`) |
-| `d` | allowlist or denylist |
-| `a` | release a program |
-| `m` | minutes a day for that program |
-| `s` | how long the whole day is |
-| `+` | more time **today** |
-| `x` | take the program off the list, or the account off the books |
+| view | key | what it does |
+|---|---|---|
+| `1` people | `n` | put an account under rules |
+| `1` people | `e` | teeth in, teeth out (`enforce`) |
+| `1` people | `d` | allowlist or denylist |
+| `1` people | `x` | take the account off the books |
+| `2` programs | `a` | release a program |
+| `2` programs | `m` | minutes a day for that program |
+| `2` programs | `+` | more time **today** |
+| `2` programs | `x` | take the program off the list |
+| `3` today | `s` | how long the whole day is |
+| `3` today | `m` | minutes a day for that budget |
+| `3` today | `+` | more time **today** |
+| `4` sites | `b` | stop a site opening (`web block`) |
+| `4` sites | `o` | let it open again (`web allow`) |
+| `4` sites | `m` | minutes a day on that site (`limit --site`) |
+| `4` sites | `+` | more time **today** on that site |
+| `4` sites | `d` | only the listed sites, or every site but the blocked |
+| `4` sites | `i` | incognito windows open, or do not |
+
+`4` is the view [§2.7](#27-block-a-site) is about, and it carries two lines above
+the list that are about the whole view: the day's presence, because a site is
+counted only while somebody is in front of the screen and that is why the number
+can be smaller than the afternoon felt; and the reach of a browser policy, which
+is one file for the whole machine, your own account included. The same sentence
+`omahouse web` prints when it writes, out of the same function, said once.
+
+Two things the sites view will not tell you, because omahouse does not know them:
+how many times a blocked site was tried — a managed policy blocks inside Chromium
+and reports nothing out — and which site is in the front tab right now, which is
+in a file only that account and root may read.
 
 > **Layout gotcha.** In a narrow window the header overlaps the subtitle and the
 > tabs, and the result is unreadable. Maximise the window.
@@ -690,10 +719,10 @@ sudo omahouse allow kid chromium --limit 3m
 sudo omahouse allow kid org.chromium.Chromium --limit 3m
 ```
 
-### 6.7 `/` in the studio filters all three lists at once
+### 6.7 `/` in the studio filters all four lists at once
 
 **What happens.** There is one filter, and it is applied to the people, the
-programs and the day together. A needle that misses the person on the people
+programs, the day and the sites together. A needle that misses the person on the people
 list empties the people list — and then the programs view has nobody to be about
 and draws *nobody is under rules yet* over a household that is right there. The
 key sheet says `/ filter this list`. This is not yet that.

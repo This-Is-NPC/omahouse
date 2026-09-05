@@ -145,6 +145,7 @@ private slots:
     void opensOnTheFaceOfWhoeverRanIt();
     void theWholeJobOnTheKeyboard();
     void theWholeJobOnTheMouse();
+    void theWebHalfOnBothDoors();
     void everyCommandIsBothAKeyAndAChip();
     void everyKeyOnTheSheetIsAnswered();
     void aRefusalIsASentenceAndNotASilence();
@@ -175,7 +176,9 @@ private:
     QVariantList people() const;
     QVariantMap personNamed(const QString &user) const;
     QVariantList programsOf(const QString &user) const;
+    QVariantList sitesOf(const QString &user) const;
     QVariantList todayOf(const QString &user) const;
+    QVariantMap siteNamed(const QString &user, const QString &domain) const;
 
     QTemporaryDir m_tree;
     QQmlApplicationEngine *m_engine = nullptr;
@@ -219,8 +222,18 @@ void TestStudio::initTestCase()
     qputenv("OMAHOUSE_CGROUP_ROOT", (root + "/cgroup").toLocal8Bit());
     qputenv("OMAHOUSE_PROC_ROOT", (root + "/proc").toLocal8Bit());
     qputenv("OMAHOUSE_DESKTOP_DIRS", (root + "/share").toLocal8Bit());
+    // The third root, and the one with the shortest fuse -- docs/design.md §11,
+    // "The refusal that protects the developer's own browser". This suite runs
+    // the real `omahouse web` verbs, and every verb that writes a profile
+    // reconciles the browser policy on its way out. Left unset, that write would
+    // be refused for the right reason and would say so on the status bar, which
+    // is a sentence in every picture `mise run shots` takes; pointed here, the
+    // file is written where it was told to write and the window is drawn at
+    // rest.
+    qputenv("OMAHOUSE_CHROMIUM_POLICY_DIR", (root + "/chromium").toLocal8Bit());
     QVERIFY(QDir().mkpath(root + "/etc"));
     QVERIFY(QDir().mkpath(root + "/var"));
+    QVERIFY(QDir().mkpath(root + "/chromium"));
     QVERIFY(QDir().mkpath(root + "/share/applications"));
 
     // The picker is fed from these. Two programs, and one of them a launcher
@@ -281,6 +294,7 @@ void TestStudio::init()
     // wrong test.
     root()->setProperty("cursorPeople", 0);
     root()->setProperty("cursorPrograms", 0);
+    root()->setProperty("cursorSites", 0);
     root()->setProperty("cursorToday", 0);
     root()->setProperty("filter", QString());
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
@@ -514,9 +528,25 @@ QVariantList TestStudio::programsOf(const QString &user) const
     return m_house->snapshot().value(QStringLiteral("programs")).toMap().value(user).toList();
 }
 
+QVariantList TestStudio::sitesOf(const QString &user) const
+{
+    return m_house->snapshot().value(QStringLiteral("sites")).toMap().value(user).toList();
+}
+
 QVariantList TestStudio::todayOf(const QString &user) const
 {
     return m_house->snapshot().value(QStringLiteral("today")).toMap().value(user).toList();
+}
+
+QVariantMap TestStudio::siteNamed(const QString &user, const QString &domain) const
+{
+    const QVariantList all = sitesOf(user);
+    for (const QVariant &row : all) {
+        const QVariantMap site = row.toMap();
+        if (site.value(QStringLiteral("id")).toString() == domain)
+            return site;
+    }
+    return QVariantMap();
 }
 
 // ---------------------------------------------------------------------------
@@ -670,6 +700,104 @@ void TestStudio::theWholeJobOnTheMouse()
     QCOMPARE(session.value(QStringLiteral("granted")).toString(), QStringLiteral("10m"));
 }
 
+// The sites view, through both doors — docs/design.md §11 and §5.3.
+//
+// The three things the CLI could do and the window could not: block a site and
+// let it open again, put a clock on one, and switch incognito off. They are here
+// as a case of their own rather than folded into `theWholeJobOnTheKeyboard`
+// because what they write is a different half of the profile, and because the
+// interesting assertion is not "the profile changed" but "the window's own
+// reading of the machine changed with it" — a row that goes on saying `opens`
+// after the rule is written is exactly the failure a snapshot rebuilt from the
+// wrong list would produce.
+//
+// Both doors, in one errand rather than two: the keyboard writes the block and
+// the clock, the mouse takes the block back and switches incognito off. Every
+// one of the four is a row of the one table, so either door could have done any
+// of them, and `everyCommandIsBothAKeyAndAChip` is the general proof of that;
+// this is the proof that pressing them writes what the CLI would have written.
+void TestStudio::theWebHalfOnBothDoors()
+{
+    if (!root()->property("operating").toBool())
+        QSKIP("not in wheel");
+
+    m_admin->run(QStringLiteral("fixture"),
+                 {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("tstjulia")});
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+
+    // `4`, `b`, the domain, Enter.
+    key('4');
+    QCOMPARE(root()->property("view").toInt(), 4);
+    key('b');
+    typeInto(QStringLiteral("promptField"), QStringLiteral("youtube.com"));
+    key(Qt::Key_Return);
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+
+    QVariantMap site = siteNamed(QStringLiteral("tstjulia"), QStringLiteral("youtube.com"));
+    QVERIFY2(!site.isEmpty(), "the site the window just blocked is not on the sites view");
+    QVERIFY2(site.value(QStringLiteral("blocked")).toBool(),
+             "the row still says the site opens");
+    QVERIFY(site.value(QStringLiteral("asked")).toBool());
+
+    // A clock on it. `m` on the row, and the verb underneath has to be
+    // `limit --site` and not `limit --budget`: the CLI refuses the second for a
+    // domain rather than guessing, so a window that sent the wrong one would
+    // fail loudly here and silently nowhere else.
+    key('m');
+    typeInto(QStringLiteral("promptField"), QStringLiteral("30m"));
+    key(Qt::Key_Return);
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+
+    site = siteNamed(QStringLiteral("tstjulia"), QStringLiteral("youtube.com"));
+    QVERIFY2(site.value(QStringLiteral("hasBudget")).toBool(),
+             "the site has no clock, so `m` wrote something else");
+    QCOMPARE(site.value(QStringLiteral("limit")).toString(), QStringLiteral("30m"));
+    // And the sentence about running out is the site's own. `stops opening` and
+    // not `only warns`: a switch whose fourth value fell into the default arm
+    // said the second for a whole release.
+    QCOMPARE(site.value(QStringLiteral("ending")).toString(), QStringLiteral("stops opening"));
+
+    // A site budget is not a program. It used to draw a row on the programs
+    // view, with a verdict read out of the app rules and an `x` that would have
+    // written `omahouse deny tstjulia youtube.com`.
+    for (const QVariant &row : programsOf(QStringLiteral("tstjulia"))) {
+        QVERIFY2(row.toMap().value(QStringLiteral("id")).toString()
+                     != QStringLiteral("youtube.com"),
+                 "the site budget turned up on the programs view");
+    }
+
+    // The other door. The chip takes the block back, and the row says so.
+    click(QStringLiteral("command-unblock"));
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    site = siteNamed(QStringLiteral("tstjulia"), QStringLiteral("youtube.com"));
+    QVERIFY2(!site.value(QStringLiteral("blocked")).toBool(),
+             "the site is still blocked after `let it open` came back green");
+
+    // And incognito, which is the one switch with no counterpart on the app
+    // side. Three states: this asserts the two the window can move between.
+    QVERIFY(!personNamed(QStringLiteral("tstjulia"))
+                 .value(QStringLiteral("incognitoStated")).toBool());
+    click(QStringLiteral("command-incognito"));
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    QVariantMap julia = personNamed(QStringLiteral("tstjulia"));
+    QVERIFY(julia.value(QStringLiteral("incognitoStated")).toBool());
+    QVERIFY2(julia.value(QStringLiteral("incognitoDenied")).toBool(),
+             "the chip said `incognito off` and incognito is still open");
+
+    click(QStringLiteral("command-incognito"));
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    QVERIFY(!personNamed(QStringLiteral("tstjulia"))
+                 .value(QStringLiteral("incognitoDenied")).toBool());
+
+    // The reach is on the view, once, and it is the CLI's own sentence rather
+    // than a second one composed here.
+    QQuickItem *reach = itemNamed(window()->contentItem(), QStringLiteral("siteReach"));
+    QVERIFY2(reach, "the sites view does not say what a browser policy reaches");
+    QVERIFY(reach->isVisible());
+    QCOMPARE(reach->property("text").toString(), m_house->reach());
+    QVERIFY(m_house->reach().contains(QStringLiteral("including you")));
+}
+
 void TestStudio::everyCommandIsBothAKeyAndAChip()
 {
     if (!root()->property("operating").toBool())
@@ -688,10 +816,23 @@ void TestStudio::everyCommandIsBothAKeyAndAChip()
                   QStringLiteral("2h")});
     QVERIFY(waitForWrite());
 
-    // The general form of the promise. Every row of the one table, on all three
+    // Something to have site commands about, so the fourth view is not an empty
+    // list with a cursor at -1 and half its table unusable.
+    m_admin->run(QStringLiteral("fixture"),
+                 {QStringLiteral("web"), QStringLiteral("block"), QStringLiteral("tstjulia"),
+                  QStringLiteral("youtube.com")});
+    QVERIFY(waitForWrite());
+
+    // The general form of the promise. Every row of the one table, on all four
     // views: a chip on screen with that id, carrying that key on its face.
+    //
+    // The bound is four and not three since the sites view arrived, and that is
+    // the whole of what this case needed to gain: an action the CLI has and the
+    // window does not escapes this proof entirely, because there is no row in
+    // the table for it to be a row of. That is how `web block`, `limit --site`
+    // and the incognito switch went a whole release without a button.
     QSet<QString> keysSeen;
-    for (int view = 1; view <= 3; ++view) {
+    for (int view = 1; view <= 4; ++view) {
         QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(view)));
         settle();
         const QVariantList commands = root()->property("commands").toList();
@@ -734,8 +875,9 @@ void TestStudio::everyCommandIsBothAKeyAndAChip()
     // own in the header. Same promise, written by hand because they are about
     // the window and not about a profile.
     for (const QString &name : {QStringLiteral("viewChip1"), QStringLiteral("viewChip2"),
-                                QStringLiteral("viewChip3"), QStringLiteral("filterChip"),
-                                QStringLiteral("paletteChip"), QStringLiteral("keysChip")}) {
+                                QStringLiteral("viewChip3"), QStringLiteral("viewChip4"),
+                                QStringLiteral("filterChip"), QStringLiteral("paletteChip"),
+                                QStringLiteral("keysChip")}) {
         QQuickItem *chip = itemNamed(window()->contentItem(), name);
         QVERIFY2(chip, qPrintable(name));
         QVERIFY2(!chip->property("key").toString().isEmpty(), qPrintable(name));
@@ -804,6 +946,8 @@ void TestStudio::everyKeyOnTheSheetIsAnswered()
     QCOMPARE(root()->property("view").toInt(), 2);
     key('3');
     QCOMPARE(root()->property("view").toInt(), 3);
+    key('4');
+    QCOMPARE(root()->property("view").toInt(), 4);
     key('1');
     QCOMPARE(root()->property("view").toInt(), 1);
 
@@ -1131,6 +1275,16 @@ void TestStudio::seedTheExampleHousehold()
         {QStringLiteral("allow"), QStringLiteral("nobody"), QStringLiteral("gtk-launch")},
         // Named and refused, so the list has a row that is not released.
         {QStringLiteral("deny"), QStringLiteral("nobody"), QStringLiteral("steam")},
+        // The web half — docs/design.md §11 and §5.3. Three rows and three
+        // different things: a site that does not open at all, a site with a
+        // clock on it that is nearly spent, and a site with neither that the
+        // day counted minutes against anyway.
+        {QStringLiteral("web"), QStringLiteral("block"), QStringLiteral("nobody"),
+         QStringLiteral("tiktok.com")},
+        {QStringLiteral("limit"), QStringLiteral("nobody"), QStringLiteral("--site"),
+         QStringLiteral("youtube.com=30m")},
+        {QStringLiteral("web"), QStringLiteral("incognito"), QStringLiteral("nobody"),
+         QStringLiteral("--deny")},
     };
     for (const QStringList &verb : verbs) {
         m_admin->run(QStringLiteral("fixture"), verb);
@@ -1146,7 +1300,7 @@ void TestStudio::seedTheExampleHousehold()
     QString error;
     QVERIFY2(readProfiles(paths::profilesFile(), &profiles, &error), qPrintable(error));
     QCOMPARE(profiles.size(), 1);
-    QString session, code, firefox;
+    QString session, code, firefox, youtube;
     for (const Budget &budget : profiles.first().budgets) {
         if (budget.match == QLatin1String("*"))
             session = budget.id;
@@ -1154,9 +1308,11 @@ void TestStudio::seedTheExampleHousehold()
             code = budget.id;
         else if (budget.match == QLatin1String("firefox"))
             firefox = budget.id;
+        else if (budget.isSite() && budget.match == QLatin1String("youtube.com"))
+            youtube = budget.id;
     }
-    QVERIFY2(!session.isEmpty() && !code.isEmpty() && !firefox.isEmpty(),
-             "the verbs above did not write the three budgets the day is drawn from");
+    QVERIFY2(!session.isEmpty() && !code.isEmpty() && !firefox.isEmpty() && !youtube.isEmpty(),
+             "the verbs above did not write the four budgets the day is drawn from");
 
     const QDate today = QDate::currentDate();
     const auto at = [today](int hour, int minute) {
@@ -1171,6 +1327,20 @@ void TestStudio::seedTheExampleHousehold()
     // Exactly its limit, so one row is drawn in the colour of a budget that has
     // run out. Nothing else in this window looks like that.
     ledger.seconds.insert(firefox, 60 * 60);
+    // The site's clock and the site's minutes, and they agree because on a real
+    // machine one statement writes both -- docs/design.md §5.2. `wikipedia.org`
+    // has no budget and no rule and is here anyway: the sites view is the day's
+    // browsing as much as it is the rules, and a domain nobody has an opinion
+    // about is the ordinary case.
+    ledger.seconds.insert(youtube, 25 * 60);
+    ledger.sites.insert(QStringLiteral("youtube.com"), 25 * 60);
+    ledger.sites.insert(QStringLiteral("wikipedia.org"), 8 * 60);
+    // And the presence beside them, never inside them. Two thirds of the day in
+    // front of the screen and one third with it dark, which is what makes the
+    // line over the sites view worth reading: 25m on youtube.com out of an
+    // afternoon somebody remembers as longer is answered by the 40m below.
+    ledger.presence.insert(QStringLiteral("using"), 70 * 60);
+    ledger.presence.insert(QStringLiteral("screen-off"), 40 * 60);
     ledger.grants.append({at(9, 12), QStringLiteral("root"), session, 10});
     ledger.events.append({at(9, 40), EventKind::Warn, firefox, QString(), 5});
     ledger.events.append({at(9, 45), EventKind::Exhausted, firefox, QString(), -1});
@@ -1248,7 +1418,7 @@ void TestStudio::writesTheOperatorShots()
 
     // Filtered on `o`, which is a needle that also matches the profile's own
     // name -- and it has to be, which is worth knowing before reading this
-    // picture. One `filter` is applied to all three lists at once, so a needle
+    // picture. One `filter` is applied to all four lists at once, so a needle
     // that misses the person under the cursor on the people list empties the
     // people list, and then the programs list has nobody to be about and draws
     // "nobody is under rules yet" over a household that is right there. The key
@@ -1298,6 +1468,31 @@ void TestStudio::writesTheOperatorShots()
     shoot(QStringLiteral("14-operator-drop-program"));
     key(Qt::Key_Escape);
 
+    // The sites, and the two questions they ask. The view carries the reach of a
+    // browser policy on its own face, once -- which is the whole of where this
+    // window says it, so the two sheets below deliberately do not repeat it.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(4)));
+    shoot(QStringLiteral("15-operator-sites"));
+
+    // The palette over it, because that is where the six site commands are read
+    // by name with their keys beside them: the visible half of the promise that
+    // nothing new arrived on only one of the two doors.
+    key(':');
+    shoot(QStringLiteral("16-operator-site-commands"));
+    key(Qt::Key_Escape);
+
+    // On `tiktok.com`, which this profile already blocks, so the field opens
+    // empty. On a row that is not blocked it opens with that row's domain in it.
+    key('b');
+    shoot(QStringLiteral("17-operator-block-site"));
+    key(Qt::Key_Escape);
+
+    // And on `youtube.com`, which has a clock, so the field opens with it.
+    key('j');
+    key('m');
+    shoot(QStringLiteral("18-operator-site-minutes"));
+    key(Qt::Key_Escape);
+
     // A refusal, out of the CLI and not made up here: `root` is in wheel on
     // every machine, and a profile for one of them is the program's one hard
     // refusal. It has to be a sentence on the status bar and not a silence.
@@ -1306,14 +1501,14 @@ void TestStudio::writesTheOperatorShots()
     typeInto(QStringLiteral("promptField"), QStringLiteral("root"));
     key(Qt::Key_Return);
     QVERIFY2(!waitForWrite(), "the CLI wrote a profile for root");
-    shoot(QStringLiteral("15-operator-refusal"));
+    shoot(QStringLiteral("19-operator-refusal"));
 
-    // And the three ways this window can be empty, which are three different
+    // And the four ways this window can be empty, which are four different
     // sentences and not one.
     m_admin->clear();
     emptyTheHouse();
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
-    shoot(QStringLiteral("16-operator-people-empty"));
+    shoot(QStringLiteral("20-operator-people-empty"));
 
     m_admin->run(QStringLiteral("fixture"),
                  {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("nobody"),
@@ -1322,9 +1517,11 @@ void TestStudio::writesTheOperatorShots()
     m_admin->clear();
     settle();
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
-    shoot(QStringLiteral("17-operator-programs-empty"));
+    shoot(QStringLiteral("21-operator-programs-empty"));
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(3)));
-    shoot(QStringLiteral("18-operator-today-empty"));
+    shoot(QStringLiteral("22-operator-today-empty"));
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(4)));
+    shoot(QStringLiteral("23-operator-sites-empty"));
 }
 
 void TestStudio::writesTheSubjectShots()
@@ -1339,27 +1536,33 @@ void TestStudio::writesTheSubjectShots()
     if (QTest::currentTestFailed())
         return;
 
-    // The same three views, the same household, and nothing to press.
+    // The same four views, the same household, and nothing to press.
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
-    shoot(QStringLiteral("19-subject-people"));
+    shoot(QStringLiteral("24-subject-people"));
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
-    shoot(QStringLiteral("20-subject-programs"));
+    shoot(QStringLiteral("25-subject-programs"));
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(3)));
-    shoot(QStringLiteral("21-subject-today"));
+    shoot(QStringLiteral("26-subject-today"));
+    // The sites view on this face is the one screen in the window that is
+    // addressed to the person being measured rather than about them: what does
+    // not open, what is left of the half hour, and why the number is smaller
+    // than the afternoon felt.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(4)));
+    shoot(QStringLiteral("27-subject-sites"));
 
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
     key('?');
-    shoot(QStringLiteral("22-subject-keys"));
+    shoot(QStringLiteral("28-subject-keys"));
     key(Qt::Key_Escape);
 
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
     key(':');
-    shoot(QStringLiteral("23-subject-commands"));
+    shoot(QStringLiteral("29-subject-commands"));
     key(Qt::Key_Escape);
 
     emptyTheHouse();
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
-    shoot(QStringLiteral("24-subject-nothing"));
+    shoot(QStringLiteral("30-subject-nothing"));
 }
 
 QTEST_MAIN(TestStudio)
