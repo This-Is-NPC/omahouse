@@ -477,6 +477,12 @@ about the PAM line: a force-install policy left behind is a browser installing a
 extension whose host is gone, and a signing key left behind is the one artefact
 this design exists to not have.
 
+It takes them off because they are on the one declaration §9 describes, and not
+because five `rm` lines were written by hand. That distinction is not a detail:
+the host manifest is the artefact that was left out of the hand-written column
+and survived a `pacman -R` in the VM, and it is the reason the column stopped
+being hand-written.
+
 ### Where the logic lives
 
 `Policy` and `Ledger` are pure functions: they are handed the scopes, the
@@ -569,16 +575,56 @@ the `.install`. The install script creates `/etc/omahouse` and
 `/var/lib/omahouse`, adds the PAM line of §2, enables `omahouse.service`, and
 takes all of it out again on removal.
 
-**Removal is half the job, not an appendix.** Four things omahouse puts on a
-machine cannot be taken off it by a file list, and every one of them is a
+**Removal is half the job, not an appendix.** What omahouse puts on a machine
+cannot be taken off it by a file list, and every one of those things is a
 restriction: the PAM line, `/etc/omahouse/blocked`, the browser policy of §11,
-and the enabled service. A restriction that outlives the program that made it is
-worse than one that never existed, because nothing left on the disk knows how to
-lift it — a name still in `blocked` locks somebody out of their own machine with
-no tool to let them back in, and a policy still in `/etc/chromium` is a site that
-will not open and a browser that says "managed by your organisation" with nothing
-to ask. `post_remove` takes all four. The profiles and the ledgers stay, by the
-convention for a package's data, and the removal message names both paths.
+the meter's four files and its key (§5.2), and the enabled service. A restriction
+that outlives the program that made it is worse than one that never existed,
+because nothing left on the disk knows how to lift it — a name still in `blocked`
+locks somebody out of their own machine with no tool to let them back in, and a
+policy still in `/etc/chromium` is a site that will not open and a browser that
+says "managed by your organisation" with nothing to ask. The profiles and the
+ledgers stay, by the convention for a package's data, and the removal message
+names them.
+
+### The removal is generated from one declaration, and a test proves it complete
+
+Since §5.2 the package is **not describable by its own file list**: the `.crx`,
+the update manifest, the force-install policy, the native messaging manifest and
+the signing key are made by a scriptlet, so `pacman -Ql` does not list them and
+`pacman -Qkk` does not verify them. What stood in for the file list was a column
+of hand-written `rm` lines in `post_remove` — and the VM proved on the first
+attempt that the column was already incomplete: the meter's native messaging
+host survived `pacman -R`.
+
+That failure mode is silent and on the wrong side, so it is closed structurally
+rather than by writing the next list more carefully:
+
+- **`_artifacts` in `packaging/omahouse.install` is the one place any of those
+  paths is written.** Four verbs — `take`, `prune`, `borrow`, `keep` — and
+  `post_remove` is a loop over the list rather than a column of commands. The
+  removal message names the `keep` lines out of the same list, so the sentence
+  and the behaviour cannot come apart.
+- **The scriptlet has a prefix**, `$OMAHOUSE_PACK_ROOT`, which is the one
+  `omahouse-meter-pack` already had. Empty on a real machine; under a root, the
+  script writes only there, enables no unit and kills no process — the same
+  discipline `mayTouchTheBrowserPolicy` keeps in §11.
+- **`check_the_removal_covers_what_the_install_makes` in `tests/test_cli.py`
+  runs the real thing.** It stages what `pacman -U` would, runs `post_install`
+  (which signs a real key and a real `.crx`), asks two questions of the disk —
+  did anything appear that the list does not name, and did anything the install
+  made outlive `post_remove` — then takes pacman's own files away and runs
+  `post_remove`. It is in `mise run verify`, so it answers on every commit
+  rather than on the next VM night.
+- **The VM case reads the same declaration.** `PUT_ON_THE_MACHINE` there used to
+  be a third copy of the list; the removal half of that case now asks the machine
+  about every `take` and `prune` line in the scriptlet.
+
+The property is the one worth naming: **an artefact cannot be added to what the
+installation creates without the removal knowing.** Add one to the packer and
+leave the list alone, and the gate goes red on the undeclared path; put it on
+the list under a verb that cannot remove it, and the gate goes red on the
+survivor.
 
 `Restart=always` matters: a stopped daemon is a rule switched off, and an
 account without privilege cannot stop a system service.
@@ -1030,7 +1076,7 @@ once per checkout with `mise run hooks:install`. In order, it runs:
 | step | what it refuses |
 |---|---|
 | `usage-check.sh` | `omahouse.usage.kdl` that does not lint, or a `docs/cli.md` that is not what it generates |
-| `test.sh` | the C++ unit suite and `tests/test_cli.py`, the CLI end to end |
+| `test.sh` | the C++ unit suite and `tests/test_cli.py`, the CLI end to end — and, since §9, `packaging/omahouse.install` put on a temporary root and taken off it again |
 | `qml-check.sh` | any QML warning at all |
 | `studio-check.sh` | the studio driven by keyboard and by mouse, offscreen |
 | `shots-check.sh` | a `docs/img` that is not what the studio draws today |

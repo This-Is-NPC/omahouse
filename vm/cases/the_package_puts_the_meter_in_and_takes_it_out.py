@@ -38,7 +38,9 @@ to keep, priced here rather than argued about.
 """
 
 import json
+import re
 import time
+from pathlib import Path
 
 MACHINE = "omarchy"
 
@@ -49,10 +51,47 @@ WHY = "the package alone puts the meter in Chromium, and pacman -R takes all of 
 #: number itself is measured against the wall clock.
 SITE = "example.com/"
 
-#: Everything the package or its scriptlet puts on a machine that a `pacman -R`
-#: has to take back off. The four browser files are written by the scriptlet and
-#: owned by no package, which is why a file list alone could never remove them
-#: and why this list is checked by hand.
+def _declared(verb):
+    """The one list in `packaging/omahouse.install`, read the way `post_remove`
+    reads it.
+
+    It used to be written again in this file, under the name below, and that was
+    a third copy of a list that had already been wrong twice -- once in the
+    scriptlet, where this case caught it, and once here, where nothing would
+    have. The removal half of this case now asks the machine about every line of
+    the declaration, so a path added to that file is measured here without
+    anybody remembering to come back and add it."""
+    text = (Path(__file__).resolve().parents[2] / "packaging/omahouse.install").read_text()
+    body = re.search(r"_artifacts\(\)\s*\{\n\s*cat <<-'LIST'\n(.*?)\n\s*LIST\n",
+                     text, re.S)
+    if not body:
+        raise RuntimeError("packaging/omahouse.install no longer has one list to read")
+    found = []
+    for line in body.group(1).splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) >= 2 and parts[0] == verb:
+            found.append(parts[1])
+    if not found:
+        raise RuntimeError(f"nothing is declared `{verb}` any more")
+    return found
+
+
+#: What `pacman -R` has to take off, out of the scriptlet's own declaration.
+TAKEN_ON_REMOVAL = _declared("take")
+#: And the directories of ours it empties behind them.
+PRUNED_ON_REMOVAL = _declared("prune")
+
+#: What has to be on the machine after `pacman -U`, before a browser has looked
+#: at any of it: the four files the scriptlet wrote, the key it wrote them from,
+#: and the three the package itself owns.
+#:
+#: Named here rather than taken from the declaration, and the difference is
+#: real. That list is about what removal has to lift, and two of its lines --
+#: the `blocked` file and the site policy of §11 -- are written by the running
+#: program and are not on a machine that has only just installed this. These are
+#: two different questions about overlapping sets, and folding them into one
+#: list is how the answer to one of them would quietly become the answer to the
+#: other.
 PUT_ON_THE_MACHINE = [
     "/etc/chromium/policies/managed/omahouse-meter.json",
     "/etc/chromium/native-messaging-hosts/com.omahouse.meter.json",
@@ -74,6 +113,15 @@ def run(vm):
 
     def there(path):
         return vm.root(f"test -e {path}", check=False)[0] == 0
+
+    def anything_matching(pattern):
+        """The same question for a line that may hold a glob.
+
+        `test -e` cannot be asked one: an unquoted pattern that matches twice
+        hands it three arguments and it answers with a usage error, which reads
+        as `no`."""
+        return vm.root(f"sh -c 'ls -d {pattern} 2>/dev/null | head -1'",
+                       check=False)[1].strip() != ""
 
     def go(where):
         """Ctrl+L, the address, Enter -- the way a person types one."""
@@ -220,17 +268,23 @@ def run(vm):
 
     # -- 5. and everything is off the machine ---------------------------------
 
-    left = [path for path in PUT_ON_THE_MACHINE if there(path)]
+    # Everything this case saw arrive, and everything the scriptlet declares it
+    # takes -- which is a longer list, because it also covers what the *running*
+    # program leaves behind and this machine may or may not have.
+    asked = PUT_ON_THE_MACHINE + [path for path in TAKEN_ON_REMOVAL
+                                  if path not in PUT_ON_THE_MACHINE]
+    left = [path for path in asked if anything_matching(path)]
     if left:
         raise Failed("`pacman -R` left these on a machine with no omahouse on it:\n"
                      "      " + "\n      ".join(left))
-    print(f"      all {len(PUT_ON_THE_MACHINE)} of them are gone")
+    print(f"      all {len(asked)} of them are gone, and the list came from "
+          "packaging/omahouse.install")
 
-    # /usr/share/omahouse and /etc/omahouse/meter as directories, not only as
-    # files: an empty directory is not a restriction, but one that is still there
-    # is a sign the removal ran half way.
-    for directory in ("/usr/share/omahouse", "/usr/lib/omahouse", "/etc/omahouse/meter"):
-        if there(directory):
+    # The directories, not only the files: an empty directory is not a
+    # restriction, but one that is still there is a sign the removal ran half
+    # way. `/usr/lib/omahouse` is pacman's own and the rest are declared.
+    for directory in PRUNED_ON_REMOVAL + ["/usr/lib/omahouse"]:
+        if anything_matching(directory):
             raise Failed(f"{directory} is still on the machine after pacman -R")
 
     # Nothing under the browser's own directories mentions omahouse -- and the

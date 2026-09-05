@@ -13,16 +13,149 @@
 # where somebody moved the line by hand, which is theirs to have done.
 #
 # And removal is not an afterthought here, it is half the job. omahouse puts
-# things on a machine that a file list cannot take back off it: the PAM line, the
-# `blocked` list that line reads, the browser policy of §11, the force-install
-# policy, the signed archive and the signing key of the meter of §5.2, and an
-# enabled service. Every
-# one of them is a restriction, and a restriction that outlives the program that
-# made it is worse than one that never existed -- there is no longer anything on
-# the machine that knows how to lift it. `post_remove` below takes all of them,
-# in that spirit, and says what it kept.
+# things on a machine that a file list cannot take back off it, and every one of
+# them is a restriction: a restriction that outlives the program that made it is
+# worse than one that never existed, because there is no longer anything on the
+# machine that knows how to lift it. `_artifacts` below is the list of all of
+# them, and it is the only place any of those paths is written down.
 
-_pam_file=/etc/pam.d/system-login
+# -- the prefix ---------------------------------------------------------------
+#
+# Empty on a real machine, and that is the whole of what it does there.
+#
+# It is here so that this scriptlet can be *run* -- `post_install` and then
+# `post_remove` -- against a directory of its own, which is what
+# `check_the_removal_covers_what_the_install_makes` in `tests/test_cli.py` does
+# on every commit. Without it, the only way to find out whether removal is
+# complete is to install the package on a machine and take it off again, which
+# is a VM run, which is nightly and manual -- and the failure this whole half of
+# the file exists to prevent is silent and on the wrong side. It was found once
+# exactly that way, in a VM, and only because somebody thought to look.
+#
+# It is the same variable `/usr/lib/omahouse/meter-pack` reads, so a rooted run
+# of this script passes the root down to the packer through the environment
+# without either of them having to know about the other. The same seam
+# `$OMAHOUSE_CONFIG_DIR` and `$OMAHOUSE_CHROMIUM_POLICY_DIR` are for the program
+# itself, and it carries the same discipline: a run pointed at a tree of its own
+# writes where it was told to write, and it does not touch this machine's
+# services.
+_root="${OMAHOUSE_PACK_ROOT:-}"
+
+# -- the one list -------------------------------------------------------------
+#
+# **Everything the installation puts on a machine outside its own file list, and
+# what removal does about it.** Declared once, here, and read by two things: the
+# `post_remove` below, which does what the first column says; and a test in
+# `tests/test_cli.py`, which runs this whole script against a temporary root and
+# refuses a path that appeared on disk and is not named here.
+#
+# That pairing is the point, and it is a correction of something that had gone
+# wrong. The `.crx`, the update manifest, the force-install policy, the native
+# messaging manifest and the signing key are made by a scriptlet rather than
+# shipped, so `pacman -Ql` does not list them and `pacman -Qkk` does not check
+# them -- the package is no longer describable by its own file list. What stood
+# in for that was a column of hand-written `rm` lines, and the VM proved on the
+# very first run that the column was already incomplete: the meter's native
+# messaging host survived `pacman -R`, on a machine with nothing left to explain
+# or undo it. A hand-written list is not a thing to write more carefully. It is a
+# thing to stop having.
+#
+# So: adding an artefact and forgetting to remove it now breaks the gate, and
+# not somebody's machine.
+#
+# Three verbs, and the third is not tidiness:
+#
+#   take    removed, whatever else is kept. Every restriction is one of these.
+#   prune   a directory of ours: removed if it is empty, left alone if somebody
+#           put something in it. Order matters -- deepest first.
+#   borrow  a directory that belongs to another program and that this install
+#           creates if it is not there. Never removed, and the test requires
+#           that nothing of omahouse's is left inside it.
+#   keep    left on purpose, and named in the removal message with the words in
+#           the third column. A report is evidence and outlives the rules it was
+#           collected under.
+#
+# A `take` line may hold a glob, and is expanded against the prefix.
+_artifacts() {
+	cat <<-'LIST'
+	take    /etc/omahouse/blocked
+	take    /etc/chromium/policies/managed/omahouse.json
+	take    /etc/chromium/policies/managed/omahouse-meter.json
+	take    /etc/chromium/native-messaging-hosts/com.omahouse.meter.json
+	take    /usr/share/omahouse/chromium/omahouse-meter.crx
+	take    /usr/share/omahouse/chromium/updates.xml
+	take    /etc/omahouse/meter
+	take    /run/user/*/omahouse/focus
+	prune   /run/user/*/omahouse
+	prune   /usr/share/omahouse/chromium
+	prune   /usr/share/omahouse
+	borrow  /etc/chromium/policies/managed
+	borrow  /etc/chromium/native-messaging-hosts
+	keep    /etc/omahouse                 the directory the two below live in
+	keep    /etc/omahouse/profiles.json   who was under rules
+	keep    /var/lib/omahouse             the days already counted
+	LIST
+}
+
+# Why each `take` line is a `take`, said once here rather than beside a `rm`:
+#
+# **`blocked`** is the one thing in this file that must not be left behind. A
+# machine with a name still in it and no omahouse installed is a machine where
+# nothing can ever take that name back out -- the daemon that would have done it
+# at the turn of the day is gone. Removing the package has to be a way out, not
+# a way to make the lock permanent.
+#
+# **The browser policy of §11** is the same argument with a different file. A
+# site blocked by omahouse is blocked by a file in another program's directory,
+# and Chromium goes on reading that file whether or not omahouse is installed.
+# Leaving it is a machine where a site does not open, the browser says "managed
+# by your organisation", and no program on the disk can explain it or undo it.
+#
+# **The meter's four files** are the same argument again. A force-install policy
+# left behind after the package is gone is a browser that goes on installing an
+# extension whose native host is not on the disk, reporting into nothing, with
+# nothing left that knows how to take it off.
+#
+# **The key** -- `/etc/omahouse/meter` -- is the one a file list could never have
+# removed, because a build never knew it would exist (§5.2, "The signing key").
+# It goes for a reason stronger than tidiness: the whole of what a key per
+# machine buys is that nothing anywhere can sign an extension this machine's
+# policy would accept, and a key left on the disk of a machine with no omahouse
+# on it is exactly that thing, waiting for somebody to write a policy by hand.
+# The price is stated and not hidden -- a reinstall makes a new key, so a new id,
+# so a new extension -- and it is affordable only because this extension keeps no
+# state at all.
+#
+# **The focus files** go with the session anyway, since /run/user is a tmpfs
+# systemd empties at logout, but a machine that has not been rebooted since the
+# uninstall would still have them, and they name sites somebody visited.
+#
+# And the two directories under /etc/chromium are `borrow` and not `prune`: they
+# existed before this package on any machine with a browser on it, Omarchy's own
+# `browser-policy.sh` writes `policies.json` beside our file, and they are not
+# ours to take. Everything omahouse ever put in them is on a `take` line above.
+
+_take_what_the_install_made() {
+    local verb path rest
+    while read -r verb path rest; do
+        case "$verb" in
+        take)
+            # Unquoted on purpose: `/run/user/*/omahouse/focus` is a glob, and a
+            # glob that matches nothing passes through as itself, which `rm -rf`
+            # treats as a path that is not there. Every path here is a literal in
+            # the list above and none of them has a space in it.
+            rm -rf -- $_root$path
+            ;;
+        prune)
+            rmdir $_root$path 2>/dev/null || true
+            ;;
+        esac
+    done < <(_artifacts)
+}
+
+# -- the PAM line -------------------------------------------------------------
+
+_pam_file="$_root/etc/pam.d/system-login"
 _pam_marker='pam_listfile.so.*file=/etc/omahouse/blocked'
 
 # The line poc/findings.md round 3 measured, and the only shape of it that is
@@ -40,6 +173,10 @@ _pam_marker='pam_listfile.so.*file=/etc/omahouse/blocked'
 # recoverable, and the one that leaves them hard is not. docs/design.md §2 and §4 both
 # say it, and this is the place where getting it wrong costs somebody their
 # machine rather than an afternoon.
+#
+# The path inside the line is never prefixed, and a rooted run writes the same
+# bytes a real one would: what is under test is the edit, and a PAM line
+# pointing into somebody's $TMPDIR would be a line no machine will ever have.
 _pam_line='account    required   pam_listfile.so item=user sense=deny file=/etc/omahouse/blocked onerr=succeed'
 
 _install_pam_line() {
@@ -101,8 +238,12 @@ _directories() {
     # 0644 files in 0755 directories -- docs/design.md §4. Root writes both and
     # everybody reads them, which is what lets the fiscalised user run
     # `omahouse status` and see what is left of their own day.
-    install -d -m 0755 /etc/omahouse
-    install -d -m 0755 /var/lib/omahouse
+    #
+    # Both are `keep` lines in `_artifacts`: they hold the profiles and the days
+    # already counted, and a report is evidence that outlives the rules it was
+    # collected under.
+    install -d -m 0755 "$_root/etc/omahouse"
+    install -d -m 0755 "$_root/var/lib/omahouse"
 }
 
 # The meter, signed here rather than in a build -- docs/design.md §5.2, "The
@@ -113,16 +254,23 @@ _directories() {
 # so the id does not move and the browser sees a version going up rather than a
 # second extension appearing beside the first.
 #
+# Everything it writes is on a `take` line above, and the test is what makes that
+# sentence true rather than hopeful: it runs this function for real and then
+# looks at what appeared.
+#
 # A failure here is loud and does not stop the transaction. Everything else
 # omahouse does -- the apps, the budgets, the session -- works without a browser
 # extension; what is lost is time per site, and half an install is worse than an
 # install that says which half is missing.
 _pack_meter() {
     local said
-    if [ ! -x /usr/lib/omahouse/meter-pack ]; then
+    if [ ! -x "$_root/usr/lib/omahouse/meter-pack" ]; then
         return
     fi
-    if said="$(/usr/lib/omahouse/meter-pack 2>&1)"; then
+    # The packer reads `$OMAHOUSE_PACK_ROOT` out of the environment, which is
+    # where this script read `$_root` from, so a rooted run reaches it without
+    # either of them naming the other.
+    if said="$("$_root/usr/lib/omahouse/meter-pack" 2>&1)"; then
         echo ">>> omahouse: the browser meter is signed for this machine and forced" >&2
         echo ">>>           into Chromium. Its extension id here is ${said##*$'\n'}" >&2
         return
@@ -142,6 +290,17 @@ _pack_meter() {
     } >&2
 }
 
+# The service, and only on a run that is managing this machine.
+#
+# A run pointed at a tree of its own is not; enabling a unit out of a test would
+# be the same mistake `mayTouchTheBrowserPolicy` refuses in the CLI, with a
+# longer fuse, because a leftover enabled unit on a developer's laptop starts at
+# the next boot and nothing says why.
+_service() {
+    [ -z "$_root" ] || return 0
+    systemctl "$@" >/dev/null 2>&1 || true
+}
+
 post_install() {
     _directories
     _install_pam_line
@@ -154,7 +313,7 @@ post_install() {
     #
     # Enabling at all is the deliberate part: docs/design.md §9. A stopped daemon is a
     # rule switched off, and this package exists to be a rule.
-    systemctl enable omahouse.service >/dev/null 2>&1 || true
+    _service enable omahouse.service
 
     # Quoted delimiter. The text below names verbs in backticks, and an
     # unquoted heredoc would run them: measured on a real Omarchy install, where
@@ -189,99 +348,48 @@ post_upgrade() {
 }
 
 pre_remove() {
-    systemctl disable --now omahouse.service >/dev/null 2>&1 || true
+    _service disable --now omahouse.service
 }
 
 post_remove() {
     _remove_pam_line
 
-    # And the list itself, always, whatever else is kept.
-    #
-    # This is the one thing in this file that must not be left behind. A machine
-    # with a name still in /etc/omahouse/blocked and no omahouse installed is a
-    # machine where nothing can ever take that name back out -- the daemon that
-    # would have done it at the turn of the day is gone. Removing the package has
-    # to be a way out, not a way to make the lock permanent.
-    rm -f /etc/omahouse/blocked
-
-    # The browser policy of docs/design.md §11, for exactly the same reason.
-    #
-    # A site blocked by omahouse is blocked by a file in another program's
-    # directory, and Chromium goes on reading that file whether or not omahouse
-    # is installed. Leaving it would be a machine where a site does not open, the
-    # browser says "managed by your organisation", and there is no longer any
-    # program on the disk that could explain it or undo it. Somebody would be
-    # editing JSON in /etc by hand to get YouTube back.
-    #
-    # Removed by name, and only by name. This directory belongs to the browser
-    # and Omarchy's own `browser-policy.sh` writes `policies.json` beside ours;
-    # anything not called omahouse.json is somebody else's and is left exactly
-    # where it is. The directory itself is not removed either -- it existed
-    # before this package and it is not ours to take.
-    rm -f /etc/chromium/policies/managed/omahouse.json
-
-    # And the meter of docs/design.md §5.2, which is the same argument again with
-    # a different file. A force-install policy left behind after the package is
-    # gone is a browser that goes on installing an extension whose native host is
-    # no longer on the disk: `chrome://extensions` says "managed by your
-    # organisation" over an extension that reports into nothing, and there is no
-    # program left that knows how to take it off. So the policy goes, the archive
-    # it names goes, and the manifest that let it reach the host goes.
-    #
-    # By name, again, and only by name. The three directories all belong to other
-    # things and none of them is removed.
-    rm -f /etc/chromium/policies/managed/omahouse-meter.json
-    rm -f /etc/chromium/native-messaging-hosts/com.omahouse.meter.json
-    rm -f /usr/share/omahouse/chromium/omahouse-meter.crx
-    rm -f /usr/share/omahouse/chromium/updates.xml
-    rmdir /usr/share/omahouse/chromium /usr/share/omahouse 2>/dev/null || true
-
-    # And the key the four files above were made from, which is the one thing on
-    # this list a file list could never have removed because a build never knew
-    # it would exist -- docs/design.md §5.2, "The signing key".
-    #
-    # It goes for a reason stronger than tidiness. The whole of what a key per
-    # machine buys is that there is nothing anywhere which can sign an extension
-    # this machine's policy would accept. A key left behind after the package is
-    # gone is exactly that thing, sitting on the disk of a machine with no
-    # omahouse on it, waiting for somebody to write a policy file by hand. What
-    # it costs is stated plainly and is not hidden: a reinstall makes a new key,
-    # so it makes a new id, so the browser installs a new extension rather than
-    # finding the old one. That is the correct price -- this extension keeps no
-    # state, so a new id loses nothing, and the alternative is a key that
-    # outlives its own program.
-    rm -rf /etc/omahouse/meter
+    # Everything on the list, in the order the list is written. There is no
+    # column of `rm` lines here any more, and that is the change: a path that is
+    # not on the list is not removed, and a path that is not on the list and
+    # appears on a machine turns the gate red.
+    _take_what_the_install_made
 
     # And any meter host that is **still running**, which is not a file and is
-    # the one thing on this list a file list could never have suggested.
+    # the one thing here a file list could never have suggested.
     #
     # A native messaging host lives as long as the pipe the browser gave it, and
     # a browser that was open through the removal still holds that pipe. Nothing
     # else on the machine would end it: the process is the child's, it holds a
     # `/usr/bin/omahouse` that no longer has a name, and it goes on appending to
-    # the focus file the next two lines delete -- so the file comes back within
-    # five seconds, naming the sites she is visiting, on a machine with no
+    # the focus file the list above has just deleted -- so the file comes back
+    # within five seconds, naming the sites she is visiting, on a machine with no
     # omahouse on it and nothing left to explain either. That is precisely the
     # failure the whole of this function refuses, and it is not a file, which is
-    # why nothing before this line caught it.
+    # why no list of paths catches it.
     #
     # By exact command line and not by name: `omahouse` alone would take a
     # `status` somebody is reading in another terminal. The native messaging
-    # manifest was removed a few lines above, so nothing can spawn another one
-    # after this, and `/usr/bin/omahouse` is not on the disk any more either.
-    pkill -f '^/usr/bin/omahouse meter' 2>/dev/null || true
-    pkill -f '^/bin/sh /usr/lib/omahouse/meter-host' 2>/dev/null || true
-    # And the same process named by the one argument only a browser ever passes
-    # it, whatever path it was reached through. Nothing but a native messaging
-    # host is ever called with an extension origin on its command line.
-    pkill -f 'omahouse meter chrome-extension://' 2>/dev/null || true
-
-    # The focus files the browser's host left in each session's runtime
-    # directory. They go with the session anyway -- /run/user is a tmpfs systemd
-    # empties at logout -- but a machine that has not been rebooted since the
-    # uninstall would still have them, and they name sites somebody visited.
-    rm -f /run/user/*/omahouse/focus 2>/dev/null || true
-    rmdir /run/user/*/omahouse 2>/dev/null || true
+    # manifest is gone by now, so nothing can spawn another one after this, and
+    # `/usr/bin/omahouse` is not on the disk any more either.
+    #
+    # Only on a run that is managing this machine, for the reason `_service`
+    # gives: a rooted run has no business killing processes that are nothing to
+    # do with the tree it was pointed at.
+    if [ -z "$_root" ]; then
+        pkill -f '^/usr/bin/omahouse meter' 2>/dev/null || true
+        pkill -f '^/bin/sh /usr/lib/omahouse/meter-host' 2>/dev/null || true
+        # And the same process named by the one argument only a browser ever
+        # passes it, whatever path it was reached through. Nothing but a native
+        # messaging host is ever called with an extension origin on its command
+        # line.
+        pkill -f 'omahouse meter chrome-extension://' 2>/dev/null || true
+    fi
 
     cat <<-'MESSAGE'
 	>>> omahouse: everything omahouse put on this machine is off it.
@@ -297,11 +405,19 @@ post_remove() {
 	>>>           starts without a policy naming it. If a window was open through
 	>>>           all of this, close it once.
 	>>>
-	>>>           Two things were kept on purpose, and here is where they are:
-	>>>             /etc/omahouse/profiles.json   who was under rules
-	>>>             /var/lib/omahouse/            the days already counted
+	>>>           Kept on purpose, and here is where they are:
+	MESSAGE
+    # Out of the same list `post_remove` just worked from, so the message cannot
+    # come to name a path the removal treats differently.
+    _artifacts | awk '$1 == "keep" {
+        path = $2
+        $1 = ""; $2 = ""
+        sub(/^ +/, "")
+        printf ">>>             %-29s %s\n", path, $0
+    }'
+    cat <<-'MESSAGE'
 	>>>           A report is evidence, and it outlives the rules it was
-	>>>           collected under. Neither of them does anything to the machine
-	>>>           now; `rm -rf` both if you want the account back to nothing.
+	>>>           collected under. Nothing there does anything to the machine
+	>>>           now; `rm -rf` all three if you want the account back to nothing.
 	MESSAGE
 }

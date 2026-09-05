@@ -511,24 +511,40 @@ sudo pacman -R omahouse
 >>>
 >>>           The login block is gone and everybody can log in again, the
 >>>           browser policy in /etc/chromium/policies/managed/omahouse.json
->>>           is gone and every site opens again, and the service is stopped
->>>           and disabled. No rule omahouse wrote is still in force.
+>>>           is gone and every site opens again, the meter extension is no
+>>>           longer force-installed, its native host is gone, the key this
+>>>           machine signed it with is gone, and the service is stopped and
+>>>           disabled. No rule omahouse wrote is still in force.
 >>>
->>>           Two things were kept on purpose, and here is where they are:
+>>>           Chromium drops a force-installed extension the next time it
+>>>           starts without a policy naming it. If a window was open through
+>>>           all of this, close it once.
+>>>
+>>>           Kept on purpose, and here is where they are:
+>>>             /etc/omahouse                 the directory the two below live in
 >>>             /etc/omahouse/profiles.json   who was under rules
->>>             /var/lib/omahouse/            the days already counted
+>>>             /var/lib/omahouse             the days already counted
 >>>           A report is evidence, and it outlives the rules it was
->>>           collected under. Neither of them does anything to the machine
->>>           now; `rm -rf` both if you want the account back to nothing.
+>>>           collected under. Nothing there does anything to the machine
+>>>           now; `rm -rf` all three if you want the account back to nothing.
 ```
 
-Four of the things omahouse does are not files it owns, and all four come off:
-the `pam_listfile` line in `/etc/pam.d/system-login`, the `blocked` list that
-line reads, the Chromium managed policy, and the enabled service. That is
-deliberate and it is the point — a name left in `blocked` with no omahouse on
-the disk would lock somebody out of their own machine with nothing left to let
-them back in, and a policy left in `/etc/chromium` would be a site that will not
-open and a browser saying "managed by your organisation" with nobody to ask.
+Most of what omahouse does is not a file it owns, and all of it comes off: the
+`pam_listfile` line in `/etc/pam.d/system-login`, the `blocked` list that line
+reads, the Chromium managed policy, the browser meter's force-install policy,
+its archive, its update manifest, its native messaging manifest, the key this
+machine signed it with, and the enabled service. That is deliberate and it is
+the point — a name left in `blocked` with no omahouse on the disk would lock
+somebody out of their own machine with nothing left to let them back in, and a
+policy left in `/etc/chromium` would be a site that will not open and a browser
+saying "managed by your organisation" with nobody to ask.
+
+None of that is a list somebody remembers to keep up to date. The scriptlet
+declares what the installation puts on a machine, `post_remove` is a loop over
+that declaration, and a test in `mise run verify` installs and removes the whole
+thing against a temporary directory and refuses a commit where something
+appeared that the declaration does not name, or survived a removal that should
+have taken it. `docs/design.md` §9 is the long version.
 
 ### Reading the day
 

@@ -28,6 +28,7 @@ import struct
 import tempfile
 import time
 from datetime import date, timedelta
+from fnmatch import fnmatch
 from pathlib import Path
 
 
@@ -2212,6 +2213,221 @@ def check_status_and_report_show_the_time_per_site(box):
 
 # -- the promise of the stage -------------------------------------------------
 
+# -- the package, put on a machine and taken off it --------------------------
+#
+# The one case in this file that is not about the binary. It is here rather than
+# in `vm/` because of where the failure it catches lives: `vm/cases/` is nightly
+# and manual and needs a VM with a browser on it, and this failure is silent and
+# on the wrong side -- a restriction left on a machine that no longer has the
+# tool to lift it. Something that can only be caught by an afternoon in a VM is
+# something that will be caught after it has shipped.
+
+INSTALL_SCRIPT = ROOT / "packaging/omahouse.install"
+METER_PACK = ROOT / "packaging/omahouse-meter-pack"
+
+
+def artifacts_the_install_declares():
+    """The one list in `packaging/omahouse.install`, read the way `post_remove`
+    reads it.
+
+    Parsed out of the file rather than repeated here, and that is the whole
+    point of the exercise: a copy in this file would be a second hand-written
+    list, which is the thing that was wrong in the first place."""
+    text = INSTALL_SCRIPT.read_text()
+    body = re.search(r"_artifacts\(\)\s*\{\n\s*cat <<-'LIST'\n(.*?)\n\s*LIST\n",
+                     text, re.S)
+    assert body, f"{INSTALL_SCRIPT} no longer has one list for anything to read"
+    declared = []
+    for line in body.group(1).splitlines():
+        parts = line.strip().split(None, 2)
+        if not parts:
+            continue
+        assert parts[0] in ("take", "prune", "borrow", "keep"), line
+        assert len(parts) >= 2 and parts[1].startswith("/"), line
+        declared.append((parts[0], parts[1]))
+    assert declared, "the list is empty"
+    return declared
+
+
+def paths_under(root):
+    """Every path in that tree, spelled as it would be on a real machine."""
+    return {"/" + child.relative_to(root).as_posix() for child in root.rglob("*")}
+
+
+def is_declared(path, declared):
+    """Whether the list has anything to say about that path.
+
+    Three ways it can. The path is named; the path is inside something the list
+    says to `take`, which is removed whole; or the path is a directory that only
+    exists so that something named can live in it -- `/etc/chromium` is not an
+    artefact, it is where one of them is."""
+    for verb, named in declared:
+        if fnmatch(path, named):
+            return True
+        if verb == "take" and fnmatch(path, named + "/*"):
+            return True
+        if named.startswith(path + "/"):
+            return True
+    return False
+
+
+def may_outlive_the_removal(path, declared):
+    """Whether that path is allowed to still be there after `post_remove`.
+
+    Only three kinds are: what the list `keep`s on purpose, a directory it
+    `borrow`s from another program, and the containers those live in."""
+    for verb, named in declared:
+        if verb in ("keep", "borrow") and fnmatch(path, named):
+            return True
+        if named.startswith(path + "/"):
+            return True
+    return False
+
+
+def check_the_removal_covers_what_the_install_makes(box):
+    """The property `packaging/omahouse.install` exists to have: **nothing can
+    be added to what the installation creates without the removal knowing.**
+
+    The package is no longer describable by its own file list. The `.crx`, the
+    update manifest, the force-install policy, the native messaging manifest and
+    the signing key are made by a scriptlet, so `pacman -Ql` does not list them
+    and `pacman -Qkk` does not verify them -- and what stood in for that was a
+    column of hand-written `rm` lines in `post_remove`. The VM proved on the
+    first attempt that the column was already incomplete: the meter's native
+    messaging host survived `pacman -R`, on a machine with nothing left on it
+    that could explain or undo it.
+
+    So the scriptlet declares what it creates, once, and this runs the real
+    thing against a directory of its own and checks the declaration against the
+    disk. Two questions, and the second is the one with the teeth:
+
+      1. Did anything appear that the list does not name?
+      2. Did anything the install made outlive `post_remove`?
+
+    Add an artefact to `omahouse-meter-pack` and forget the line, and both go
+    red here rather than on somebody's machine.
+
+    Nothing of this machine is touched. `$OMAHOUSE_PACK_ROOT` is the prefix the
+    packer already had and the scriptlet now shares, and under it the scriptlet
+    refuses to enable a unit or to kill a process -- the same discipline
+    `mayTouchTheBrowserPolicy` keeps in the CLI."""
+    declared = artifacts_the_install_declares()
+    machine = box.root / "machine"
+
+    # What `pacman -U` itself puts down: `vm/PKGBUILD`'s `package()`, cut to the
+    # four files the scriptlet reaches for. Everything else in that list is a
+    # binary or a unit and is removed by pacman without a scriptlet's help.
+    packaged = {}
+    for source, destination, mode in (
+            (ROOT / "packaging/omahouse-meter-host", "usr/lib/omahouse/meter-host", 0o755),
+            (METER_PACK, "usr/lib/omahouse/meter-pack", 0o755),
+            (ROOT / "extension/manifest.json",
+             "usr/share/omahouse/chromium/omahouse-meter/manifest.json", 0o644),
+            (ROOT / "extension/background.js",
+             "usr/share/omahouse/chromium/omahouse-meter/background.js", 0o644)):
+        target = machine / destination
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+        target.chmod(mode)
+        packaged["/" + destination] = target
+
+    # A login stack with an `account` line in it, so the PAM edit has somewhere
+    # to go. The one thing on a machine omahouse changes rather than creates,
+    # which is why it is checked by comparing bytes rather than by the list.
+    pam = machine / "etc/pam.d/system-login"
+    pam.parent.mkdir(parents=True, exist_ok=True)
+    was = ("auth       required   pam_unix.so\n"
+           "account    required   pam_unix.so\n"
+           "session    required   pam_unix.so\n")
+    pam.write_text(was)
+
+    environment = dict(os.environ, OMAHOUSE_PACK_ROOT=str(machine))
+    before = paths_under(machine)
+
+    def scriptlet(function):
+        done = subprocess.run(
+            ["bash", "-c", f". {INSTALL_SCRIPT}; {function}"],
+            capture_output=True, text=True, env=environment)
+        assert done.returncode == 0, f"{function}: {done.stderr}"
+        return done.stdout + done.stderr
+
+    said = scriptlet("post_install")
+
+    # If the packer did not run, everything below is vacuously true, which is
+    # the worst way for this case to pass.
+    crx = machine / "usr/share/omahouse/chromium/omahouse-meter.crx"
+    assert crx.is_file(), (
+        "the packer wrote no archive, so this case proved nothing. `openssl` and "
+        f"`zip` are its whole toolchain and vm/PKGBUILD names both. It said:\n{said}")
+    identifier = (machine / "etc/omahouse/meter/id").read_text().strip()
+    assert len(identifier) == 32, identifier
+    for named in ("etc/chromium/policies/managed/omahouse-meter.json",
+                  "etc/chromium/native-messaging-hosts/com.omahouse.meter.json",
+                  "usr/share/omahouse/chromium/updates.xml"):
+        assert identifier in (machine / named).read_text(), named
+
+    # The §11 policy and the `blocked` list are written by the program and not by
+    # the scriptlet, so nothing above made them -- and they are on the list all
+    # the same, because what the list is about is what omahouse leaves on a
+    # machine and not which of its parts put it there. Made here by hand so that
+    # the removal half is asked about them too.
+    (machine / "etc/omahouse/blocked").write_text("kid\n")
+    (machine / "etc/chromium/policies/managed/omahouse.json").write_text(
+        '{"URLBlocklist":["youtube.com"]}\n')
+
+    made = paths_under(machine) - before
+    undeclared = sorted(path for path in made if not is_declared(path, declared))
+    assert not undeclared, (
+        "the installation put these on a machine and "
+        f"{INSTALL_SCRIPT.name} does not name any of them, so `post_remove` will "
+        "not take them off:\n      " + "\n      ".join(undeclared))
+
+    # And now `pacman -R`: it removes the files it owns and the directories that
+    # are its own and are empty, and then runs the scriptlet.
+    for target in packaged.values():
+        target.unlink()
+    (machine / "usr/share/omahouse/chromium/omahouse-meter").rmdir()
+    (machine / "usr/lib/omahouse").rmdir()
+
+    scriptlet("post_remove")
+
+    left = sorted(path for path in made
+                  if (machine / path.lstrip("/")).exists()
+                  and not may_outlive_the_removal(path, declared))
+    assert not left, (
+        "`pacman -R` left these on a machine with no omahouse on it:\n      "
+        + "\n      ".join(left))
+
+    # The one that really happened, named so that a regression says which
+    # regression it is.
+    assert not (machine / "etc/chromium/native-messaging-hosts"
+                          "/com.omahouse.meter.json").exists()
+    # And the key, which is the whole of what a key per machine buys: nothing is
+    # left anywhere that could sign an extension this machine's policy accepts.
+    assert not (machine / "etc/omahouse/meter").exists()
+
+    # Nothing of ours inside the directories that are not ours, and the
+    # directories themselves still standing: they belong to the browser, and
+    # Omarchy's own `browser-policy.sh` writes `policies.json` beside our file.
+    for verb, named in declared:
+        if verb != "borrow":
+            continue
+        borrowed = machine / named.lstrip("/")
+        assert borrowed.is_dir(), f"{named} was taken, and it is not ours to take"
+        for child in borrowed.rglob("*"):
+            assert "omahouse" not in child.name, child
+
+    # The two kept on purpose, and the message that names them, out of the same
+    # list `post_remove` worked from.
+    assert (machine / "etc/omahouse").is_dir()
+    assert (machine / "var/lib/omahouse").is_dir()
+
+    # And the PAM file, which is not on the list because it is not a file
+    # omahouse creates: it is one it edits, and the only sound assertion about
+    # an edit is that the bytes came back.
+    assert pam.read_text() == was, pam.read_text()
+
+
 def check_the_reading_verbs_write_nothing(box):
     """`status`, `report` and `profile show` read. None of them touches a file.
 
@@ -2291,6 +2507,7 @@ def main():
         check_a_site_budget_composes_with_the_web_rules,
         check_status_and_report_show_the_time_per_site,
         check_watch_writes_presence_beside_the_budgets_and_never_into_them,
+        check_the_removal_covers_what_the_install_makes,
         check_the_reading_verbs_write_nothing,
     ]
     for case in cases:
