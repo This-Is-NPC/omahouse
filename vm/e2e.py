@@ -108,6 +108,22 @@ class VM:
         # `put_the_state_back`.
         self.remembered = None
 
+    @property
+    def omakure_binary(self):
+        """The statically linked omakure built from the checkout beside this one.
+
+        A path, never a download. The spike is about the code on this machine,
+        and a release fetched from anywhere would be testing somebody else's
+        build. musl because the guest's glibc is not this one's.
+        """
+        built = (ROOT.parent / "omakure" / "target" / "x86_64-unknown-linux-musl"
+                 / "release" / "omakure")
+        if not built.exists():
+            raise Blocked(
+                f"{built} is not built. In the omakure checkout run\n"
+                "    cargo build --release --target x86_64-unknown-linux-musl")
+        return built
+
     # -- libvirt ------------------------------------------------------------
 
     def virsh(self, *args, check=True):
@@ -210,10 +226,10 @@ class VM:
             command,
         ]
 
-    def ssh(self, command, check=True, timeout=120):
+    def ssh(self, command, check=True, timeout=120, stdin=None):
         if self.address is None:
             raise Blocked("no address yet")
-        done = run(self._ssh_argv(command), timeout=timeout)
+        done = run(self._ssh_argv(command), timeout=timeout, input=stdin)
         self.log.append((command, done.returncode, done.stdout, done.stderr))
         if check and done.returncode != 0:
             raise Failed(
