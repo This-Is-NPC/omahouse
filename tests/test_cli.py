@@ -715,7 +715,7 @@ def check_status_of_a_user_who_is_not_logged_in(box):
 def check_status_says_who_is_in_front_of_the_machine(box):
     """Presence, on the screen an operator reads — the three states, measured.
 
-    `.temp/spike-extension.md` §5 measured a browser answering `active` for
+    The browser spike measured a browser answering `active` for
     twenty-five minutes with the monitor physically off. So the question is asked
     of the machine: which session the seat is showing, and whether the screens
     are lit. Both roots are this box's own, which is what lets the three states
@@ -1880,7 +1880,7 @@ def check_watch_counts_a_faster_tick(box):
 def check_the_meter_writes_what_the_browser_told_it(box):
     """The host's half: frames in on stdin, one line out per frame.
 
-    It is stupid on purpose. `.temp/spike-extension.md` §1 measured this process
+    It is stupid on purpose. The browser spike measured this process
     running as the child with /var/lib/omahouse root's, so it has no path to the
     ledger and is given none -- it appends to a file in her own runtime directory
     and stops.
@@ -1913,7 +1913,7 @@ def check_the_meter_writes_what_the_browser_told_it(box):
     assert ran.stdout == b"", ran.stdout
 
     # Typed by a person rather than started by a browser. Native messaging is
-    # always a pipe (`.temp/spike-extension.md` §1 measured `STDIN_ISATTY=False`),
+    # always a pipe (the browser spike measured `STDIN_ISATTY=False`),
     # so a terminal here is somebody wondering what the verb does -- and what it
     # would do is sit there silently for ever. A real pty, because the whole
     # refusal is about what stdin is.
@@ -1934,7 +1934,7 @@ def check_watch_counts_a_site_only_while_somebody_is_there(box):
     """The crossing, and the case that decides whether this is worth having.
 
     A browser is a witness to what is on the screen and a proven liar about
-    whether anybody is looking at it: `.temp/spike-extension.md` §5 asked
+    whether anybody is looking at it: the browser spike asked
     `chrome.idle` ninety-four times through half an hour of an empty room, with
     the monitor off for twenty-five minutes of it, and got `active` every time.
     So the name comes from the browser and the presence comes from the kernel,

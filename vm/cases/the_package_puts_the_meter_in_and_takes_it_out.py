@@ -14,7 +14,7 @@ asserts is that a browser which has never heard of any of it installs the
 extension and spawns the host.
 
 **Why a key made during `pacman -U` is the interesting part.**
-`.temp/spike-extension.md` §2 proved a `.crx` we signed installs off-store under
+The browser spike proved a `.crx` we signed installs off-store under
 `ExtensionSettings` with a `file:` `update_url` — with a key that already existed,
 on a machine somebody had prepared. What was never measured is whether a key born
 minutes earlier, whose id nothing in the tree can name, is different in any way

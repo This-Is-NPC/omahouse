@@ -17,7 +17,11 @@ This page is enough on its own. Stopping a site from opening at all is
   Chromium by the install scriptlet. A build straight from a checkout has no
   meter, and with no meter no site is ever reported and no site budget is ever
   spent. [How to install it](how-to-install-and-remove.md).
-- **The browser is Chromium**, and the person is browsing in it.
+- **The browser is Chromium**, and it is the *only* browser this account can
+  open. The meter is a Chromium extension: it reports nothing from Firefox and
+  nothing from anything else, so a second browser on the allowlist is an hour a
+  day that no site budget will ever see. Leaving it off the allowlist is what
+  makes the number mean anything — [how to release programs](how-to-release-programs.md).
 - `kid` is a placeholder for the account's login name. Writing needs root.
 
 **One thing to know before writing the number:** the browser policy is one file

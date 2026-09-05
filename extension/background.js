@@ -30,7 +30,7 @@
 // content script would be code running inside every page somebody opens, and
 // this needs to know a name rather than to read a page.
 //
-// No `idle`. `.temp/spike-extension.md` §5 asked `chrome.idle` every twenty
+// No `idle`. The browser spike asked `chrome.idle` every twenty
 // seconds through thirty minutes of an empty room and got `active` ninety-four
 // times out of ninety-four, including the last twenty-five minutes with the
 // monitor physically off. A browser on Omarchy does not merely fail to notice
@@ -169,7 +169,7 @@ function open() {
     }
     port.onDisconnect.addListener(() => {
         port = null;
-        // Not measured: `.temp/spike-extension.md` §3 held the port for thirty
+        // Not measured: the browser spike held the port for thirty
         // minutes without one of these, and a suspend and resume was never
         // exercised (`docs/the-browser-half.md` §9, question 9). So the
         // reconnection here is written for a case nobody has seen rather than
@@ -216,7 +216,7 @@ async function report(why) {
     // `docs/the-browser-half.md` §5.7 warned that `windows.onFocusChanged` sends
     // a spurious `WINDOW_ID_NONE` before every window-to-window switch on some
     // Linux window managers and that the lie would have to be damped.
-    // `.temp/spike-extension.md` §4 measured it on this compositor: twenty real
+    // the browser spike measured it on this compositor: twenty real
     // alt-tabs, twenty clean events, zero spurious `NONE`. Damping a lie nobody
     // has observed would be machinery with no measurement behind it, and this
     // file is small on purpose.

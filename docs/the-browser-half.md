@@ -127,7 +127,7 @@ what that costs.
 
 ## 1. Where the evidence comes from, and what kind it is
 
-The survey behind this page is `.temp/extension-survey.md`, 2026-09-04. Four
+The survey behind this page was made on 2026-09-04. Four
 kinds of evidence, in descending order of confidence, and the page marks which
 one it is using whenever it matters.
 

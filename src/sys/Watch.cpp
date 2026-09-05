@@ -422,7 +422,7 @@ void Watch::observe(const Profile &profile, Watched *watched, const SeatReading 
     // The crossing is the whole of why the number is worth having, and it is why
     // this is the one thing `evaluate` is told about the browser. The browser is
     // a witness to *what* is on the screen and a proven liar about *whether
-    // anybody is looking*: `.temp/spike-extension.md` §5 asked `chrome.idle`
+    // anybody is looking*: the browser spike asked `chrome.idle`
     // ninety-four times through half an hour of an empty room, with the monitor
     // physically off for twenty-five minutes of it, and got `active` every time.
     // So the name comes from the browser and the presence comes from the

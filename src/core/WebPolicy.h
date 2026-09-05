@@ -31,7 +31,7 @@ namespace omahouse {
 /// The three keys are the whole of this slice. `URLBlocklist` and `URLAllowlist`
 /// are Chromium's own pair, and the allowlist is only ever an exception carved
 /// out of the blocklist: on its own it blocks nothing at all. That is not a
-/// guess -- `.temp/spike-extension.md` §7 measured the same trap one policy
+/// guess -- the browser spike measured the same trap one policy
 /// over, where a `NativeMessagingAllowlist` with no blocklist beside it let
 /// through exactly the host it was supposed to keep out.
 struct ChromiumPolicy {

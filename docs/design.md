@@ -257,7 +257,7 @@ says both of those things out loud.
 
 A spike put a Chromium extension on real Omarchy and asked `chrome.idle` every
 twenty seconds for thirty minutes with nobody at the keyboard
-(`.temp/spike-extension.md` §5). It answered `active` every single time, including
+(the browser spike). It answered `active` every single time, including
 the last twenty-five minutes with the monitor physically off. A browser does not
 merely fail to notice idleness — it reports presence that is not there, and any
 time-per-site meter built on it runs all night beside a sleeping child.
@@ -313,7 +313,7 @@ which is the one number in this program that a dark screen does change.
 ### 5.2 Time per site, and the budget on it
 
 `the-browser-half.md` proposed a Chromium extension that reports the site in
-the front tab, and `.temp/spike-extension.md` measured its whole chain on real
+the front tab, and the browser spike measured its whole chain on real
 Omarchy. This is what shipped of it. It counts the number, and — since §5.3 — a
 number that runs out acts.
 
@@ -339,7 +339,7 @@ omahouse watch        reads that file every cycle, crosses it with §5.1's
 
 **Why a file and not a socket.** `the-browser-half.md` §8.1 called this "the
 largest single piece of unplanned work": the host is spawned by the browser as
-the child (`.temp/spike-extension.md` §1 measured uid 1001, in her session, with
+the child (the browser spike measured uid 1001, in her session, with
 her bus in the environment) and the ledger is root's, so the argument there reached for
 a socket in the daemon, with framing and a second writer's worth of validation —
 against §3's "no second process, no IPC, no second reader of the profiles".
@@ -350,7 +350,7 @@ whether anybody is in front of the screen; it reads this the way it reads
 `/sys/class/drm`. No endpoint, no protocol to version, nothing listening, and the
 accumulation stays in exactly one place — which is what §3 was protecting.
 
-**The crossing is what makes the number honest.** `.temp/spike-extension.md` §5
+**The crossing is what makes the number honest.** The browser spike
 asked `chrome.idle` ninety-four times through thirty minutes of an empty room and
 got `active` every time, including twenty-five minutes with the monitor
 physically off. A browser is a reliable witness to *what* is on the screen and a
@@ -782,7 +782,7 @@ the rule exists for.
 
 **An allowlist with nothing blocked beside it is not a policy**, and no file is
 written for one. `URLAllowlist` is only ever an exception carved out of
-`URLBlocklist`. That is not a guess: `.temp/spike-extension.md` §7 measured the
+`URLBlocklist`. That is not a guess: the browser spike measured the
 same trap one policy over, where a `NativeMessagingAllowlist` with no blocklist
 beside it let through exactly the host it was meant to keep out.
 

@@ -91,7 +91,7 @@ struct Outcome {
 /// presence** by the caller, so an empty string means "bill no site this tick"
 /// and covers every way that can be true at once -- no extension, no browser, a
 /// stale file, a dark screen, somebody else's session in front. This function
-/// does not know what a screen is and must not learn: `.temp/spike-extension.md`
+/// does not know what a screen is and must not learn: the browser spike
 /// §5 is why the crossing exists, and it is made of a kernel attribute and
 /// logind, neither of which belongs on this side of the line.
 ///

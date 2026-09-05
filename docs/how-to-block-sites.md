@@ -248,8 +248,10 @@ inside the browser and reports nothing out, so omahouse never learns the attempt
 happened at all.
 
 **A second browser is a door with no lock on it.** Nothing in the browser stops
-somebody opening a different one. What stops them is the app allowlist, with the
-same hole it always has —
+somebody opening a different one, and nothing in this page reaches Firefox. What
+stops them is the app allowlist, and the rule is short: release Chromium and no
+other browser to an account these rules are meant to hold. It has the same hole
+the allowlist always has —
 [do not release a terminal in a profile that is meant to hold](how-to-release-programs.md).
 
 ---

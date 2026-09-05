@@ -459,7 +459,7 @@ class VM:
     def remember_the_state(self):
         """Everything this run is about to change, as bytes, before it changes.
 
-        Only for a machine that is not disposable. `.temp/docs/vm-runbook.md` §7
+        Only for a machine that is not disposable. The VM runbook
         restores the demonstration VM by retyping the verbs that made it, which
         is a restoration of what somebody remembered to write down; this is the
         file. A profile put back byte for byte is a profile that cannot come back
@@ -571,7 +571,7 @@ class VM:
     # -- typing at it -------------------------------------------------------
     #
     # Only the machine with a greeter has these, and only because there is no
-    # keyboard on the far side of an ssh. `.temp/docs/vm-runbook.md` §5 is where
+    # keyboard on the far side of an ssh. The VM runbook is where
     # the key codes come from: `<keycode>:<1 down|0 up>`, modifier down first and
     # up last, nesting closing from the inside out.
 

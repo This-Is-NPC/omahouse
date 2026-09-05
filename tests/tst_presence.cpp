@@ -15,7 +15,7 @@ namespace {
 /// One DRM connector, as far as this walk is concerned: a directory with a
 /// `status` and a `dpms` in it.
 ///
-/// Every shape below was measured rather than invented, and `.temp/poc-presence.md`
+/// Every shape below was measured rather than invented, and the presence PoC
 /// is the record. The VM's single `card0-Virtual-1`, the development machine's
 /// eight unplugged DisplayPorts, its one lit eDP, and the writeback connector
 /// that is not a screen at all and answers `On` forever.
@@ -75,7 +75,7 @@ SeatReading showing(uid_t uid, ScreenState screen)
 // Whether anybody is in front of the machine, proved on a machine that may have
 // nobody in front of it.
 //
-// That is the whole design of this file. `.temp/spike-extension.md` §5 measured a
+// That is the whole design of this file. The browser spike measured a
 // browser answering `active` for twenty-five minutes with the monitor off, and
 // the answer to it was to ask the machine instead -- but a suite that had to ask
 // the *real* machine would pass or fail depending on whether whoever ran it had

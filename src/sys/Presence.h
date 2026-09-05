@@ -10,7 +10,7 @@ namespace omahouse {
 // Whether anybody is in front of the machine, asked of the machine and never of
 // a browser.
 //
-// The whole reason this file exists is one measurement. `.temp/spike-extension.md`
+// The whole reason this file exists is one measurement. The browser spike
 // §5 put a Chromium extension on real Omarchy and asked `chrome.idle` every
 // twenty seconds for thirty minutes with nobody at the keyboard: it answered
 // `active` every single time, including the last twenty-five minutes with the
@@ -19,7 +19,7 @@ namespace omahouse {
 // browser runs all night beside a sleeping child.
 //
 // So presence is omahouse's own question, and it is asked of the compositor's
-// side of the world. `.temp/poc-presence.md` is the measurement that chose how.
+// side of the world. The presence PoC is the measurement that chose how.
 //
 // -- what is read, and what is deliberately not -------------------------------
 //

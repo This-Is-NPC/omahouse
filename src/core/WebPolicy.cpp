@@ -132,7 +132,7 @@ ChromiumPolicy chromiumPolicyFor(const QVector<Profile> &profiles, const QString
     // `needed()` goes false with it -- which is what makes taking back the last
     // block put the machine back where it started.
     //
-    // This is not a guess about Chromium's behaviour. `.temp/spike-extension.md`
+    // This is not a guess about Chromium's behaviour. The browser spike
     // §7 measured the same trap one policy over: a `NativeMessagingAllowlist`
     // with no blocklist beside it let through exactly the host it was meant to
     // keep out. The allowlist is only ever an exception carved out of a

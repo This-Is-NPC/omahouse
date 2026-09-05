@@ -72,7 +72,7 @@ private slots:
         QCOMPARE(written.value(QStringLiteral("URLBlocklist")).toArray().size(), 1);
     }
 
-    // The measured trap, one policy over: `.temp/spike-extension.md` §7 found a
+    // The measured trap, one policy over: the browser spike found a
     // `NativeMessagingAllowlist` with no blocklist beside it letting through
     // exactly the host it was meant to keep out. The same is true of
     // `URLAllowlist`, so an allowlist alone is not a policy -- it is a file that

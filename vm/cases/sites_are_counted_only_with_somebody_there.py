@@ -32,7 +32,7 @@ because a hand cannot be two round trips early. The window now opens where
 `site_seconds` rather than half of one, so a single tick of slop is the same
 fraction of it as it is of the other three.
 
-Two things the hand run found that are not in `.temp/docs/vm-runbook.md`:
+Two things the hand run found that are not in the VM runbook:
 
   * `hyprctl dispatch dpms off` is dead on this Hyprland. The dispatcher argument
     is Lua now, and the form that works is
@@ -155,7 +155,7 @@ def run(vm):
 
     # The screen off with the last site still in the front tab. This is the
     # crossing: the browser goes on reporting archlinux.org, because a browser
-    # cannot tell -- `.temp/spike-extension.md` §5 measured one answering `active`
+    # cannot tell -- the browser spike measured one answering `active`
     # through twenty-five minutes of a dark monitor -- and omahouse asks the
     # kernel instead.
     dark = vm.pace["screen_off_seconds"]

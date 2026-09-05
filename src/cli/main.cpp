@@ -2256,7 +2256,7 @@ int cmdWebRule(const Globals &g, const QString &verb, const QStringList &positio
         line = QStringLiteral("%1: %2 is blocked, and so are its subdomains.").arg(user, domain);
     } else if (chromiumPolicyFor(profiles.all, sitesOutOfTime(profiles.all))
                    .blocklist.isEmpty()) {
-        // The trap `.temp/spike-extension.md` §7 measured one policy over: an
+        // The trap the browser spike measured one policy over: an
         // allowlist with no blocklist beside it lets everything through,
         // including the thing it names. Saying "allowed" and stopping would read
         // as a rule that is doing something.
@@ -2948,7 +2948,7 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
 //
 // The native messaging host of docs/design.md §5.2, and it is stupid on purpose.
 //
-// Chromium spawns it as whoever opened the browser -- `.temp/spike-extension.md`
+// Chromium spawns it as whoever opened the browser -- the browser spike
 // §1 measured uid 1001, cwd the host's own directory, stdin and stdout pipes,
 // and the child's whole session environment. So this half has no privilege and
 // is not given any: it appends `<epoch> <site>` to a file in that user's runtime
@@ -3011,7 +3011,7 @@ int cmdMeter(const Globals &g, const QStringList &positionals)
     }
 
     // A person, rather than a browser. Native messaging is always a pipe
-    // (`.temp/spike-extension.md` §1 measured `STDIN_ISATTY=False`), so a
+    // (the browser spike measured `STDIN_ISATTY=False`), so a
     // terminal here is somebody who typed the verb to see what it does -- and
     // what it would do is sit there silently forever.
     if (::isatty(STDIN_FILENO) == 1) {

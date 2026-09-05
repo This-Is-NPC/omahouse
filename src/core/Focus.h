@@ -15,7 +15,7 @@ namespace omahouse {
 //                   focused window, over native messaging, and nothing else
 //   the host        runs as the child, and appends `<epoch> <site>` to a file
 //                   under her own runtime directory. It cannot write the ledger:
-//                   `.temp/spike-extension.md` §1 measured it running as uid
+//                   The browser spike measured it running as uid
 //                   1001 with /var/lib/omahouse root's, and there is no path
 //                   from one to the other
 //   this            is what `omahouse watch` reads that file with, and it is

@@ -965,7 +965,7 @@ private slots:
     // The crossing of docs/design.md §5.2, and the case the whole browser half
     // exists to be able to pass.
     //
-    // `.temp/spike-extension.md` §5 measured a browser answering `active`
+    // the browser spike measured a browser answering `active`
     // ninety-four times through thirty minutes of an empty room, with the
     // monitor physically off for twenty-five of them. A meter that trusted the
     // browser would bill YouTube all night beside a sleeping child. So the name

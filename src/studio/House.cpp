@@ -444,7 +444,7 @@ QVariantList sitesOf(const Profile &profile, const Ledger &ledger,
             note = QStringLiteral("%1 when the time is up")
                        .arg(spellExhausted(budget->onExhausted));
         } else if (named && machine.blocklist.isEmpty()) {
-            // The trap `.temp/spike-extension.md` §7 measured one policy over,
+            // The trap the browser spike measured one policy over,
             // and the sentence `omahouse web allow` prints for it: an allowlist
             // with nothing blocked beside it is inert.
             note = QStringLiteral("on the allowed list — which blocks nothing on its own, "

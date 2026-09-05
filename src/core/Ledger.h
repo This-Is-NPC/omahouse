@@ -82,7 +82,7 @@ struct Ledger {
     ///
     /// A second only lands here if two things were true at once: the browser
     /// said a site was in front, and omahouse's own presence said somebody was
-    /// in front of the screen. `.temp/spike-extension.md` §5 is why the second
+    /// in front of the screen. The browser spike is why the second
     /// half is not optional -- a browser reports `active` with the monitor
     /// physically off, so a meter that trusted it would run all night beside a
     /// sleeping child.

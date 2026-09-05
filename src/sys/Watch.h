@@ -140,7 +140,7 @@ struct Watched {
     /// §5.2 -- and carried here whether or not it was billed, because the line
     /// that says `youtube.com, not counted: screen-off` is the whole point of
     /// crossing the two. A browser reporting a site into an empty room is
-    /// exactly what `.temp/spike-extension.md` §5 measured, and the journal is
+    /// exactly what the browser spike measured, and the journal is
     /// where somebody can see that omahouse knows the difference.
     QString site;
     /// Whether that site really gained the tick.
