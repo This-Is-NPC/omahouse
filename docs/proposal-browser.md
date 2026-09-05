@@ -1,22 +1,36 @@
-# Proposal — time per site through a Chromium extension · **the reporting half now ships**
+# Where the browser half was decided — the argument, and what became of it
 
-> **Most of this page has now shipped, and the split is exact.**
+> **This is a record, not a description of what omahouse does.** It is the page
+> the browser half was argued from, kept because the reasoning and the source
+> reads behind several shipped decisions are here and nowhere else — and because
+> comments in `src/`, `packaging/`, `extension/` and `omahouse.usage.kdl` cite
+> its sections by number. **For what omahouse actually does, read
+> [`design.md`](design.md) §5.2, §5.3 and §11, and the how-to pages.** Where this
+> page disagrees with `design.md`, `design.md` wins.
 >
-> **Built, and described in [`design.md`](design.md) §11** — blocking and
+> **Shipped, and described in [`design.md`](design.md) §11** — blocking and
 > unblocking a site by managed policy, and switching incognito off. The policy
 > file of §3, the `IncognitoModeAvailability` of §4.1, the per-machine reach of
 > §3.1 and the composition of profiles that disagree. It has a field in
 > `profiles.json` (`web`), four subcommands (`omahouse web block|allow`,
 > `omahouse web <user> --all-but-listed|--only-listed`,
 > `omahouse web incognito`), a line in `status`, and a `post_remove` that takes
-> the file back off the machine. §11 is what to read for what it does; this page
-> is the argument it was decided from, and where it disagrees with §11, §11 wins.
+> the file back off the machine.
 >
-> **Built, and described in [`design.md`](design.md) §5.2** — the counting half,
-> as far as counting. There is an extension (`extension/`), a signing key with
-> its custody decided (§6.3 asked and did not answer; design.md's "The signing
-> key" answers), a native messaging host (`omahouse meter`), and time per site in
-> the ledger, in `status` and in `report`.
+> **Shipped, and described in [`design.md`](design.md) §5.2** — time per site.
+> An extension (`extension/`), a native messaging host (`omahouse meter`), the
+> crossing with the presence signal, and the seconds in the ledger, in `status`
+> and in `report`. The signing key that §6.3 named as a new problem and did not
+> decide is decided there: it is made on the machine during `pacman -U` and dies
+> with `pacman -R`, so there is no key anybody holds.
+>
+> **Shipped since, and described in [`design.md`](design.md) §5.3** — the teeth
+> on that number. A budget on a site, with the same warning marks, the same
+> grace, the same grants, and a fourth thing running out can do: the domain goes
+> into the browser's blocklist until the day turns, or until a grant. There is a
+> fourth view in the window for all of it — `4`, the sites — which is
+> [`screens.md`](screens.md). **An earlier version of this box said all of that
+> was unbuilt. It shipped, and the box was stale.**
 >
 > **It shipped in a different shape from the one §2 and §8.1 propose, and that is
 > the largest disagreement between this page and what exists.** §8.1 says the
@@ -26,43 +40,38 @@
 > stupid: it appends `<epoch> <site>` to a file in the child's own runtime
 > directory, and `omahouse watch` — already root, already ticking, already
 > holding the presence signal — reads it as one more fact about the machine. The
-> file is untrusted input and is read as such. Where this page and design.md §5.2
-> disagree, §5.2 wins.
+> file is untrusted input and is read as such.
 >
-> **Still not built, and not promised:** a budget on a site, a warning, a block,
-> a count of blocked attempts, and any screen in the studio. §5.2 is the
-> observing stage, which is where `enforce: false` was for the apps.
+> **What is still not built** — the per-account policy of §3.2 and §3.4, the
+> unattributed-browsing line of §3.5 and §4.4, Firefox (§7), and the count of
+> blocked attempts, which is not unfinished work but an impossibility — is
+> listed with its reasons in [`not-built/`](not-built/README.md).
 >
-> The measurement that decided the shape is `.temp/spike-extension.md`: a
-> throwaway extension and a throwaway native messaging host driven on a real
-> Omarchy VM. It contradicts this page in three places, which are marked
-> **[measured]** where they occur.
->
-> **This page was written with no measurement of its own mechanism.**
-> [`proposal-network.md`](proposal-network.md) is written on top of a proof of
-> concept that ran in two virtual machines; this one was written on top of a
-> reading survey — Chromium source at `main`, the policy definition files, the
-> signed store builds of two third-party extensions, and read-only checks of
-> this machine. That is a weaker kind of evidence and the page is arranged so
-> you can always tell which kind you are looking at: §1 to §2 are what the
-> source says and what this machine answered, §3 onwards is trade-off and
-> argument, and every claim that has not been observed says **not measured** in
-> those words. Two rounds of measurement have since happened —
-> `.temp/spike-extension.md` for the extension, and `design.md` §11's own VM
-> case for the policy — and where they answer a **not measured** here, the
-> paragraph says so where it stands.
+> **This page was written with no measurement of its own mechanism**, and that is
+> why it is arranged the way it is. [The network
+> record](not-built/network-control-per-account.md) stands on a proof of concept
+> that ran in two virtual machines; this one stood on a reading survey — Chromium
+> source at `main`, the policy definition files, the signed store builds of two
+> third-party extensions, and read-only checks of one machine. That is a weaker
+> kind of evidence, so §1 to §2 are what the source says and what this machine
+> answered, §3 onwards is trade-off and argument, and every claim that had not
+> been observed says **not measured** in those words. Two rounds of measurement
+> happened afterwards — a spike for the extension, and the VM case for the policy
+> — and `design.md`'s "Measured, and what it cost" is where their numbers live.
 >
 > The precedent this box is here for: an earlier `testing.md` in this tree
 > described a `systemd-nspawn` layer that had never been built, and the claim
 > reached `docs/cli.md` before anybody noticed. The repository is public now, so
-> the distinction has to be visible from the file name inwards.
+> the distinction between *measured*, *built* and *argued* has to be visible from
+> the first screen of a page inwards.
 
-This page is for the owner to say yes or no to. It is written against the model
-of [`design.md`](design.md) — `Profile`, `Rule`, `Budget`, `onExhausted`, the
-two second cycle — and where it does not fit that model, §8 says so rather than
-inventing a second one.
+It was written for the owner to say yes or no to, and the answer was yes. It is
+written against the model of [`design.md`](design.md) — `Profile`, `Rule`,
+`Budget`, `onExhausted`, the two second cycle — and where it does not fit that
+model, §8 says so rather than inventing a second one.
 
-It exists because the other route failed. `proposal-network.md` §3 measured a
+It exists because the other route failed. [The network
+record](not-built/network-control-per-account.md) §3 measured a
 per-account network path and found that it can **block** a site and cannot
 **count** one: the child's browser emits no port 53 packet (§3.1), and the set
 of addresses does not contain the site anyway (§3.2) — 4.5% of the bytes of a
@@ -86,7 +95,7 @@ compromise between them.
 **The browser knows the name and nothing else does.** Not the compositor —
 `hyprctl activewindow` gives a window title, and "(3) WhatsApp" is not
 `web.whatsapp.com`, and a page can write whatever it likes there. Not the
-network — measured, twice over, in `proposal-network.md` §3.1 and §3.2. Not the
+network — measured, twice over, in the network record §3.1 and §3.2. Not the
 DevTools protocol — dead since Chrome 136 for the default profile. The name of
 the site in the active tab exists in exactly one process, and to get it out you
 have to run code inside that process.
@@ -97,7 +106,7 @@ directory on Linux, and the code that would read one does not exist. So every
 lever this page reaches for — force-install, incognito, developer mode, native
 messaging — lands on every account on the machine that opens that browser.
 
-`proposal-network.md` opens with the same seam and had `nft meta skuid` to close
+The network record opens with the same seam and had `nft meta skuid` to close
 it, at the packet, by UID. There is no `skuid` here. What there is instead is
 **the extension deciding nothing**: it opens a port to the native host, the host
 runs as whoever opened the browser and knows the `uid`, and for an account with
@@ -106,7 +115,7 @@ for the rest of the session. The seam is not closed. It is moved to the one side
 of the wall where a user identity still exists.
 
 There is a second consequence, and it runs the other way from
-`proposal-network.md` §1. The `skuid` rule was the one part of omahouse that a
+the network record §1. The `skuid` rule was the one part of omahouse that a
 terminal does not defeat: a `curl`, a Flatpak, a binary out of `~/.local/` and a
 compositor-started process all carry the same UID. **This mechanism has the
 opposite property.** The whole per-site channel — the extension, the port, the
@@ -144,7 +153,7 @@ that distinction is the whole point.
 
 **What there is none of:** no extension was installed, no browser was launched
 under policy, no VM was run for this page, and no line of omahouse was written
-or changed. Where `proposal-network.md` can say "a machine did this", this page
+or changed. Where the network record can say "a machine did this", this page
 can only say "the code says this". Every one of the four questions in §9 exists
 because of that gap.
 
@@ -292,7 +301,7 @@ about which browser is whose.
 `design.md` §5 ends with *"No seccomp, no eBPF, no AppArmor: a `QTimer`, a read
 of `/sys/fs/cgroup`, and a write"* — a namespace wrapper on every browser launch
 is a different kind of component from anything in the tree, and the same
-argument that `proposal-network.md` §8.6 makes against an `nfqueue` matcher
+argument that the network record §8.6 makes against an `nfqueue` matcher
 applies here. It has to be imposed at launch by something the child does not
 control, which means it lands in the launch path — `uwsm`, the desktop entry,
 the keybinding — and a launch path the child can edit is a wrapper the child can
@@ -313,7 +322,7 @@ worker comes back after a resume (§5.2).
 **What it costs, and what the project already does about it.** The rule in this
 tree is that an unseen thing gets reported rather than assumed away. `design.md`
 round 2 gave `status` a number for what it cannot see; its §5 says out loud
-that a scope with no id falls through to the default; `proposal-network.md` §4.3
+that a scope with no id falls through to the default; the network record §4.3
 demands `status` print how many addresses a set holds, because an empty set is a
 defect and not a state. The same obligation here: **`status` prints, per
 profile, that browser time exists which no site budget can account for, and how
@@ -368,7 +377,7 @@ product omahouse already is, rather than to nothing.
 
 **What it costs.** Nothing directly — but it is the reason to be suspicious of
 any future feature that treats a site budget and an app budget as the same kind
-of number. `proposal-network.md` §8.5 raises exactly that objection about the
+of number. The network record §8.5 raises exactly that objection about the
 network path's 35% error, and it applies here for a different reason.
 
 ### 4.4 If incognito is allowed, the report has to grow a line for it
@@ -394,7 +403,7 @@ restriction.
 
 **What it buys.** The recoverable mistake is the one to make by accident — the
 same reasoning as `onerr=succeed` in `design.md` §2, as the absent-`default`
-choice in §4, and as `sitesDefault: allow` in `proposal-network.md` §7.2. Here
+choice in §4, and as `sitesDefault: allow` in the network record §7.2. Here
 the recoverable direction happens to be the restrictive one, because §4.3 means
 the restriction cannot lock anybody out of anything.
 
@@ -445,6 +454,12 @@ explains the reports without contradicting the code, and is exactly the sort of
 explanation that turns out to be wrong. §9 puts this first because it can end
 the page on its own.
 
+**Measured since, and it holds.** A `.crx`, an `updates.xml` and a `file:`
+update URL under `ExtensionSettings` installed on a real Omarchy VM on the first
+attempt, and later from inside a `pacman -U` transaction with a key made in that
+same transaction — Chromium could not tell it from any other extension.
+[`design.md`](design.md), rounds 5 and 8.
+
 It is worth being precise about what force-install actually promises, in the
 policy's own words: extensions *"which users can't uninstall or turn off through
 the Google Chrome interface"*, and then, two paragraphs later, *"some operating
@@ -460,6 +475,12 @@ blocks a fake host planted in the user's home (§5.5). And Omarchy's own
 `browser_policy_purge_dir` deletes anything in those directories not owned by
 root, which helps rather than hinders: our file is root's and survives, a file
 the child plants is not.
+
+**None of those three policies is written by what shipped.** The install writes
+one `ExtensionSettings` entry that force-installs the meter and nothing else, so
+the lockouts named in this paragraph are on
+[the not-built list](not-built/README.md) with the measured reason they were left
+off, which is §5.5's collision.
 
 ### 5.2 A native port is a strong keepalive, but a suspend still kills the worker
 
@@ -566,6 +587,16 @@ the child writes their own `com.omahouse.meter.json` into
 `~/.config/chromium/NativeMessagingHosts/`, pointing at a script of their own,
 and the extension dutifully reports to it.
 
+> **Half of that shipped, and the half that did not is the policy.** The
+> manifest is written to `/etc` by the install scriptlet, with `allowed_origins`
+> naming the id that machine's key produced. `NativeMessagingUserLevelHosts` is
+> **not** set, because the answer to §9's question 6 turned out to be yes — it
+> blocks every per-user host on the machine, Omarchy's own included — and the
+> documented escape does not escape: a `NativeMessagingAllowlist` with no
+> blocklist beside it blocks nothing at all. So the hole below is open, and
+> [the not-built list](not-built/README.md) says what it costs, which is §8.2's
+> answer: anonymity, and not a minute of the day.
+
 **Omarchy installs its own native messaging host manifests in
 `~/.config/chromium/NativeMessagingHosts/`** — the user's directory, writable by
 the user. That is fine for what they do and would be a hole for what we do,
@@ -633,9 +664,16 @@ one for the browser and another for everything else, and it keeps the extension
 free of a content script, which is what `time-tracker-4-browser` needs to solve
 the same problem inside the browser.
 
-**Partly inferred.** The `strings` output and the source reads are facts. That a
-running Chromium therefore answers `"active"` forever has not been observed. §9
-asks for it, because it is a five-minute check.
+**Measured since, and it is worse than inferred.** A spike asked `chrome.idle`
+ninety-four times through thirty minutes of an empty room on real Omarchy and
+got `active` every single time, including twenty-five minutes with the monitor
+physically off. It does not merely fail to notice idleness; it reports presence
+that is not there. That measurement is why presence is asked of the kernel and
+of logind instead — [`design.md`](design.md) §5.1.
+
+**Partly inferred, as it stood.** The `strings` output and the source reads were
+facts. That a running Chromium therefore answers `"active"` forever had not been
+observed when this was written, and §9 asked for it as a five-minute check.
 
 ### 5.7 `windows.onFocusChanged` lies on Linux, and the lie has to be damped
 
@@ -659,8 +697,11 @@ compositor route (§5.6) would otherwise have to infer from a window title.
 Having both signals — the compositor's and the browser's — is a cross-check
 neither one gives alone.
 
-**Not verified on Hyprland.** The documentation warns about "some Linux window
-managers"; which ones is not stated and this one was not tested.
+**Measured since, and the answer was no.** Twenty real alt-tabs between two
+Chromium windows on this compositor produced twenty clean events and **zero**
+spurious `WINDOW_ID_NONE`. So no debounce was written: damping a lie nobody has
+observed would be machinery with no measurement behind it, and the extension is
+small on purpose.
 
 ---
 
@@ -799,7 +840,7 @@ in cannot write the ledger. It has to hand its segments to `omahouse watch`,
 which means a socket, a protocol and a second writer's worth of validation — and
 `design.md` §3 says, as a feature, *"No second process, no IPC, no second reader
 of the profiles."* This is not fatal and it is not free: it is the same class of
-cost as `proposal-network.md` §8.6's matcher, arriving for a different reason.
+cost as the network record §8.6's matcher, arriving for a different reason.
 The alternative — the extension talks to a root-owned socket directly, with no
 native host at all — throws away the `connectNative` keepalive of §5.2, which is
 the thing that made MV3 tractable.
@@ -809,7 +850,7 @@ child's browser and the host is the child's process. A child who kills the host
 closes the port; the worker dies on the normal timers; site reporting stops.
 This is detectable — the daemon sees the browser's scope alive with no channel
 open, and §3.5 already requires it be said out loud — and it is not defeatable.
-Compare `proposal-network.md` §1, where `nft meta skuid` matches at the packet
+Compare the network record §1, where `nft meta skuid` matches at the packet
 and a terminal does not help: this mechanism has the terminal problem and the
 network one did not. §4.3 is the reason it is survivable: what a child wins by
 killing the host is anonymity, not minutes.
@@ -818,12 +859,12 @@ killing the host is anonymity, not minutes.
 for the same reason.** A site budget's selector is a domain and not an app scope
 id, so `verdictFor` needs to know which kind it is looking at, `Decision::Kind`
 needs something that is not `Close`, and the profile needs a second default.
-`proposal-network.md` §8.1 to §8.3 works all of this through and this page
+The network record §8.1 to §8.3 works all of this through and this page
 proposes nothing different — which is worth saying explicitly, because it means
 **the two proposals share a core change and should not be costed twice**. If
 either ships, the model work is done for both.
 
-**8.4 The number is still not the number.** `proposal-network.md` §3.3 measured
+**8.4 The number is still not the number.** The network record §3.3 measured
 that an idle tab moves bytes 35% of the time and concluded that time per site is
 fairer than time per app and still wrong in both directions. This mechanism
 fixes the *naming* problem completely — the extension says `youtube.com` because
@@ -831,7 +872,7 @@ the tab says `youtube.com`, with no address, no set, no coverage question and no
 QUIC — but the presence problem is the same problem: a tab in the front with
 nobody at the keyboard reads as live. §5.6 moves the answer to the daemon rather
 than solving it, and the daemon's answer is compositor idleness, which is
-coarser than "this person is reading this page". So `proposal-network.md` §8.5
+coarser than "this person is reading this page". So the network record §8.5
 stands word for word: either a site minute means something looser than an app
 minute and the studio says which, or the counting is not shipped.
 
@@ -846,7 +887,21 @@ engine reporting confidently wrong numbers.
 
 ---
 
-## 9. What has to be measured before a line is written
+## 9. What had to be measured before a line was written
+
+> **Where this list stands.** Questions 1, 2, 3, 5 and 6 were answered by a
+> spike on a real Omarchy VM, and the answers are why the shipped shape is what
+> it is — off-store force-install works, the native port holds the worker alive,
+> `chrome.idle` answers `active` for twenty-five minutes with the monitor
+> physically off, the host is spawned as the child with her bus in the
+> environment, and blocking per-user native messaging hosts would break
+> Omarchy's own. Question 4 was answered the other way: twenty real alt-tabs
+> produced twenty clean events and **zero** spurious `WINDOW_ID_NONE` on this
+> compositor, so the debounce §5.7 asks for was not written — damping a lie
+> nobody has observed would be machinery with no measurement behind it.
+> **Questions 7, 8 and 9 have never been run**: a second browser profile, an
+> incognito window, and a suspend and resume. The round that measured the meter
+> end to end says in as many words that it did not exercise the last two.
 
 The survey lists four. They are the right four, they are all cheap, and they are
 all VM work. Confirmed, in its order, with what each one decides:
@@ -895,6 +950,6 @@ Five more that this page adds, and why each earns its place:
 
 Until at least 1, 2 and 5 are answered, everything on this page is a proposal
 with a plausible shape, and it should be read with exactly the suspicion that
-`proposal-network.md` §3 earned for its own predecessor: the documentation was
+the network record §3 earned for its own predecessor: the documentation was
 current, the source was read correctly, and the mechanism still did not do what
 the page said it would.
