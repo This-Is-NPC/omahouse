@@ -71,8 +71,6 @@ def run(vm):
     vm.ssh(f"setsid --fork /usr/local/bin/omakure --scripts-dir ~/ws api "
            f"--bind 0.0.0.0:{PORT} --allow-non-loopback --tokens-file ~/tokens.toml "
            "</dev/null >/tmp/api.log 2>&1", check=False)
-    vm.ssh("setsid --fork /usr/local/bin/omakure --scripts-dir ~/ws queue worker "
-           "</dev/null >/tmp/worker.log 2>&1", check=False)
 
     # -- everything from here runs on the parent's machine --------------------
     #
@@ -92,6 +90,15 @@ def run(vm):
     vm.wait_for(lambda: console("GET", "/v1/health").get("ok") is True,
                 vm.pace["patience_seconds"],
                 f"the child's machine to answer the parent's at {kid_ip}:{PORT}")
+
+    # The worker only after the API is answering, and the two are separate
+    # processes because `omakure api` serves without draining. Started together
+    # they race for `runs.sqlite` and one of them loses: a run enqueued in that
+    # window comes back `io_failed: Init runs db failed: database is locked`,
+    # measured here. Serialising them is the order a deployment would use
+    # anyway, and it is not a fix for the race -- that one belongs to Omakure.
+    vm.ssh("setsid --fork /usr/local/bin/omakure --scripts-dir ~/ws queue worker "
+           "</dev/null >/tmp/worker.log 2>&1", check=False)
     print(f"      the parent at {dad_ip} reached the child at {kid_ip}")
 
     def finished(run_id):
