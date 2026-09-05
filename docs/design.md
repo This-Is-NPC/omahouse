@@ -931,6 +931,75 @@ through its own file watcher, and the ten seconds above are that watcher and not
 omahouse. Both browser-side assertions are waits with the regime's patience on
 them, and the seconds they really took are printed on every run.
 
+### Round 8 — the meter arriving in a package, and leaving in one
+
+`omahouse-omarchy`, quick pace, `vm/e2e.py --machine omarchy --case package`,
+2026-09-04 around 23:16. Rounds 5 to 7 all measured a machine somebody had
+prepared: the harness signed the `.crx` here and mounted it, the `updates.xml`
+and the policy over there. This round removes that step from existence. The
+package is built from the tree, `pacman -U` installs it, and the scriptlet makes
+the key, signs the archive and writes the three files inside that transaction.
+
+**A key born during `pacman -U` is a key Chromium cannot tell from any other.**
+That was the open question — the spike proved off-store force-install with a key
+that already existed — and it is answered:
+
+```
+>>> omahouse: the browser meter is signed for this machine and forced
+>>>           into Chromium. Its extension id here is ahdeiepgabnoenfnoebeomaoipdfgkpl
+      the archive itself            written by the scriptlet, owned by no package
+      the host Chromium spawned     julia  /usr/bin/omahouse meter \
+                                    chrome-extension://ahdeiepgabnoenfnoebeomaoipdfgkpl/
+      Chromium installed            ahdeiepgabnoenfnoebeomaoipdfgkpl 1.0.0_0
+      example.com was in front for 12s and the report says 10s
+```
+
+The id in `/etc/omahouse/meter/id`, the id derived again from the key, the id in
+the policy, the id in `allowed_origins`, the id in `updates.xml`, the id in the
+argument Chromium passed the host and the name of the directory Chromium made in
+julia's profile are one id, and no file in this repository contains it.
+
+**Removal, which is the other half.** `pacman -R`: the nine things the package
+and its scriptlet put on the machine are gone, `/etc/chromium` holds nothing at
+all, the PAM line went from one to zero, `omahouse.service` is `not-found`, and
+the extension directory left julia's profile the next time Chromium started.
+
+**And one thing that is not a file, found by this round.** A native messaging
+host lives as long as the pipe the browser gave it, so a `pacman -R` while a
+window is open leaves `/usr/bin/omahouse meter` running as the child, holding a
+binary that no longer has a name, appending sites she is visiting to the file
+`post_remove` had just deleted — which comes back within five seconds, on a
+machine with no omahouse on it and nothing left to explain either. `post_remove`
+now ends it by exact command line, and the case measures that it was the removal
+which did so: *`the host at ['3201'] died with the removal, Chromium still open`*.
+Nothing else could have closed that pipe.
+
+**The reinstall, priced rather than argued.** The case puts the machine back and
+the id moves — `ahdeiepgabnoenfnoebeomaoipdfgkpl` →
+`heaplkipdmjbgamhmhkgbgnmhphbpfjk` — because the key went with the removal, as it
+must. **The upgrade path does the opposite, twice over:** each of the two runs
+that followed began with `pacman -U` over an already installed package, and each
+printed back the very id the run before it had left — `heaplkipdmjbgamhmhkgbgnmhphbpfjk`
+again, from a key `post_upgrade` found rather than made. The key surviving an
+upgrade and not surviving a removal is the whole design, and both halves are
+measured.
+
+**Nothing regressed.** The whole of `vm/run.sh --machine omarchy` — all three
+browser cases, now against a package rather than a hand-mounted archive — is
+3/3 in 227s: the site budget's teeth, three sites against the wall clock with the
+dark window billing nothing, and this round.
+
+**Cost: one bug in the harness's own eyes, and it was in two cases.** The check
+for "a host is running" was `pgrep -f 'omahouse meter'`, asked over ssh — and
+sshd runs the command inside a shell whose *own* command line holds those words.
+It answered a pid every time, its own, whether or not a host existed. It is a
+green light nobody earned, and `sites_are_counted_only_with_somebody_there` had
+been carrying it since round 6; only the second assertion under it kept that case
+honest. Both now ask `pgrep -u julia -x omahouse`, which the question cannot
+satisfy. The failure that exposed it was the removal half asserting the *absence*
+of a host and being told there was one: an assertion that cannot fail is
+invisible until somebody writes down its negation.
+
 ---
 
 ## Tests and the gate
@@ -1042,29 +1111,45 @@ mise run test:vm:browser    # vm/run.sh --machine omarchy
 `omahouse-poc` has no browser, no greeter and a `vkms` framebuffer nothing can
 photograph. The meter of §5.2 needs all three of the opposite, so its cases run
 on `omahouse-omarchy` — real Omarchy, SDDM, a `bochs` framebuffer, and a real
-Chromium. There are two of them: `sites_are_counted_only_with_somebody_there`
-proves the number against what was on the screen, and
+Chromium. There are three of them: `sites_are_counted_only_with_somebody_there`
+proves the number against what was on the screen,
 `a_site_budget_that_runs_out_stops_the_site` proves §5.3's teeth against what the
-browser then refused to open.
+browser then refused to open, and `the_package_puts_the_meter_in_and_takes_it_out`
+proves that a household gets any of it — `pacman -U`, a browser that had never
+heard of the extension installing it, the site in the report, and then `pacman -R`
+taking the archive, the policy, the host manifest, the key and the running host
+back off, file by file.
 
-**The binary is the one thing a run there does not put back.** It is the artefact
-under test and every run installs the build from the working tree over whatever
-was on the machine, exactly as the disposable machine's `deploy` does. What a run
-must not do is replace it in silence, so the version and the hash of what was
-found and of what is left are both printed — that silence is how the machine came
-to be carrying an unpackaged build nothing on it could name.
+**A run there installs a package and not a binary.** `deploy_on_omarchy` builds
+`vm/PKGBUILD` from the working tree into a temporary directory — twenty seconds,
+nothing landing in the tree and nothing installed on the developer's machine —
+and `pacman -U`s it on the guest. That is what makes the browser half testable at
+all: the `.crx`, the `updates.xml`, the force-install policy and the native
+messaging manifest are written by the scriptlet inside that transaction, from a
+key made inside it, and no line of the harness mounts any of them. Before this,
+the harness signed the archive here and copied it over, which meant every green
+run was a green run about a machine somebody had prepared.
+
+**The package is the one thing a run there does not put back**, and that is a
+better thing to leave than what came before. It is the artefact under test; what
+a run must not do is replace it in silence, so the version and the hash of what
+was found and of what is left are both printed — that silence is how the machine
+came to be carrying an unpackaged build nothing on it could name. What is left
+now answers to `pacman -Qo` and comes off with one command, the meter included.
 
 **That machine is not disposable**, and the harness knows it. `reset()` refuses
 to run there at all, because it empties `/etc/omahouse` and `/var/lib/omahouse`
 and that is the owner's demonstration profile. Instead the run takes a copy of
 `profiles.json`, the day's ledger and SDDM's `state.conf` before it touches
-anything, and puts them back byte for byte afterwards, along with removing the
-force-install policy, the signed archive, the native messaging manifest, the
-extension in julia's profile and the `ydotool` it installed to type with. Which
-cases exist on which machine is not a convention either: a case declares
-`MACHINE` and is not imported into a run pointed at the other one, so there is no
-path by which the cases that end a login can reach the machine that is
-demonstrated from.
+anything and puts them back byte for byte afterwards, removes the site block of
+§11 — the one browser file no package writes, and the one a run could leave a
+domain in — and takes off the `ydotool` it installed to type with. The meter's
+four files are deliberately *not* on that list: they are the package's, and
+stripping them by hand while leaving the package installed would hand back a
+state that no install and no removal ever produces. Which cases exist on which
+machine is not a convention either: a case declares `MACHINE` and is not imported
+into a run pointed at the other one, so there is no path by which the cases that
+end a login can reach the machine that is demonstrated from.
 
 ### Docker does not serve here
 

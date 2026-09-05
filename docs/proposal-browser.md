@@ -738,6 +738,16 @@ names an extension that no longer exists. Leaking it means somebody else can
 sign something the policy will force-install. **Not in the survey** — the survey
 notes the key fixes the id and does not discuss custody. This is argument.
 
+**Decided, and not the way this section assumed.** Both paragraphs above take for
+granted that the id is stable across machines and that somebody therefore holds a
+key. `design.md` §5.2, "The signing key, and why there is not one", takes the
+other branch: the key is made during `post_install`, on the machine, so the id is
+per machine and there is nothing to hold, revoke or leak beyond the one machine
+it belongs to. The `key` in the manifest is gone, no file in the tree names an
+extension id, and `post_remove` deletes the key — which is what makes a reinstall
+a new extension, the one real cost, affordable only because this extension keeps
+no state.
+
 ### 6.4 Manifest V2 is over, and it was not our choice
 
 `ExtensionManifestV2Availability.yaml` is `deprecated: true` with `supported_on:

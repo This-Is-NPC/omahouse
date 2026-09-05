@@ -63,6 +63,15 @@ says somebody is really there — a browser answers "active" with the monitor
 physically off, which is measured. It shows up in `omahouse status` and
 `omahouse report` beside the budgets.
 
+**The extension arrives with the package and leaves with it.** Installing
+omahouse signs it into a `.crx` with a key made on your machine, and forces it
+into Chromium; there is nothing to download, no store account, and no signing key
+anybody has to keep, because the one that signs yours cannot sign anybody else's.
+`pacman -R` takes the extension, the policy, the key and the native host back off
+— a machine with no omahouse on it is never left with an extension nobody can
+uninstall. The cost of having no key to keep is that reinstalling makes a new
+one, so the browser sees a new extension; it holds no state, so nothing is lost.
+
 `omahouse limit kid --site youtube.com=30m` gives that number teeth, and it is
 the same noun as `--budget` with a domain where a scope id would be: the same
 warning marks, the same grace, the same grant. When it runs out the domain goes
