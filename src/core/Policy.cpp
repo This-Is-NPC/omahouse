@@ -1,5 +1,7 @@
 #include "Policy.h"
 
+#include "Furniture.h"
+
 namespace omahouse {
 
 namespace {
@@ -41,7 +43,8 @@ bool anyLiveScopeMatches(const QVector<AppScope> &live, const QString &selector)
 } // namespace
 
 Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const Ledger &ledger,
-                 const QDateTime &now, int tickSeconds, const QString &siteInFront)
+                 const QDateTime &now, int tickSeconds, const QString &siteInFront,
+                 const QStringList &alsoFurniture)
 {
     Outcome outcome;
     outcome.ledger = ledger;
@@ -85,6 +88,12 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
 
     // 1. The verdict, per app.
     for (const AppScope &scope : live) {
+        // The session's own furniture is not judged. `default: deny` is about
+        // what somebody chose to open, and closing `udiskie` two seconds after
+        // login is omahouse breaking the desktop it is a guest on. See
+        // `Furniture.h` for why unknown is never furniture.
+        if (isFurniture(scope.id, alsoFurniture))
+            continue;
         if (profile.verdictFor(scope.id) != Verdict::Deny)
             continue;
         // Said once per scope. A refused app that is closed and opened again
@@ -123,6 +132,20 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
     //    `youtube.com`.
     const int tick = qMax(0, tickSeconds);
 
+    // Furniture is not evidence that anybody is at the keyboard, so it is held
+    // out of the one selector that means "anything at all". A budget that names
+    // one of these by id is somebody asking for exactly that number, and it
+    // still gets it -- refusing would be this file deciding what an operator is
+    // allowed to be curious about.
+    QVector<AppScope> billable;
+    QVector<AppScope> furniture;
+    for (const AppScope &scope : live) {
+        if (isFurniture(scope.id, alsoFurniture))
+            furniture.append(scope);
+        else
+            billable.append(scope);
+    }
+
     // The site in front, beside the budgets and never inside them --
     // docs/design.md §5.2. Written whether or not anything has a budget about
     // it, because the observing number is the whole of what §5.2 shipped and it
@@ -135,7 +158,9 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
             continue;
         const bool spending = budget.isSite()
             ? (!siteInFront.isEmpty() && selectorMatches(budget.match, siteInFront))
-            : anyLiveScopeMatches(live, budget.match);
+            : anyLiveScopeMatches(billable, budget.match)
+                || (budget.match != QStringLiteral("*")
+                    && anyLiveScopeMatches(furniture, budget.match));
         if (spending)
             outcome.ledger.addSeconds(budget.id, tick);
     }
@@ -159,6 +184,18 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
             int lowest = -1;
             for (int mark : profile.warnAt) {
                 if (mark <= 0 || left > mark * 60)
+                    continue;
+                // A mark the budget was never above is not a mark. The marks are
+                // absolute -- ten, five, one -- and a budget smaller than one of
+                // them is born with it already crossed, so it fires the instant
+                // the app opens and says nothing anybody can act on: a three
+                // minute budget announced five minutes left, and a ten minute
+                // session spent its ten minute mark at login. Strictly above,
+                // because a mark equal to the whole budget is the same event as
+                // opening the app. What is left when every mark goes this way --
+                // a budget of one minute -- still gets the grace warning, which
+                // is the one that was always going to matter there.
+                if (limit <= mark * 60)
                     continue;
                 if (outcome.ledger.hasWarned(budget.id, mark))
                     continue;

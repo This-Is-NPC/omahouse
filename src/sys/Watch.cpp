@@ -287,7 +287,8 @@ Watch::Watch(const Proc *proc, Notifier *notifier, Enforcer *enforcer, PresenceS
 {
 }
 
-Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now)
+Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now,
+                  const QStringList &alsoFurniture)
 {
     Cycle cycle;
     cycle.at = now;
@@ -317,7 +318,7 @@ Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now)
         watched.account = uidForUser(profile.user, &uid);
         watched.uid = uid;
         if (watched.account && watched.enabled)
-            observe(profile, &watched, cycle.seat, now);
+            observe(profile, &watched, cycle.seat, now, alsoFurniture);
 
         cycle.users.append(watched);
     }
@@ -340,7 +341,7 @@ Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now)
 }
 
 void Watch::observe(const Profile &profile, Watched *watched, const SeatReading &seat,
-                    const QDateTime &now)
+                    const QDateTime &now, const QStringList &alsoFurniture)
 {
     // Whether the user's own systemd manager is up, which is the same question
     // docs/design.md §5 asks as "does /run/user/<uid> exist". This is the stronger half
@@ -389,7 +390,8 @@ void Watch::observe(const Profile &profile, Watched *watched, const SeatReading 
         // question worth asking. `evaluate` over no scopes with a tick of
         // nothing debits nothing and appends nothing, and answers whether the
         // budget that ended this session is still out of time.
-        const Outcome quiet = evaluate(profile, {}, before, now, 0);
+        const Outcome quiet = evaluate(profile, {}, before, now, 0, QString(),
+                                       alsoFurniture);
         for (const Decision &decision : quiet.decisions) {
             if (decision.kind == Decision::Kind::Logout)
                 watched->logouts.append(decision);
@@ -441,7 +443,7 @@ void Watch::observe(const Profile &profile, Watched *watched, const SeatReading 
     }
 
     Outcome outcome = evaluate(profile, scopes, before, now, m_options.tickSeconds,
-                               watched->siteCounted ? watched->site : QString());
+                               watched->siteCounted ? watched->site : QString(), alsoFurniture);
 
     // The day's presence, beside the budgets and never inside them. `evaluate`
     // has already decided everything it is going to decide, and this is written

@@ -270,11 +270,15 @@ public:
     /// operator be able to hand over ten minutes with the game still running,
     /// and a daemon holding a copy of the rules from when it started cannot
     /// honour that.
-    Cycle tick(const QVector<Profile> &profiles, const QDateTime &now);
+    /// `alsoFurniture` is what this machine starts for itself beyond the
+    /// built-in list, read fresh by the caller every cycle -- `src/sys/Furniture.h`
+    /// says why it is read there and not held here.
+    Cycle tick(const QVector<Profile> &profiles, const QDateTime &now,
+               const QStringList &alsoFurniture = QStringList());
 
 private:
     void observe(const Profile &profile, Watched *watched, const SeatReading &seat,
-                 const QDateTime &now);
+                 const QDateTime &now, const QStringList &alsoFurniture);
     /// The sequence of docs/design.md §5 for one scope, spread across ticks: SIGTERM
     /// the first time, `cgroup.kill` once the window has gone by.
     void closeScope(const Profile &profile, Watched *watched, const Decision &decision,

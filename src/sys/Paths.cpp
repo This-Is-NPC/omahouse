@@ -79,6 +79,11 @@ QString blockedFile()
     return configDir() + QStringLiteral("/blocked");
 }
 
+QString furnitureFile()
+{
+    return configDir() + QStringLiteral("/furniture");
+}
+
 QString userStateDir(const QString &user)
 {
     return stateDir() + QLatin1Char('/') + user;

@@ -107,7 +107,7 @@ The `+` on the left is drawn by the field and is not in it.
 >
 > ![The "More time today for foot" dialogue with a lone `+` in the field and the `Enter ok` button greyed out.](../vm/shots/39-studio-mais-tempo-hoje.png)
 >
-> [The defect](what-does-not-work.md#10-the-key-that-opens-more-time-today-lands-in-the-field)
+> [The defect](what-does-not-work.md#8-the-key-that-opens-more-time-today-lands-in-the-field)
 
 **more time today** is missing from the command palette when the row under the
 cursor has no clock on it. That is the point of listing only what is usable:

@@ -378,14 +378,11 @@ omahouse allow julia xdg-terminal-exec
 omahouse allow julia omahouse
 omahouse allow julia chromium --limit 3m
 omahouse allow julia org.chromium.Chromium --limit 3m
-# Omarchy's own. `default/hypr/autostart.lua` launches these two through
-# `uwsm-app --`, so they get app scopes of their own under app.slice and are
-# judged exactly like a game would be. Measured: with `default: deny` and no
-# rule for it, omahouse SIGTERMs `omarchy-hyprland-monitor-watch` two seconds
-# after login -- correctly by the model, and wrongly by any reading of what the
-# machine is for. An allowlist on real Omarchy has to name Omarchy.
-omahouse allow julia omarchy-hyprland-monitor-watch
-omahouse allow julia udiskie
+# Omarchy's own two -- `udiskie` and `omarchy-hyprland-monitor-watch`, launched
+# by `default/hypr/autostart.lua` through `uwsm-app --` -- used to need a rule
+# each here, because they arrive as app scopes and were judged exactly like a
+# game. They are session furniture now (`src/core/Furniture.h`): not judged, and
+# not on their own evidence that anybody is at the keyboard. Nothing to write.
 omahouse limit julia --session 10m
 omahouse profile enforce julia --on
 omahouse profile show julia

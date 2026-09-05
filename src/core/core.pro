@@ -20,6 +20,7 @@ HEADERS += \
     AppScope.h \
     Duration.h \
     Focus.h \
+    Furniture.h \
     Json.h \
     Ledger.h \
     Policy.h \
@@ -31,6 +32,7 @@ SOURCES += \
     AppScope.cpp \
     Duration.cpp \
     Focus.cpp \
+    Furniture.cpp \
     Json.cpp \
     Ledger.cpp \
     Policy.cpp \

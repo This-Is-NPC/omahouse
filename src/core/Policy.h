@@ -5,6 +5,7 @@
 #include "Profile.h"
 
 #include <QDateTime>
+#include <QStringList>
 #include <QVector>
 
 namespace omahouse {
@@ -101,6 +102,7 @@ struct Outcome {
 /// extension on it, which is most of them.
 Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const Ledger &ledger,
                  const QDateTime &now, int tickSeconds,
-                 const QString &siteInFront = QString());
+                 const QString &siteInFront = QString(),
+                 const QStringList &alsoFurniture = QStringList());
 
 } // namespace omahouse

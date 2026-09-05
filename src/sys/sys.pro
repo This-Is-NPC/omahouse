@@ -34,6 +34,7 @@ HEADERS += \
     Chromium.h \
     Enforce.h \
     FocusFile.h \
+    FurnitureFile.h \
     Notify.h \
     Paths.h \
     Presence.h \
@@ -46,6 +47,7 @@ SOURCES += \
     Chromium.cpp \
     Enforce.cpp \
     FocusFile.cpp \
+    FurnitureFile.cpp \
     Notify.cpp \
     Paths.cpp \
     Presence.cpp \

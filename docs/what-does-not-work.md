@@ -43,20 +43,7 @@ already ended, having seen nothing:
 reliable one. If a profile really has to warn to the end, turn the idle lock off
 for that account — knowing that is loosening something else.
 
-## 3. The warnings on a short budget all fire at once
-
-**What happens.** The marks are 10, 5 and 1 minute left. On a budget smaller
-than the largest mark, the marks that were born already past cross at the same
-instant and go off together. On a 3 minute browser budget the 10 and 5 minute
-marks came out together the moment the browser opened; only the 1 minute one
-landed where it meant something. A 10 minute session fires its 10 minute mark at
-login.
-
-**What to do in the meantime.** Either give budgets larger than the largest
-mark, or edit `warnAt` by hand in `/etc/omahouse/profiles.json` — there is no
-verb for that field.
-
-## 4. When the session runs out, the screen goes black
+## 3. When the session runs out, the screen goes black
 
 **What happens.** SDDM 0.21 reads a session ended by `loginctl terminate-user`
 as `Process crashed` and does nothing further: no greeter, no new display.
@@ -68,23 +55,16 @@ The demonstration VM carries a patch service that brings SDDM back up when
 part of omahouse.** On a stock Omarchy there is nothing that brings the greeter
 back.
 
+**This one is a known limitation and not work in progress.** The defect is
+SDDM's: nothing omahouse can write changes how SDDM reads a session it did not
+end itself. Shipping a watchdog for somebody else's display manager was weighed
+and not taken.
+
 **What to do in the meantime.** Install an equivalent service — one that
 restarts `sddm` when the seat is left with no session — or do not use a session
 budget that logs out, on a machine nobody will be able to reach the console of.
 
-## 5. Omarchy launches its own utilities as though they were apps
-
-**What happens.** Omarchy's `autostart.lua` brings up `udiskie` and
-`omarchy-hyprland-monitor-watch` through `uwsm-app --`. They are born as app
-scopes, so under `default: deny` with no rule for them omahouse closes them two
-seconds after login. And `udiskie` on its own is a live scope, so the session
-budget — which matches everything — **runs from login onwards**, with the
-machine idle and no window open.
-
-**What to do in the meantime.** Put both on every profile's allowlist, and count
-the day knowing it starts at login and not at the first window.
-
-## 6. Chromium turns up as two ids
+## 4. Chromium turns up as two ids
 
 **What happens.** One Chromium window on real Omarchy produces two scopes:
 `chromium`, holding the child processes, and `org.chromium.Chromium`, holding
@@ -101,7 +81,7 @@ sudo omahouse allow kid chromium --limit 45m
 sudo omahouse allow kid org.chromium.Chromium --limit 45m
 ```
 
-## 7. The filter narrows all four lists at once
+## 5. The filter narrows all four lists at once
 
 **What happens.** There is one filter in the window, and `/` applies it to the
 people, the programs, the day and the sites together. A needle that misses the
@@ -115,7 +95,7 @@ that.
 **What to do in the meantime.** Filter with something that also matches the
 profile's own name, or press `Esc` and walk the list with `j` and `k`.
 
-## 8. A refusal loses its reason on the way to the window
+## 6. A refusal loses its reason on the way to the window
 
 **What happens.** Only the last line the CLI printed reaches the status bar. The
 sentence that says *what* was refused and why — `profile add: howl is in wheel,
@@ -128,7 +108,7 @@ missing:
 **What to do in the meantime.** Run the same verb in a terminal to read the
 whole refusal.
 
-## 9. A scope nothing can name has no screen in the window
+## 7. A scope nothing can name has no screen in the window
 
 **What happens.** `omahouse status` reports these prominently — a
 `tmux-spawn-<uuid>.scope` with twenty processes in it is somebody at the
@@ -139,7 +119,7 @@ What the status bar does show is the other number, the processes in
 
 **What to do in the meantime.** Use `omahouse status` for that number.
 
-## 10. The key that opens more time today lands in the field
+## 8. The key that opens more time today lands in the field
 
 **What happens.** Pressing `+` on a program opens the *more time today* sheet
 and the same keystroke arrives in the field it opened, so the field starts with
@@ -149,7 +129,7 @@ a lone `+` in it and `ok` is born greyed out:
 
 **What to do in the meantime.** Clear the `+` before typing the number.
 
-## 11. In a narrow window the header overlaps the tabs
+## 9. In a narrow window the header overlaps the tabs
 
 **What happens.** The header draws over the subtitle and the tabs, and the
 result is unreadable.

@@ -2080,17 +2080,21 @@ def check_a_site_that_ran_out_is_blocked_and_comes_back_on_its_own(box):
     """
     document = watching_profile(enforce=True, default="allow")
     document["profiles"][0]["grace"] = 0
+    # Two minutes and not one, because the marks are 10, 5 and 1 and a mark the
+    # budget was never above is not a mark: a one minute budget would announce
+    # its one minute mark at the instant the tab opened, which is the thing that
+    # stopped happening. Two minutes leaves the 1 minute mark real.
     document["profiles"][0]["budgets"].append(
         {"id": "youtube.com", "match": "youtube.com", "kind": "site",
-         "dailyMinutes": 1, "onExhausted": "block"})
+         "dailyMinutes": 2, "onExhausted": "block"})
     box.write_profiles(document)
-    box.write_day(TODAY, {"youtube.com": 56})
+    box.write_day(TODAY, {"youtube.com": 116})
     box.browsing("www.youtube.com")
 
     # Two seconds left: counted, warned about, and opening.
     left = box.run("watch", "--once")
     assert left.returncode == 0, left.stderr
-    assert box.day(TODAY)["budgets"]["youtube.com"] == 58, box.day(TODAY)
+    assert box.day(TODAY)["budgets"]["youtube.com"] == 118, box.day(TODAY)
     assert box.policy() is None, box.policy()
     assert any("youtube.com" in " ".join(one) for one in box.said()), box.said()
 

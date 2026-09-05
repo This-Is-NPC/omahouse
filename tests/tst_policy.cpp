@@ -329,6 +329,154 @@ private slots:
         QCOMPARE(third.decisions.at(0).secondsLeft, 60);
     }
 
+    // A budget smaller than a mark is born with that mark already crossed, and it
+    // used to fire the instant the app opened: three minutes of browser
+    // announcing five minutes left, a ten minute session spending its ten minute
+    // mark at login. A mark the budget was never above is not a mark.
+    void neverAnnouncesAMarkTheBudgetWasNeverAbove()
+    {
+        Profile profile = profileOf();
+        profile.warnAt = {10, 5, 1};
+        profile.budgets = {budget(QStringLiteral("chromium"), QStringLiteral("chromium"), 3,
+                                  OnExhausted::Close)};
+        const AppScope chromium = scope(QStringLiteral("chromium"));
+
+        // The app has just opened on a three minute budget. Ten and five are
+        // behind it already; neither is said, and neither is written down as
+        // said -- an event for a mark that never meant anything is a line in the
+        // report somebody has to explain.
+        const Outcome opened = evaluate(profile, {chromium}, startOfDay(), at(19, 0), 2);
+        QVERIFY2(opened.decisions.isEmpty(), "a mark the budget was never above was announced");
+        QVERIFY2(opened.ledger.events.isEmpty(), "a mark that was never said was written down");
+
+        // The one mark under the budget still lands where it means something.
+        Ledger nearlyOut = opened.ledger;
+        nearlyOut.seconds.insert(QStringLiteral("chromium"), 3 * 60 - 55);
+        const Outcome warned = evaluate(profile, {chromium}, nearlyOut, at(19, 2), 2);
+        QCOMPARE(warned.decisions.size(), 1);
+        QCOMPARE(warned.decisions.at(0).reason, Decision::Reason::Warning);
+        // 53 and not 55: this tick's two seconds are spent before the decision.
+        QCOMPARE(warned.decisions.at(0).secondsLeft, 53);
+    }
+
+    // Strictly above, and the ten minute session is why: a mark equal to the
+    // whole budget is the same event as opening the app.
+    void aMarkEqualToTheWholeBudgetIsNotAMark()
+    {
+        Profile profile = profileOf();
+        profile.warnAt = {10, 5, 1};
+        profile.budgets = {budget(QStringLiteral("session"), QStringLiteral("*"), 10,
+                                  OnExhausted::Logout)};
+        const AppScope anything = scope(QStringLiteral("chromium"));
+
+        const Outcome login = evaluate(profile, {anything}, startOfDay(), at(19, 0), 2);
+        QVERIFY2(login.decisions.isEmpty(), "the ten minute mark fired at login");
+
+        // Five is under ten, so it is still a mark.
+        Ledger half = login.ledger;
+        half.seconds.insert(QStringLiteral("session"), 10 * 60 - 280);
+        const Outcome later = evaluate(profile, {anything}, half, at(19, 5), 2);
+        QCOMPARE(later.decisions.size(), 1);
+        QCOMPARE(later.decisions.at(0).secondsLeft, 278);
+    }
+
+    // A grant is part of the limit, so time handed over gives the marks back: a
+    // three minute budget with an hour added is an hour's budget and warns like
+    // one.
+    void aGrantGivesBackTheMarksItRaisesTheBudgetAbove()
+    {
+        Profile profile = profileOf();
+        profile.warnAt = {10, 5, 1};
+        profile.budgets = {budget(QStringLiteral("chromium"), QStringLiteral("chromium"), 3,
+                                  OnExhausted::Close)};
+        const AppScope chromium = scope(QStringLiteral("chromium"));
+
+        Ledger ledger = startOfDay();
+        ledger.grants.append(Grant{at(19, 0), QStringLiteral("root"),
+                                   QStringLiteral("chromium"), 60});
+        // 63 minutes in all, 4:40 spent, so 58:20 left and the ten minute mark is
+        // ahead rather than behind.
+        ledger.seconds.insert(QStringLiteral("chromium"), 280);
+        const Outcome open = evaluate(profile, {chromium}, ledger, at(19, 5), 2);
+        QVERIFY2(open.decisions.isEmpty(), "a mark still ahead of the budget was announced");
+
+        Ledger nearly = open.ledger;
+        nearly.seconds.insert(QStringLiteral("chromium"), 63 * 60 - 570);
+        const Outcome warned = evaluate(profile, {chromium}, nearly, at(20, 0), 2);
+        QCOMPARE(warned.decisions.size(), 1);
+        QCOMPARE(warned.decisions.at(0).secondsLeft, 568);
+    }
+
+    // Omarchy's own furniture, which nobody chose to open.
+    //
+    // `autostart.lua` brings `udiskie` up through `uwsm-app --`, so it arrives as
+    // an app scope like any other. Under `default: deny` that got it closed two
+    // seconds after login, and on its own it kept a session budget -- which
+    // matches everything -- running from login onwards on an idle machine.
+    void neverJudgesOrBillsTheSessionsOwnFurniture()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.enforce = true;
+        profile.budgets = {budget(QStringLiteral("session"), QStringLiteral("*"), 120,
+                                  OnExhausted::Logout)};
+        const AppScope udiskie = scope(QStringLiteral("udiskie"));
+
+        // Nothing but furniture is nobody at the keyboard: not denied, not
+        // closed, and the session does not start.
+        const Outcome idle = evaluate(profile, {udiskie}, startOfDay(), at(19, 0), 2);
+        QVERIFY2(idle.decisions.isEmpty(), "the session's own furniture was judged");
+        QCOMPARE(idle.ledger.secondsFor(QStringLiteral("session")), 0);
+
+        // One real app beside it, and the session runs -- once, not twice.
+        const AppScope chromium = scope(QStringLiteral("chromium"));
+        const Outcome used = evaluate(profile, {udiskie, chromium}, idle.ledger, at(19, 0, 2), 2);
+        QCOMPARE(used.ledger.secondsFor(QStringLiteral("session")), 2);
+        // And the real app is still judged by the default, which is the whole
+        // point of holding furniture out rather than letting everything through.
+        QVERIFY(!used.decisions.isEmpty());
+        QCOMPARE(used.decisions.at(0).reason, Decision::Reason::Denied);
+    }
+
+    // A budget that names a piece of furniture by its id still counts it. That is
+    // somebody asking for exactly that number, and refusing would be the core
+    // deciding what an operator may be curious about.
+    void aBudgetThatNamesFurnitureStillCountsIt()
+    {
+        Profile profile = profileOf();
+        profile.budgets = {budget(QStringLiteral("udiskie"), QStringLiteral("udiskie"), 0,
+                                  OnExhausted::Warn),
+                           budget(QStringLiteral("session"), QStringLiteral("*"), 120,
+                                  OnExhausted::Logout)};
+        const AppScope udiskie = scope(QStringLiteral("udiskie"));
+
+        const Outcome out = evaluate(profile, {udiskie}, startOfDay(), at(19, 0), 2);
+        QCOMPARE(out.ledger.secondsFor(QStringLiteral("udiskie")), 2);
+        QCOMPARE(out.ledger.secondsFor(QStringLiteral("session")), 0);
+    }
+
+    // A machine that starts something else says so, and unknown is never
+    // furniture -- the direction that fails safe.
+    void takesTheMachinesOwnFurnitureAndTrustsNothingElse()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.budgets = {budget(QStringLiteral("session"), QStringLiteral("*"), 120,
+                                  OnExhausted::Logout)};
+        const AppScope waybar = scope(QStringLiteral("waybar"));
+
+        // Nobody listed it, so it is the child's: judged, and it starts the day.
+        const Outcome unlisted = evaluate(profile, {waybar}, startOfDay(), at(19, 0), 2);
+        QCOMPARE(unlisted.ledger.secondsFor(QStringLiteral("session")), 2);
+        QVERIFY(!unlisted.decisions.isEmpty());
+
+        // Listed by the machine, and it stops being either.
+        const Outcome listed = evaluate(profile, {waybar}, startOfDay(), at(19, 0), 2,
+                                        QString(), {QStringLiteral("waybar")});
+        QCOMPARE(listed.ledger.secondsFor(QStringLiteral("session")), 0);
+        QVERIFY2(listed.decisions.isEmpty(), "furniture the machine named was judged");
+    }
+
     // The window between running out and the action. The caller has to be able
     // to tell "say it closes in twenty seconds" from "close it now", and the
     // stamp it measures from lives in the ledger, so a daemon restarted in the

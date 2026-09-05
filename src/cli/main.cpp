@@ -4,6 +4,8 @@
 #include "FocusFile.h"
 #include "Ledger.h"
 #include "Notify.h"
+#include "Furniture.h"
+#include "FurnitureFile.h"
 #include "Paths.h"
 #include "Presence.h"
 #include "Proc.h"
@@ -1147,15 +1149,40 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
         headers.append(QStringLiteral("SCOPE"));
         right.append(false);
 
+        // The machine's own list is read here for the same reason `watch` reads
+        // it every cycle: the two have to agree about what is furniture, and the
+        // way to be sure of that is for both to read the file rather than for
+        // one to be told.
+        const QStringList alsoFurniture = furnitureOfThisMachine();
+        bool anyFurniture = false;
+
         QVector<QStringList> rows;
         for (const AppScope &scope : named) {
+            const bool furniture = isFurniture(scope.id, alsoFurniture);
+            anyFurniture = anyFurniture || furniture;
             QStringList row {scope.id, QString::number(scope.pidCount)};
-            if (profile)
-                row.append(verdictName(profile->verdictFor(scope.id)));
+            if (profile) {
+                // Furniture has no verdict, and saying `allow` would be a lie in
+                // the direction that matters: it is not allowed, it is not asked
+                // about.
+                row.append(furniture ? QStringLiteral("the session's")
+                                     : verdictName(profile->verdictFor(scope.id)));
+            }
             row.append(scope.unit);
             rows.append(row);
         }
         printTable(headers, rows, right);
+        if (anyFurniture) {
+            // Said rather than left to be inferred from a word in a column. A
+            // reader who counts the rows and then reads the session's total has
+            // to be able to see why the two do not add up.
+            out() << QStringLiteral("\n  Rows marked `the session's` are what Omarchy "
+                                    "starts for itself, not what\n  %1 opened. They are "
+                                    "never closed and never on their own start the\n  "
+                                    "session's clock. %2 is where this machine adds to "
+                                    "that list.\n")
+                         .arg(user, paths::furnitureFile());
+        }
     }
 
     if (profile) {
@@ -3201,7 +3228,11 @@ int cmdWatch(const Globals &g, const QStringList &positionals, const Options &op
         // parameter for exactly this reason, and it is what lets a two hour
         // budget be proved in microseconds by a test that never touches the
         // clock of the machine it runs on.
-        const Cycle done = watch.tick(current.all, QDateTime::currentDateTime());
+        // Read every cycle, beside the profiles, so a line added to
+        // `/etc/omahouse/furniture` lands on the next tick and not on the next
+        // restart -- the discipline `/etc/omahouse/blocked` already keeps.
+        const Cycle done = watch.tick(current.all, QDateTime::currentDateTime(),
+                                      furnitureOfThisMachine());
         logCycle(done);
         if (g.json)
             printJson(cycleToJson(done, current));

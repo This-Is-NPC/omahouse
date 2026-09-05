@@ -41,10 +41,12 @@ kid: session 2h a day, and it logs out when the time is out.
 ```
 
 **The session is the budget whose selector is `*`.** There is no separate
-concept of user time: it is an ordinary budget that matches every app, which is
-why it runs from login onwards even with nothing on screen — the `udiskie`
-Omarchy itself brings up is a live app scope
-([and that is a defect worth knowing about](what-does-not-work.md#5-omarchy-launches-its-own-utilities-as-though-they-were-apps)).
+concept of user time: it is an ordinary budget that matches every app. What it
+does *not* match is the session's own furniture — `udiskie` and
+`omarchy-hyprland-monitor-watch`, which Omarchy starts for itself — so the clock
+begins at the first program somebody opened and not at login. If this machine
+starts something else of its own, name it in `/etc/omahouse/furniture`, one per
+line.
 
 ## 2. One program
 
@@ -76,7 +78,7 @@ Two things worth knowing:
 - **Chromium turns up as two ids**, so it takes two budgets with the same number
   — `chromium` and `org.chromium.Chromium`. Otherwise the browser closes for the
   wrong reason and the grace warning arrives twice.
-  [The defect](what-does-not-work.md#6-chromium-turns-up-as-two-ids).
+  [The defect](what-does-not-work.md#4-chromium-turns-up-as-two-ids).
 
 A budget that is already there gets the new number and keeps everything else:
 what a budget does when it runs out is a decision somebody made once, and a new
@@ -182,7 +184,7 @@ somebody back in.
 Two defects live in this sequence, and both were measured:
 [if the screen locks on idle the last warnings go unseen](what-does-not-work.md#2-if-the-screen-locks-on-idle-the-last-warnings-go-unseen),
 and
-[when the session runs out the screen goes black](what-does-not-work.md#4-when-the-session-runs-out-the-screen-goes-black).
+[when the session runs out the screen goes black](what-does-not-work.md#3-when-the-session-runs-out-the-screen-goes-black).
 Read both before switching on `logout` on a machine nobody can reach the console
 of.
 
@@ -213,11 +215,11 @@ at all, the today view says which key would fix it:
 
 ## What can go wrong
 
-**The warnings on a short budget all fire at once.** The marks are 10, 5 and 1
-minute left, so on a budget smaller than the largest mark the marks that were
-born already past cross at the same instant. On a 3 minute browser the 10 and 5
-minute marks come out together the moment it opens.
-[The defect, and what to do in the meantime](what-does-not-work.md#3-the-warnings-on-a-short-budget-all-fire-at-once).
+**A short budget has fewer warnings, and that is on purpose.** The marks are 10,
+5 and 1 minute left, and a mark the budget was never above is not a mark: a 3
+minute browser warns once, at 1 minute, rather than announcing five minutes it
+never had. A budget under a minute gets no mark at all and only the grace
+warning — which was always the one that mattered there.
 
 **`warnAt` and `grace` have no verb.** They are fields in
 `/etc/omahouse/profiles.json`, and editing that file by hand is the only way to

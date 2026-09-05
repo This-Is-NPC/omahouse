@@ -37,6 +37,15 @@ QString profilesFile();
 /// module of ours. So this is the one file omahouse writes that it did not
 /// choose the format of.
 QString blockedFile();
+/// `<configDir>/furniture` -- what this machine starts for itself, one name per
+/// line, beyond the two `src/core/Furniture.h` was measured with.
+///
+/// The same shape as `blocked` and for the same reason: an operator has to be
+/// able to read it, add a line and be sure of what it did. Its absence is the
+/// ordinary state and means the built-in list stands. Blank lines and `#`
+/// comments are skipped, because a list somebody maintains by hand is a list
+/// they will want to write a note in.
+QString furnitureFile();
 /// `/etc/chromium/policies/managed`, or `$OMAHOUSE_CHROMIUM_POLICY_DIR`.
 ///
 /// A third root, and it gets a variable for the same reason the other two do:
