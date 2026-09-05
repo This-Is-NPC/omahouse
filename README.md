@@ -7,6 +7,7 @@ when the credit does.
 
 ![the operator's programs view](docs/img/02-operator-programs.png)
 ![the day, live](docs/img/03-operator-today.png)
+![the sites, and the minutes on them](docs/img/15-operator-sites.png)
 
 ## Install
 
@@ -96,20 +97,23 @@ the privileged half is the CLI, with the same refusals. **It is never root.**
 
 Two faces, and nobody picks one on screen. Whoever is in `wheel` gets the
 operator's: the people under rules, the programs released to each of them, the
-day's balance live, and the chips to change all three. Everybody else gets the
-subject's, which is the same window with nothing to press.
+day's balance live, the sites that open and the minutes on them, and the chips
+to change all four. Everybody else gets the subject's, which is the same window
+with nothing to press.
 
 - `j` / `k`, `↓` / `↑` — move the cursor
 - `g` / `G`, `Home` / `End` — first, last row
 - `l` / `Enter` — open the profile under the cursor
 - `h` / `Esc` — back, or clear the filter, or leave a control
-- `1` / `2` / `3` — the people, their programs, their day
+- `1` / `2` / `3` / `4` — the people, their programs, their day, their sites
 - `/` — filter · `:` — commands · `?` — the key map
 - `Tab` — next control · `Space` — press the one the keyboard is on
 - `n` — put an account under rules · `e` — close programs, or only watch
 - `d` — only the listed run, or everything but the listed
 - `a` — release a program · `m` — minutes a day · `+` — more time today
 - `x` — take a program off the list, or an account off the books
+- on the sites view: `b` — stop a site opening · `o` — let it open again ·
+  `m` — minutes a day on it · `d` — only the listed sites · `i` — incognito
 
 ![the key sheet](docs/img/04-operator-keys.png)
 
@@ -141,7 +145,7 @@ do in the meantime.
 - When a session runs out, SDDM stops and the screen stays black until somebody
   brings it back.
 - Chromium turns up as two ids, and both need the rule.
-- `/` in the studio filters all three lists at once, against what its own key
+- `/` in the studio filters all four lists at once, against what its own key
   sheet says.
 - A CLI refusal loses its reason on the way to the studio: only the last line
   printed reaches the status bar.

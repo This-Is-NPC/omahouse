@@ -434,11 +434,15 @@ QVariantList sitesOf(const Profile &profile, const Ledger &ledger,
         } else if (blocked && !asked) {
             note = QStringLiteral("another profile blocks it, and the most restrictive of the "
                                   "two is what the machine does");
+        } else if (asked) {
+            // Before the clock and not after it. A site this profile blocks
+            // outright and also has a limit on does not open at all, and
+            // `stops opening when the time is up` would be a sentence about
+            // minutes that are never going to be spent.
+            note = QStringLiteral("blocked here, and so are its subdomains");
         } else if (budget && budget->hasLimit()) {
             note = QStringLiteral("%1 when the time is up")
                        .arg(spellExhausted(budget->onExhausted));
-        } else if (asked) {
-            note = QStringLiteral("blocked here, and so are its subdomains");
         } else if (named && machine.blocklist.isEmpty()) {
             // The trap `.temp/spike-extension.md` §7 measured one policy over,
             // and the sentence `omahouse web allow` prints for it: an allowlist
