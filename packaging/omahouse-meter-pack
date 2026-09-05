@@ -1,0 +1,314 @@
+#!/bin/bash
+# omahouse — sign the meter into a `.crx` with **this machine's own key**, and
+# write the policy that names the id that key produces.
+#
+#     /usr/lib/omahouse/meter-pack
+#
+# Run by `packaging/omahouse.install` on install and on every upgrade. It is not
+# a verb of `omahouse` and not on anybody's PATH: nothing a person types, only
+# the last step of putting the package on a machine.
+#
+# -- why there is no key to keep ----------------------------------------------
+#
+# `docs/proposal-browser.md` §6.3 named the signing key as a cost of self-hosting
+# and did not decide it. The two ways to pay it:
+#
+#   (a) A release key held by whoever cuts releases. The `.crx` is signed once,
+#       ships inside the package, and every machine runs the same extension id.
+#       This is what every other project does, and the price is that somebody has
+#       to hold a key whose leak lets a stranger sign an extension that **every**
+#       installed policy will force-install, on every machine, with no store and
+#       no review in the way.
+#
+#   (b) A key made on the machine, at install time. The id of a Chromium
+#       extension is the first sixteen bytes of the SHA-256 of the signing key's
+#       public half, so a key per machine is an id per machine -- and the policy
+#       is written here, after the key exists, naming the id that key produced.
+#       **There is no key to hold.** There is nothing to leak that would reach a
+#       second machine, because the key that signs julia's meter cannot sign
+#       anything her neighbour's Chromium would accept.
+#
+# **This is (b).** The one thing it needed before it could be chosen was a
+# measurement: `.temp/spike-extension.md` §2 proved a `.crx` we signed installs
+# off-store under `ExtensionSettings` with a `file:` `update_url`, but it proved
+# it with a key that already existed. What had to be shown is that a key which
+# comes into being during `pacman -U`, minutes before the browser first opens,
+# is not different in any way Chromium can see. It is not: Chromium never learns
+# where a key came from. It hashes the public half in the archive's header, gets
+# an id, and checks the policy names it.
+#
+# -- what it costs, and it is not nothing --------------------------------------
+#
+# **The id is not stable across machines.** Nothing in this project may name the
+# extension by a constant any more -- not the policy, not the native messaging
+# manifest's `allowed_origins`, not a support document. Everything that needs
+# the id reads it out of `/etc/omahouse/meter/id`, which this script writes. A
+# bug report that says "extension ghio… is misbehaving" is now a bug report about
+# one machine.
+#
+# **The id is not stable across a reinstall.** `post_remove` deletes the key --
+# it must, see below -- so a `pacman -R` followed by a `pacman -U` produces a new
+# key, a new id, and, to Chromium, a different extension. The old one is
+# uninstalled when the policy stops naming it and the new one is installed fresh.
+# That is acceptable here and would not be everywhere: this extension keeps no
+# state at all. It has no `storage` permission (`extension/background.js` says
+# why), no options page, no per-site settings -- everything it knows it learns
+# from `chrome.tabs` in the first second. A new id costs the household nothing
+# because there is nothing in the old id to lose. An extension with saved
+# settings could not take this trade.
+#
+# **An upgrade is not a reinstall**, and the difference is the whole of why the
+# key lives in `/etc` rather than in a build directory. `post_upgrade` runs this
+# script again and finds the key already there, so the id does not move and
+# Chromium sees a version going up on an extension it already has -- which is an
+# update through the same `file:` channel `.temp/spike-extension.md` §2 measured
+# working, not a second extension appearing beside the first.
+#
+# **And the key has to go on removal.** A key left behind after `pacman -R` is a
+# key that would let the *next* install produce the *same* id -- which sounds
+# convenient and is the one thing this design must not have. The point of a key
+# per machine is that nothing survives that could sign for a machine again later.
+# `post_remove` deletes `/etc/omahouse/meter` whole, and the price is the
+# paragraph above.
+#
+# -- why there is no browser here ---------------------------------------------
+#
+# `extension/pack.sh` used to do this with `chromium --pack-extension`, which
+# meant packing the meter needed the browser it is for. A `.crx` is a zip with
+# eleven bytes of magic, a protobuf header and an RSA signature over both; the
+# format is documented and fixed, and `openssl` and `zip` are the whole of the
+# toolchain. That matters here for a reason beyond taste: this runs inside a
+# `pacman` transaction, and a scriptlet that starts a browser -- with a profile,
+# a GPU probe and a sandbox -- inside one is a scriptlet that will one day hang
+# an upgrade for reasons nobody can read.
+#
+# The format, from `components/crx_file/crx_file.proto` and `crx_verifier.cc`:
+#
+#     "Cr24"                     magic
+#     uint32le 3                 format version
+#     uint32le N                 length of the header that follows
+#     header (N bytes)           CrxFileHeader, below
+#     zip archive                the extension, from its manifest.json down
+#
+#     CrxFileHeader   field 2      AsymmetricKeyProof  (sha256_with_rsa)
+#                     field 10000  bytes signed_header_data (a SignedData)
+#     AsymmetricKeyProof  field 1  bytes public_key  (a DER SubjectPublicKeyInfo)
+#                         field 2  bytes signature
+#     SignedData          field 1  bytes crx_id       (16 bytes)
+#
+# and the signature is RSA PKCS#1 v1.5 over SHA-256 of, in order: the sixteen
+# bytes `CRX3 SignedData\0`, the length of `signed_header_data` as uint32le,
+# `signed_header_data` itself, and then the zip.
+#
+# Every length above is a constant because the key is RSA-2048 and nothing else:
+# a DER SubjectPublicKeyInfo for one is 294 bytes and its signature is 256, so
+# the protobuf varints are the constants written below rather than something
+# computed. Both lengths are checked before they are used, and a key that came
+# out any other size stops this script rather than producing an archive Chromium
+# would reject with a message nobody could trace back to here.
+set -euo pipefail
+
+# Everything this writes hangs off one prefix, empty on a real machine. It is
+# here so the whole of this script can be run against a temporary root -- which
+# is how it is exercised without a browser policy, a key or an archive ever
+# appearing on a developer's machine.
+root="${OMAHOUSE_PACK_ROOT:-}"
+
+source_dir="$root/usr/share/omahouse/chromium/omahouse-meter"
+key_dir="$root/etc/omahouse/meter"
+key="$key_dir/key.pem"
+id_file="$key_dir/id"
+out_dir="$root/usr/share/omahouse/chromium"
+crx="$out_dir/omahouse-meter.crx"
+updates="$out_dir/updates.xml"
+policy="$root/etc/chromium/policies/managed/omahouse-meter.json"
+host_manifest="$root/etc/chromium/native-messaging-hosts/com.omahouse.meter.json"
+
+if [ ! -f "$source_dir/manifest.json" ]; then
+    echo "meter-pack: no extension source at $source_dir" >&2
+    exit 1
+fi
+
+work="$(mktemp -d "${TMPDIR:-/tmp}/omahouse-meter-pack.XXXXXX")"
+trap 'rm -rf "$work"' EXIT
+
+# -- the key ------------------------------------------------------------------
+#
+# Made once, kept at 0600 in a 0700 directory, and never made again while it is
+# there. This is the same shape as an ssh host key and it is kept in the same
+# kind of place for the same reason: it is not a secret about a person, it is
+# the identity of one machine, and it is worth exactly as much as root on that
+# machine is -- which is to say, to anybody who already has root, nothing.
+install -d -m 0700 "$key_dir"
+if [ ! -s "$key" ]; then
+    ( umask 077; openssl genrsa -out "$key" 2048 2>/dev/null )
+fi
+chmod 0600 "$key"
+
+openssl rsa -in "$key" -pubout -outform DER -out "$work/public.der" 2>/dev/null
+der_bytes="$(stat -c %s "$work/public.der")"
+if [ "$der_bytes" != 294 ]; then
+    echo "meter-pack: the public key is $der_bytes bytes and an RSA-2048 one is 294;" >&2
+    echo "            every length in the header below assumes 2048." >&2
+    exit 1
+fi
+
+# The id, in the two forms it is needed in. The sixteen bytes go inside the
+# archive; the thirty-two letters are what a policy names, and they are the same
+# number written in `a`..`p` instead of `0`..`f` -- Chromium's own alphabet for
+# extension ids, chosen so an id is never mistaken for a hash.
+openssl dgst -sha256 -binary "$work/public.der" | head -c 16 > "$work/crx_id"
+id="$(openssl dgst -sha256 -r "$work/public.der" | cut -c1-32 | tr '0-9a-f' 'a-p')"
+case "$id" in
+    [a-p]*) ;;
+    *) echo "meter-pack: could not derive an extension id from the key" >&2; exit 1 ;;
+esac
+
+version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "$source_dir/manifest.json" | head -1)"
+if [ -z "$version" ]; then
+    echo "meter-pack: no \"version\" in $source_dir/manifest.json" >&2
+    exit 1
+fi
+
+# -- the archive --------------------------------------------------------------
+#
+# `-X` so no uid, gid or extra attribute of this machine goes into it, and the
+# names relative to the source directory so `manifest.json` sits at the root of
+# the archive where the unpacker looks for it.
+( cd "$source_dir" && zip -qrX "$work/extension.zip" . -x '.*' )
+
+# -- the header ---------------------------------------------------------------
+
+signed_header_data="$work/signed_header_data"
+# SignedData: field 1, length 16, the id.
+printf '\x0a\x10' > "$signed_header_data"
+cat "$work/crx_id" >> "$signed_header_data"
+
+# What is actually signed. The context string carries its own NUL: it is a C
+# string literal in `crx_verifier.cc` and the terminator is part of what goes
+# into the digest.
+{
+    printf 'CRX3 SignedData\x00'
+    printf '\x12\x00\x00\x00'
+    cat "$signed_header_data"
+    cat "$work/extension.zip"
+} > "$work/to_sign"
+
+openssl dgst -sha256 -sign "$key" -out "$work/signature" "$work/to_sign"
+signature_bytes="$(stat -c %s "$work/signature")"
+if [ "$signature_bytes" != 256 ]; then
+    echo "meter-pack: the signature is $signature_bytes bytes and an RSA-2048 one is 256" >&2
+    exit 1
+fi
+
+# AsymmetricKeyProof: the public key (field 1, 294 bytes -> varint a6 02) and the
+# signature (field 2, 256 bytes -> varint 80 02). 556 bytes in all.
+{
+    printf '\x0a\xa6\x02'
+    cat "$work/public.der"
+    printf '\x12\x80\x02'
+    cat "$work/signature"
+} > "$work/proof"
+
+# CrxFileHeader: the proof at field 2 (556 bytes -> varint ac 04), and
+# `signed_header_data` at field 10000, whose key varint is 82 f1 04.
+{
+    printf '\x12\xac\x04'
+    cat "$work/proof"
+    printf '\x82\xf1\x04\x12'
+    cat "$signed_header_data"
+} > "$work/header"
+
+header_bytes="$(stat -c %s "$work/header")"
+
+le32() {
+    local n="$1"
+    printf "\\x$(printf %02x $(( n & 255 )))\\x$(printf %02x $(( (n >> 8) & 255 )))"
+    printf "\\x$(printf %02x $(( (n >> 16) & 255 )))\\x$(printf %02x $(( (n >> 24) & 255 )))"
+}
+
+{
+    printf 'Cr24'
+    le32 3
+    le32 "$header_bytes"
+    cat "$work/header"
+    cat "$work/extension.zip"
+} > "$work/omahouse-meter.crx"
+
+# -- what the browser reads ---------------------------------------------------
+#
+# Written into place last and by `install`, so a machine never has a policy
+# naming an archive that is not there yet. The three of them name the same id,
+# and the id came from the key three steps above rather than from a constant in
+# the tree -- which is the whole of the difference between this and (a).
+
+install -d -m 0755 "$out_dir"
+install -Dm644 "$work/omahouse-meter.crx" "$crx"
+
+# The `file:` update manifest `.temp/spike-extension.md` §2 measured installing
+# **and** updating: the version here going up is what makes Chromium fetch the
+# archive again on its next start.
+install -d -m 0755 "$(dirname "$updates")"
+cat > "$work/updates.xml" <<XML
+<?xml version='1.0' encoding='UTF-8'?>
+<gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>
+  <app appid='$id'>
+    <updatecheck codebase='file://$crx' version='$version' />
+  </app>
+</gupdate>
+XML
+install -Dm644 "$work/updates.xml" "$updates"
+
+# The force-install policy. `override_update_url` is what stops Chromium asking
+# the Web Store about an id it has never heard of.
+#
+# The directory is created if it is not there and is **never** removed: it
+# belongs to the browser, Omarchy's own `browser-policy.sh` writes `policies.json`
+# beside this file, and `post_remove` takes our file by name and leaves
+# everything else exactly where it is.
+install -d -m 0755 "$(dirname "$policy")"
+cat > "$work/omahouse-meter.json" <<JSON
+{
+  "ExtensionSettings": {
+    "$id": {
+      "installation_mode": "force_installed",
+      "update_url": "file://$updates",
+      "override_update_url": true
+    }
+  }
+}
+JSON
+install -Dm644 "$work/omahouse-meter.json" "$policy"
+
+# And the native messaging manifest, which is the other end of the same id:
+# `allowed_origins` is what stops any other extension on the machine opening the
+# port and reporting sites into somebody's day. It has to be written here rather
+# than shipped as a file, because until the key existed there was no id to put
+# in it.
+#
+# In `/etc` and not in a home directory -- `docs/proposal-browser.md` §5.5: a host
+# manifest under `~/.config` is one the child owns and can rewrite, and this one
+# is root's.
+install -d -m 0755 "$(dirname "$host_manifest")"
+cat > "$work/com.omahouse.meter.json" <<JSON
+{
+  "name": "com.omahouse.meter",
+  "description": "omahouse: the site in the front tab, reported to the daemon that counts the day",
+  "path": "/usr/lib/omahouse/meter-host",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://$id/"
+  ]
+}
+JSON
+install -Dm644 "$work/com.omahouse.meter.json" "$host_manifest"
+
+# Last, and only once everything above is in place: the id, where anything that
+# needs to name this machine's extension can read it. `omahouse status` has no
+# use for it; a person looking at `chrome://extensions` and wondering which of
+# the rows is this one does.
+printf '%s\n' "$id" > "$work/id"
+install -Dm644 "$work/id" "$id_file"
+
+echo "$id"

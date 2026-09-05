@@ -1,9 +1,12 @@
 # omahouse — what a package cannot do from a file list.
 #
-# Four things: the two directories of docs/design.md §4, the service of §9, and the one
-# line of PAM that makes `logout` mean anything at all (§2). The last is the only
-# one that edits a file this package does not own, and it is the reason this
-# script is longer than it looks like it should be.
+# Five things: the two directories of docs/design.md §4, the service of §9, the
+# one line of PAM that makes `logout` mean anything at all (§2), and the meter of
+# §5.2 -- which is signed here, on the machine, because the key that decides its
+# extension id is made here and did not exist when the package was built. The PAM
+# line and the meter are the two that write files this package does not own, and
+# between them they are the reason this script is longer than it looks like it
+# should be.
 #
 # Everything here is idempotent. It runs again on every upgrade, and a machine
 # that already has the line has to come out of it unchanged -- including one
@@ -12,7 +15,8 @@
 # And removal is not an afterthought here, it is half the job. omahouse puts
 # things on a machine that a file list cannot take back off it: the PAM line, the
 # `blocked` list that line reads, the browser policy of §11, the force-install
-# policy and signed archive of the meter of §5.2, and an enabled service. Every
+# policy, the signed archive and the signing key of the meter of §5.2, and an
+# enabled service. Every
 # one of them is a restriction, and a restriction that outlives the program that
 # made it is worse than one that never existed -- there is no longer anything on
 # the machine that knows how to lift it. `post_remove` below takes all of them,
@@ -101,9 +105,47 @@ _directories() {
     install -d -m 0755 /var/lib/omahouse
 }
 
+# The meter, signed here rather than in a build -- docs/design.md §5.2, "The
+# signing key". `/usr/lib/omahouse/meter-pack` makes this machine's own key if
+# there is not one yet, signs the extension into a `.crx` with it, and writes the
+# force-install policy and the native messaging manifest that name the id that
+# key produces. It is idempotent: on an upgrade it finds the key already there,
+# so the id does not move and the browser sees a version going up rather than a
+# second extension appearing beside the first.
+#
+# A failure here is loud and does not stop the transaction. Everything else
+# omahouse does -- the apps, the budgets, the session -- works without a browser
+# extension; what is lost is time per site, and half an install is worse than an
+# install that says which half is missing.
+_pack_meter() {
+    local said
+    if [ ! -x /usr/lib/omahouse/meter-pack ]; then
+        return
+    fi
+    if said="$(/usr/lib/omahouse/meter-pack 2>&1)"; then
+        echo ">>> omahouse: the browser meter is signed for this machine and forced" >&2
+        echo ">>>           into Chromium. Its extension id here is ${said##*$'\n'}" >&2
+        return
+    fi
+    # No unquoted heredoc here, and no backticks anywhere in the text. The
+    # comment above `post_install` is the story of a message that ran its own
+    # words; this one carries a captured error string, which is somebody else's
+    # text and the worst possible thing to hand to the shell.
+    {
+        echo ">>> omahouse: could not sign the browser meter, so there is no time per"
+        echo ">>>           site on this machine. Everything else works. It said:"
+        echo ">>>"
+        printf '>>>           %s\n' "$said"
+        echo ">>>"
+        echo ">>>           openssl and zip are what it needs. Run"
+        echo ">>>           /usr/lib/omahouse/meter-pack again once they are there."
+    } >&2
+}
+
 post_install() {
     _directories
     _install_pam_line
+    _pack_meter
 
     # Enabled, and not started. A daemon that begins counting inside a pacman
     # transaction is a daemon nobody chose to run yet, and there are no profiles
@@ -138,6 +180,12 @@ post_upgrade() {
     # Again on every upgrade, because a PAM file replaced by a .pacnew merge is a
     # machine where the line quietly went away and nothing else would notice.
     _install_pam_line
+    # And again for the same reason on the browser's side. The extension's source
+    # is a file this package owns, so an upgrade has just replaced it: without
+    # this line the machine would go on force-installing an archive signed from
+    # last version's source, and `chrome://extensions` would show a version the
+    # package no longer ships. The key is not touched, so the id does not move.
+    _pack_meter
 }
 
 pre_remove() {
@@ -188,6 +236,22 @@ post_remove() {
     rm -f /usr/share/omahouse/chromium/updates.xml
     rmdir /usr/share/omahouse/chromium /usr/share/omahouse 2>/dev/null || true
 
+    # And the key the four files above were made from, which is the one thing on
+    # this list a file list could never have removed because a build never knew
+    # it would exist -- docs/design.md §5.2, "The signing key".
+    #
+    # It goes for a reason stronger than tidiness. The whole of what a key per
+    # machine buys is that there is nothing anywhere which can sign an extension
+    # this machine's policy would accept. A key left behind after the package is
+    # gone is exactly that thing, sitting on the disk of a machine with no
+    # omahouse on it, waiting for somebody to write a policy file by hand. What
+    # it costs is stated plainly and is not hidden: a reinstall makes a new key,
+    # so it makes a new id, so the browser installs a new extension rather than
+    # finding the old one. That is the correct price -- this extension keeps no
+    # state, so a new id loses nothing, and the alternative is a key that
+    # outlives its own program.
+    rm -rf /etc/omahouse/meter
+
     # The focus files the browser's host left in each session's runtime
     # directory. They go with the session anyway -- /run/user is a tmpfs systemd
     # empties at logout -- but a machine that has not been rebooted since the
@@ -201,9 +265,13 @@ post_remove() {
 	>>>           The login block is gone and everybody can log in again, the
 	>>>           browser policy in /etc/chromium/policies/managed/omahouse.json
 	>>>           is gone and every site opens again, the meter extension is no
-	>>>           longer force-installed and its native host is gone, and the
-	>>>           service is stopped and disabled. No rule omahouse wrote is
-	>>>           still in force.
+	>>>           longer force-installed, its native host is gone, the key this
+	>>>           machine signed it with is gone, and the service is stopped and
+	>>>           disabled. No rule omahouse wrote is still in force.
+	>>>
+	>>>           Chromium drops a force-installed extension the next time it
+	>>>           starts without a policy naming it. If a window was open through
+	>>>           all of this, close it once.
 	>>>
 	>>>           Two things were kept on purpose, and here is where they are:
 	>>>             /etc/omahouse/profiles.json   who was under rules

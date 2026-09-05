@@ -417,40 +417,65 @@ close every one of them when it ran out.
 
 `omahouse limit <user> --site youtube.com=30m`, beside the `--budget` it mirrors.
 
-### The signing key
+### The signing key, and why there is not one
 
 `proposal-browser.md` §6.3 named the custody of the key as a new problem and did
-not decide it. It is decided here.
+not decide it. It is decided here: **there is no key to keep, because the key is
+made on the machine during `pacman -U` and dies with `pacman -R`.**
 
-**The public half is committed**, in `extension/manifest.json` under `key`. That
-is what fixes the extension id — `ghiofeehkpcmfcpogcpjlpnfgnfaidjn` — across
-rebuilds, so `packaging/omahouse-meter-policy.json` can name it statically and a
-rebuilt package installs over the one before it rather than beside it under a new
-name. A public key is not a secret.
+The two ways to pay §6.3's bill were a release key held by whoever cuts releases,
+with a `.crx` prebuilt inside the package — the ordinary answer, and the one
+whose price is a single file whose leak lets a stranger sign an extension that
+*every* installed policy force-installs, with no store and no review in the
+way — or a key per machine. A Chromium extension's id is the first sixteen bytes
+of the SHA-256 of its signing key's public half, so a key per machine is an id
+per machine, and the policy can only be written *after* the key exists, naming
+what that key produced. `packaging/omahouse-meter-pack` does exactly that, from
+`post_install`, and is the whole of the mechanism.
 
-**In development the private half lives at
-`~/.config/omahouse/omahouse-meter.pem`**, outside the repository, 0600, made by
-`extension/pack.sh` on first use and moved by `$OMAHOUSE_EXTENSION_KEY`.
-`.gitignore` refuses `*.pem` and `*.crx` as a second line of defence, because the
-failure is silent: a key committed once is a key somebody else can sign a
-force-installed extension with, on every machine that has the policy.
+**What it buys.** Nothing to hold, nothing to rotate, nothing to lose, nothing
+whose leak reaches a second machine. The key that signs julia's meter cannot sign
+anything her neighbour's Chromium would accept, and anybody who can read it is
+already root on the only machine it means anything on.
 
-**In production it would not be on a developer's machine at all** — the same
-shape as any release signing key, held by whoever cuts releases, passphrase
-protected or on a token, reachable by the release job and nothing else. Two
-properties matter: losing it means every installed policy names an extension that
-no longer exists, and leaking it means somebody else can sign something those
-policies will force-install. The development key is explicitly not it.
+**What it costs, and it is not nothing.**
 
-**The package does not build the `.crx`.** Signing needs a browser and a private
-key, and a `makedepends` on chromium for a parental control, with a signing key
-reachable by a build, is a bad trade twice over. So `vm/PKGBUILD` ships the shim,
-the native messaging manifest and the extension's source; `extension/pack.sh`
-makes the archive, its `updates.xml` and nothing else; and `post_remove` takes
-the policy, the archive and the manifest off the machine whether or not the
-package put them there — the same argument §9 makes about the PAM line, because a
-force-install policy left behind is a browser installing an extension whose host
-is gone.
+*The id is not a constant any more.* Nothing may name the extension statically —
+not the policy, not `allowed_origins` in the native messaging manifest, not a
+support page. Everything that needs it reads `/etc/omahouse/meter/id`. A bug
+report naming an extension id is now a bug report about one machine.
+
+*A reinstall makes a different extension.* `post_remove` deletes the key, so
+`pacman -R` then `pacman -U` gives a new key, a new id, and an extension Chromium
+has never seen. It uninstalls the old one when the policy stops naming it and
+installs the new one fresh. That is affordable here only because this extension
+keeps no state at all — no `storage` permission, no options, nothing saved per
+site — so a new id loses nothing. An extension with settings could not take this
+trade, and this is the sentence to re-read if one ever grows them.
+
+*An upgrade is not a reinstall.* `post_upgrade` runs the packer again, finds the
+key, and re-signs the same id at the new version — which the browser takes
+through the `file:` update channel as an update, not as a second extension.
+The key surviving an upgrade and not surviving a removal is the whole design in
+one line.
+
+**The package cannot ship a `.crx`, and does not want a browser to make one.**
+A `.crx` is a zip behind eleven bytes of magic, a protobuf header and an RSA
+signature over both; `openssl` and `zip` are the entire toolchain, and
+`omahouse-meter-pack` writes the header by hand from
+`components/crx_file/crx_file.proto`. That matters beyond taste: this runs inside
+a `pacman` transaction, and a scriptlet that starts a browser — profile, GPU
+probe, sandbox — inside one is a scriptlet that will hang an upgrade for reasons
+nobody can read. `vm/PKGBUILD` therefore ships three static files (the host shim,
+the extension's source, the packer) and nothing that names an id; the archive,
+the `updates.xml`, the force-install policy and the native messaging manifest are
+all written on the machine.
+
+**And `post_remove` takes all five off** — policy, archive, update manifest, host
+manifest, key — whether or not the package put them there. Same argument §9 makes
+about the PAM line: a force-install policy left behind is a browser installing an
+extension whose host is gone, and a signing key left behind is the one artefact
+this design exists to not have.
 
 ### Where the logic lives
 

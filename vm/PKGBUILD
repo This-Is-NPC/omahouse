@@ -24,7 +24,14 @@ license=('MIT')
 # "never notify-send". Without this line every warning omahouse tries to say on
 # an Omarchy machine is a silent failure, and the first time anybody notices is
 # when a session ends with no warning before it.
-depends=('qt6-base' 'qt6-declarative' 'polkit' 'libnotify')
+#
+# `openssl` and `zip` are the whole toolchain of `packaging/omahouse-meter-pack`,
+# which signs the meter into a `.crx` during `post_install`. Both are on every
+# Arch machine and neither is implied by anything above, and the failure without
+# them is the same silent shape as the one libnotify has: the scriptlet cannot
+# make the archive, no policy is written, and the first anybody knows is a
+# household with no time per site in the report and nothing saying why.
+depends=('qt6-base' 'qt6-declarative' 'polkit' 'libnotify' 'openssl' 'zip')
 makedepends=('qt6-base' 'qt6-declarative' 'qt6-tools' 'gcc' 'make')
 # `vm/omahouse.install` is a symlink to `packaging/omahouse.install`, so the
 # scriptlet pacman runs here is the very file the repo ships and not a copy that
@@ -66,24 +73,24 @@ package() {
   install -Dm644 packaging/omahouse.svg \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/omahouse.svg"
 
-  # The browser's half of docs/design.md §5.2, and only the half a package can
-  # honestly carry.
+  # The browser's half of docs/design.md §5.2.
   #
-  # The shim and the native messaging manifest are static files and they go in
-  # here: together they are what makes `com.omahouse.meter` a host Chromium can
-  # reach at all. The extension's own source goes in beside them so that whatever
-  # signs it is signing something with the package's version on it.
+  # Three static files: the shim Chromium runs for `com.omahouse.meter`, the
+  # extension's own source, and the script that turns that source into a signed
+  # `.crx` on the machine it is being installed on.
   #
-  # What is NOT here is the signed `.crx`, its `updates.xml` and the
-  # force-install policy that names them. Producing those needs a browser to sign
-  # with and a private key to sign with, and neither belongs in a package build:
-  # a makedepends on chromium to build a parental control is a bad trade, and a
-  # signing key reachable by a build is a signing key. `extension/pack.sh` makes
-  # them, and `post_remove` takes them off whether or not this package ever put
+  # What is **not** in this list is anything that names an extension id -- no
+  # `.crx`, no `updates.xml`, no force-install policy, no native messaging
+  # manifest. There is no id to name at build time, because the key that decides
+  # it does not exist until `post_install` makes one. `meter-pack` writes all
+  # four, and `post_remove` takes them off whether or not this package ever put
   # them there.
+  #
+  # That also means a file list is no longer the whole of what this package puts
+  # on a machine, which is a real cost of the choice and is why the scriptlet's
+  # removal half is as long as it is.
   install -Dm755 packaging/omahouse-meter-host "$pkgdir/usr/lib/omahouse/meter-host"
-  install -Dm644 packaging/com.omahouse.meter.json \
-    "$pkgdir/etc/chromium/native-messaging-hosts/com.omahouse.meter.json"
+  install -Dm755 packaging/omahouse-meter-pack "$pkgdir/usr/lib/omahouse/meter-pack"
   install -Dm644 extension/manifest.json \
     "$pkgdir/usr/share/omahouse/chromium/omahouse-meter/manifest.json"
   install -Dm644 extension/background.js \

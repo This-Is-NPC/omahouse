@@ -41,6 +41,7 @@ import shlex
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 from pathlib import Path
@@ -505,25 +506,22 @@ class VM:
         say("  putting the machine back")
         self.stop_daemon()
 
-        # The browser half of docs/design.md §5.2: the force-install policy, the
-        # archive it names, the native messaging manifest and the extension in
-        # the subject's own profile. Every one of them is a restriction or a
-        # thing that reports, and none of them may outlive this run.
-        # `omahouse.json` is in this list for a stronger reason than the rest:
-        # it is a **restriction**, and a site budget that ran out during a run
-        # would leave a domain in it that only a running daemon knows how to take
-        # back out. A machine put back with a site still blocked and no omahouse
-        # counting on it is exactly the failure docs/design.md §11 refuses.
-        self.root("rm -f /etc/chromium/policies/managed/omahouse-meter.json "
-                  "/etc/chromium/policies/managed/omahouse.json "
-                  "/etc/chromium/native-messaging-hosts/com.omahouse.meter.json "
-                  "/usr/share/omahouse/chromium/omahouse-meter.crx "
-                  "/usr/share/omahouse/chromium/updates.xml", check=False)
-        self.root("rmdir /usr/share/omahouse/chromium /usr/share/omahouse "
-                  "/etc/chromium/native-messaging-hosts 2>/dev/null || true", check=False)
+        # The site block of docs/design.md §11, which is the one browser file
+        # here that no package ever writes: the daemon writes it at run time when
+        # a site budget runs out, and only a running daemon knows how to take a
+        # domain back out of it. A machine put back with a site still blocked and
+        # nothing counting on it is exactly the failure §11 refuses.
+        #
+        # The **meter's** four files are deliberately not on this list any more.
+        # They are the package's, made by its scriptlet, and they are removed the
+        # way a household removes them -- by `pacman -R`, which is what
+        # `the_package_installs_the_meter` proves and what the message at the end
+        # of this method points at. Stripping them by hand while leaving the
+        # package installed would leave the machine in a state no install and no
+        # removal ever produces, which is a worse thing to hand back than either.
+        self.root("rm -f /etc/chromium/policies/managed/omahouse.json", check=False)
         self.root(f"pkill -u {self.subject} -x chromium || true", check=False)
-        self.root(f"rm -rf /home/{self.subject}/.config/chromium/Default/Extensions "
-                  f"/run/user/{self.uid}/omahouse", check=False)
+        self.root(f"rm -rf /run/user/{self.uid}/omahouse", check=False)
 
         # The virtual keyboard, which is a test tool and does not stay.
         self.root("systemctl stop ydotoold; systemctl reset-failed ydotoold; "
@@ -552,7 +550,13 @@ class VM:
 
         # And the one thing left changed on purpose, named rather than left for
         # somebody to find. See `remember_the_state`.
-        say(f"  the binary left on the machine: {self.binary_on_the_machine()}")
+        #
+        # It is now a **package** and not a loose binary, which is the difference
+        # that makes leaving it defensible: `pacman -Qo` answers, `pacman -R`
+        # undoes it, and the meter it forced into Chromium comes off with it.
+        # Before, this machine was left carrying a file nothing on it could name.
+        say(f"  the package left on the machine: {self.binary_on_the_machine()}")
+        say("  everything it put in Chromium comes off with `pacman -R omahouse`")
 
     # -- typing at it -------------------------------------------------------
     #
@@ -755,54 +759,85 @@ def log_in_on_omarchy(vm):
                 vm.pace["patience_seconds"], "the Omarchy shell to come up")
 
 
-def deploy_on_omarchy(vm):
-    """The build, and the browser half of docs/design.md §5.2.
+def build_the_package():
+    """`makepkg` over `vm/PKGBUILD`, into a temporary directory.
 
-    The `.crx` is signed **on this machine** and copied over, so the private key
-    never leaves the developer's laptop -- `extension/pack.sh` says where it
-    lives and what it would be in production. The guest gets an archive and a
-    public id, which is all a machine ever needs.
+    Twenty seconds, and every byte of it lands under `$TMPDIR`: `BUILDDIR`,
+    `PKGDEST`, `SRCDEST` and `LOGDEST` are all pointed away, so a run leaves
+    nothing in the working tree and nothing installed here. `-d` because the
+    dependencies that matter are the guest's -- `deploy_on_omarchy` checks the
+    one that can actually break a copied binary, which is Qt -- and a build
+    machine is not the machine under test.
+
+    The `-debug` package makepkg also produces when the local `makepkg.conf` asks
+    for it is not what is installed: the file is picked by exact name.
     """
-    binary = ROOT / "build/bin/omahouse"
-    if not binary.exists():
-        raise Blocked(f"{binary} is not built. Run `mise run build` first.")
+    out = Path(tempfile.mkdtemp(prefix="omahouse-pkg."))
+    done = run(["makepkg", "-f", "-d", "--noconfirm"], cwd=str(HERE),
+               env={**os.environ,
+                    "BUILDDIR": str(out / "build"),
+                    "PKGDEST": str(out / "pkg"),
+                    "SRCDEST": str(out / "src"),
+                    "LOGDEST": str(out / "log")})
+    if done.returncode != 0:
+        tail = "\n".join((done.stdout + done.stderr).splitlines()[-20:])
+        raise Blocked("makepkg over vm/PKGBUILD failed:\n" + tail)
+    built = sorted(p for p in (out / "pkg").glob("omahouse-[0-9]*.pkg.tar.*")
+                   if "-debug-" not in p.name)
+    if not built:
+        raise Blocked(f"makepkg produced nothing under {out / 'pkg'}")
+    return built[0]
+
+
+def deploy_on_omarchy(vm):
+    """The package, the way somebody's laptop would get it.
+
+    Not a binary copied into place and not a `.crx` signed here and carried over:
+    `pacman -U` of a package built from this working tree, so the scriptlet of
+    `packaging/omahouse.install` runs the way it runs on a household's machine.
+    It is the scriptlet that makes this machine's signing key, signs the meter
+    with it and writes the force-install policy naming the id that key produced --
+    docs/design.md §5.2, "The signing key, and why there is not one". Nothing
+    about the browser half is mounted by hand any more, here or anywhere.
+    """
     guest_qt = vm.ssh("pacman -Q qt6-base 2>/dev/null || true", check=False)[1].split()
     host_qt = run(["pacman", "-Q", "qt6-base"]).stdout.split()
     if guest_qt and host_qt and guest_qt[1].split("-")[0] != host_qt[1].split("-")[0]:
         raise Blocked(f"qt6-base is {host_qt[1]} here and {guest_qt[1]} there")
 
-    say("  installing the build")
-    vm.put(binary, "/tmp/omahouse")
-    vm.root("install -Dm755 /tmp/omahouse /usr/bin/omahouse")
-    vm.put(ROOT / "packaging/omahouse.service",
-           "/tmp/omahouse.service")
-    vm.root("install -Dm644 /tmp/omahouse.service "
-            "/usr/lib/systemd/system/omahouse.service")
+    say("  building the package from the tree")
+    package = build_the_package()
+    say(f"    {package.name}")
+    install_the_package(vm, package)
+    # Handed to the cases on the object they are given rather than imported, for
+    # the reason the `Failed` class is: a case that imported this file would get
+    # a second copy of it. `the_package` is the very artefact this run installed,
+    # so a case that removes it can put the machine back with the same bytes.
+    vm.the_package = package
+    vm.install_the_package = lambda: install_the_package(vm, package)
+    return package
+
+
+def install_the_package(vm, package):
+    """`pacman -U` on the guest, and the scriptlet's own words repeated here.
+
+    `--overwrite '*'` is bounded by the package's own file list and is there for
+    one case: a machine carrying an **unpackaged** `/usr/bin/omahouse` from an
+    earlier era of this harness, which pacman would otherwise refuse to install
+    over. It cannot reach a file omahouse does not ship.
+    """
+    vm.put(package, f"/tmp/{package.name}")
+    code, said = vm.root(f"pacman -U --noconfirm --overwrite '*' /tmp/{package.name}",
+                         check=False)
+    if code != 0:
+        raise Blocked(f"pacman -U said:\n{said}")
+    for line in said.splitlines():
+        # The scriptlet speaks on stderr with a `>>>` of its own, and what it
+        # says about the meter is the whole of what this deployment did that a
+        # file list did not.
+        if line.startswith(">>>") and ("meter" in line or "extension id" in line):
+            say("    " + line.strip())
     vm.root("systemctl daemon-reload")
-
-    say("  signing the meter and putting it on the machine")
-    packed = Path(run(["mktemp", "-d", "/tmp/omahouse-meter-out.XXXXXX"]).stdout.strip())
-    done = run([str(ROOT / "extension/pack.sh"), str(packed)])
-    if done.returncode != 0:
-        raise Blocked("extension/pack.sh: " + (done.stderr.strip() or done.stdout.strip()))
-    say("    " + " · ".join(line.strip() for line in done.stdout.splitlines()))
-
-    vm.put(packed / "omahouse-meter.crx", "/tmp/omahouse-meter.crx")
-    vm.put(packed / "updates.xml", "/tmp/updates.xml")
-    vm.root("install -Dm644 /tmp/omahouse-meter.crx "
-            "/usr/share/omahouse/chromium/omahouse-meter.crx")
-    vm.root("install -Dm644 /tmp/updates.xml /usr/share/omahouse/chromium/updates.xml")
-
-    for name, target in (
-            ("omahouse-meter-host", "/usr/lib/omahouse/meter-host"),
-            ("com.omahouse.meter.json",
-             "/etc/chromium/native-messaging-hosts/com.omahouse.meter.json"),
-            ("omahouse-meter-policy.json",
-             "/etc/chromium/policies/managed/omahouse-meter.json"),
-    ):
-        vm.put(ROOT / "packaging" / name, f"/tmp/{name}")
-        mode = "0755" if name == "omahouse-meter-host" else "0644"
-        vm.root(f"install -Dm{mode} /tmp/{name} {target}")
 
 
 def load_cases(wanted, machine):
