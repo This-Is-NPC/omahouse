@@ -84,6 +84,7 @@ class VM:
 
     def __init__(self, manifest, machine, pace):
         self.manifest = manifest
+        self._peers = []
         # Which of the two machines this run is about. `poc` is disposable and is
         # where the teeth are exercised; `omarchy` is the owner's demonstration
         # machine and is put back exactly as it was found.
@@ -107,6 +108,39 @@ class VM:
         # is not disposable. Filled by `remember_the_state` and undone by
         # `put_the_state_back`.
         self.remembered = None
+
+    def peer(self, machine):
+        """A second machine, brought up beside this one and shut down with it.
+
+        For the cases that are about two computers rather than about one. It is
+        proved and started exactly the way the first is: a case that reached a
+        machine without the manifest's four checks would be a case that could one
+        day reach the developer's own.
+
+        Only a disposable peer, deliberately. A case that wanted the owner's
+        demonstration VM as a bit part would be a case that could leave it
+        changed, and `put_the_state_back` belongs to the machine a run is *about*
+        rather than to whatever it borrowed along the way.
+        """
+        if machine not in self.manifest["machines"]:
+            raise Blocked(f"no machine called {machine!r} in the manifest")
+        other = VM(self.manifest, machine, self.pace)
+        if not other.disposable:
+            raise Blocked(f"{machine} is not disposable and cannot be a peer")
+        other.prove_it_is_the_right_machine()
+        other.start()
+        self._peers.append(other)
+        return other
+
+    def shutdown_peers(self):
+        """Every machine a case borrowed, reset and shut down."""
+        for other in self._peers:
+            try:
+                other.reset()
+            except Exception as problem:  # noqa: BLE001 -- cleanup is best effort
+                say(f"  could not reset {other.domain}: {problem}")
+            other.shutdown()
+        self._peers = []
 
     @property
     def omakure_binary(self):
@@ -970,6 +1004,7 @@ def main():
                     vm.put_the_state_back()
             except Exception as problem:  # noqa: BLE001 -- cleanup is best effort
                 say(f"  could not put the machine back: {problem}")
+            vm.shutdown_peers()
             if options.keep:
                 say(f"  leaving {vm.domain} running at {vm.address}")
             else:

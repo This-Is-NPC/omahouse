@@ -31,6 +31,27 @@ uid = 1001
 # shut out, and that is what makes it safe to close processes and end logins on.
 disposable = true
 
+# The parent's own PC, for the two-machine half of the spike. Cloned from the
+# `poc` and then emptied of everything that makes a machine fiscalised: no
+# omahouse binary, no daemon, no /etc/omahouse. It conducts and it reads, and
+# that is the whole point -- if the console needed omahouse installed beside it,
+# the design would be two managed machines rather than an operator and a
+# subject.
+#
+# Disposable: nothing on it is anybody's demonstration.
+[machines.dad]
+name = "omahouse-dad"
+uri = "qemu:///system"
+disk = "/var/lib/libvirt/images/omahouse-dad.qcow2"
+hostname = "omahouse-dad"
+key = "~/.ssh/id_vms"
+operator = "arch"
+# It inherited the clone's `julia`, who has no session and no rules here. The
+# field is required by the harness and names nobody who matters on this machine.
+subject = "julia"
+uid = 1001
+disposable = true
+
 [machines.omarchy]
 # The owner's demonstration machine, on real Omarchy: SDDM rather than an
 # autologin on tty1, a `bochs` framebuffer the VNC can see, and a real Chromium.
