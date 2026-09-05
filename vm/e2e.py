@@ -473,6 +473,25 @@ class VM:
             "sddm": self.root("cat /var/lib/sddm/state.conf 2>/dev/null || true",
                               check=False)[1],
         }
+        # The binary is the one thing here that is **not** put back, and that is
+        # the point of writing it down. `/usr/bin/omahouse` is the artefact under
+        # test: every run installs the build from the working tree over whatever
+        # was there, exactly as the disposable machine's `deploy` does, because a
+        # run against last week's binary proves nothing about this week's. What a
+        # run must not do is replace it in silence -- which is how this machine
+        # came to be carrying an unpackaged build that nothing on it could name.
+        # So the version and the hash of what was found are said out loud, and
+        # `put_the_state_back` says what is being left in its place.
+        self.remembered["binary"] = self.binary_on_the_machine()
+        say(f"  the binary that was here: {self.remembered['binary']}")
+
+    def binary_on_the_machine(self):
+        """What `/usr/bin/omahouse` is right now, in one line somebody can quote."""
+        said = self.ssh(
+            "omahouse --version 2>/dev/null | head -1; "
+            "sha256sum /usr/bin/omahouse 2>/dev/null | cut -c1-12; "
+            "pacman -Qo /usr/bin/omahouse 2>&1 | tail -1", check=False)[1]
+        return " · ".join(line.strip() for line in said.splitlines() if line.strip())
 
     def put_the_state_back(self):
         """The copy above, and everything this run installed, taken off again.
@@ -524,6 +543,10 @@ class VM:
         # person sees -- which is where the machine was found.
         self.root(f"loginctl terminate-user {self.subject} || true", check=False)
         self.root("systemctl restart sddm", check=False)
+
+        # And the one thing left changed on purpose, named rather than left for
+        # somebody to find. See `remember_the_state`.
+        say(f"  the binary left on the machine: {self.binary_on_the_machine()}")
 
     # -- typing at it -------------------------------------------------------
     #

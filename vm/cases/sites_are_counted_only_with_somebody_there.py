@@ -15,9 +15,22 @@ from a monitor that really went dark.
 
 **Provenance.** The sequence below was driven by hand against `omahouse-omarchy`
 on 2026-09-04 between 21:26 and 21:28 and the numbers it produced are in
-docs/design.md §5.2. This file is that run written down so it can be run again;
-it has not yet been executed through `vm/e2e.py --machine omarchy` end to end,
-and the first person to run it should expect to fix a wait rather than a claim.
+docs/design.md §5.2. It has since been run by `vm/e2e.py --machine omarchy
+--case sites` at the quick pace, and every claim it makes held the first time it
+was asked automatically: the `.crx` installed under policy, the service worker
+opened the port, Chromium spawned `omahouse meter` as julia, three sites came
+back as three rows within a tick of the wall clock, and the dark window billed
+nothing.
+
+**What did have to change was one of its own clocks.** The lit window after the
+screen came back was opened *before* the dispatch that turned it on, so it
+counted the two ssh round trips and the poll that follow -- seconds the screen
+was still off -- as seconds the site should have been billed for, and then read
+that as the daemon losing time. It is the failure a hand run cannot have,
+because a hand cannot be two round trips early. The window now opens where
+`wait_for` says the screen really is on, and the tail is a whole
+`site_seconds` rather than half of one, so a single tick of slop is the same
+fraction of it as it is of the other three.
 
 Two things the hand run found that are not in `.temp/docs/vm-runbook.md`:
 
@@ -53,13 +66,34 @@ def run(vm):
     day = f"/var/lib/omahouse/{julia}/{vm.today()}.json"
 
     def screen():
-        return vm.root("cat /sys/class/drm/card0-Virtual-1/dpms", check=False)[1].strip()
+        # Every connected connector, the way `screenStateFromDrm` reads them:
+        # `On` if any of them is on. The connector is found rather than named --
+        # `card0-Virtual-1` is what `bochs` gives this machine and `vkms` gives
+        # the other one, and a case that spelled one of them out would be a case
+        # that answered the empty string on the other and read as a dark screen.
+        seen = vm.root(
+            "sh -c 'for c in /sys/class/drm/*/status; do "
+            "[ \"$(cat $c)\" = connected ] || continue; "
+            "cat \"$(dirname $c)/dpms\"; done'", check=False)[1].split()
+        if not seen:
+            raise Failed("no connected screen under /sys/class/drm to read a dpms from")
+        return "On" if "On" in seen else "Off"
 
     def hypr(command):
-        signature = vm.root(f"ls /run/user/{vm.uid}/hypr", check=False)[1].split()[0]
-        return vm.root(
+        listed = vm.root(f"ls /run/user/{vm.uid}/hypr", check=False)[1].split()
+        if not listed:
+            raise Failed(f"no Hyprland instance under /run/user/{vm.uid}/hypr to dispatch to")
+        # `hyprctl dispatch dpms off` is dead on this Hyprland: the dispatcher
+        # argument is Lua now. The old spelling fails with a parse error and an
+        # exit code nobody checks, so the caller reads the output rather than
+        # trusting the exit status -- a screen turned off in the log and not on
+        # the machine is the expensive kind of green.
+        said = vm.root(
             f"-u {julia} env XDG_RUNTIME_DIR=/run/user/{vm.uid} WAYLAND_DISPLAY=wayland-1 "
-            f"HYPRLAND_INSTANCE_SIGNATURE={signature} hyprctl {command}", check=False)[1]
+            f"HYPRLAND_INSTANCE_SIGNATURE={listed[0]} hyprctl {command}", check=False)[1]
+        if "ok" not in said.lower():
+            raise Failed(f"hyprctl {command} said {said.strip()!r} rather than ok")
+        return said
 
     def go(where):
         """Ctrl+L, the address, Enter -- the way a person types one."""
@@ -134,12 +168,24 @@ def run(vm):
     time.sleep(seconds)
     if screen() != "Off":
         raise Failed("the screen came back on inside the dark window")
-    came_back = time.time()
+    still_dark = time.time()
 
+    # The screen back on, and the lit window starting **after** it really is on
+    # rather than before the dispatch that turns it on. Two ssh round trips and a
+    # poll sit between the two moments, and every second of them is a second the
+    # screen was still off: a window opened at the earlier moment credits the
+    # site with time nobody could see it for, and then reads as the daemon having
+    # lost seconds. That is a bookkeeping fault in the case and not a fault in
+    # the meter, and it is the one the first automated run of this file found.
     hypr("dispatch 'hl.dsp.dpms(\"on\")'")
-    vm.wait_for(lambda: screen() == "On", vm.pace["patience_seconds"],
-                "the screen to come back")
-    time.sleep(seconds // 2)
+    lit_again = vm.wait_for(lambda: screen() == "On", vm.pace["patience_seconds"],
+                            "the screen to come back")
+    # A whole window and not half of one. The extension repeats itself every five
+    # seconds and the daemon refuses a line older than fifteen, so the first beat
+    # after a dark stretch is worth several seconds of nothing being billed --
+    # measured below, and printed whether or not this passes. A tail shorter than
+    # the other windows makes that beat most of the window.
+    time.sleep(seconds)
 
     # Stopped, so that the end of the counting is a moment this case knows rather
     # than whenever the report happened to be read.
@@ -150,6 +196,12 @@ def run(vm):
     written = json.loads(vm.root(f"cat {day}"))
     sites = written.get("sites", {})
     presence = written.get("presence", {})
+
+    # What the browser really said, and when. Printed every run and not only on a
+    # failure: the file is the whole of what the daemon had to go on, and a row
+    # that came out short is either a beat that never arrived or a tick that was
+    # refused, which are two different bugs and look identical in the report.
+    beats = vm.root(f"tail -n 12 /run/user/{vm.uid}/omahouse/focus", check=False)[1]
 
     # What the wall clock says each site was in front for. The tick is two
     # seconds and a page takes a moment to load and be reported, so the
@@ -162,27 +214,43 @@ def run(vm):
         name = site.split("/")[0]
         name = name.split(".", 1)[1] if name.startswith("en.") else name
         expected[name] = until - at
-    # The last site again, for the lit part after the screen came back.
+    # The last site again, for the lit part after the screen came back. Kept
+    # apart as well as added in, because a tail that bills nothing and a head
+    # that bills nothing are the same number here and not the same finding.
     last = list(expected)[-1]
-    expected[last] += ended - came_back
+    tail = ended - lit_again
+    expected[last] += tail
+
+    def whole(reason):
+        return (f"the whole of it: sites {sites}, presence {presence}\n"
+                f"    {last} was lit for {expected[last] - tail:.0f}s, dark for "
+                f"{still_dark - went_dark:.0f}s, then lit again for {tail:.0f}s\n"
+                f"    the last beats the browser sent:\n      "
+                + beats.strip().replace("\n", "\n      ") + f"\n    {reason}")
 
     slack = 6
     for site, wanted in expected.items():
         got = sites.get(site, 0)
         if abs(got - wanted) > slack:
             raise Failed(f"{site}: the report says {got}s and the screen had it for "
-                         f"{wanted:.0f}s\n    the whole of it: {sites}")
+                         f"{wanted:.0f}s\n    " + whole("more than the %ds this allows"
+                                                        % slack))
         print(f"      {site:16} report {got:3}s   screen {wanted:5.0f}s")
 
     # And the dark window, which is the assertion this case exists for. The
     # browser was reporting a site throughout it and not one second of it was
-    # billed.
-    was_dark = came_back - went_dark
+    # billed. `still_dark` and not the moment the screen came back on: the window
+    # asserted about has to be one the screen was provably off for all of, and
+    # the seconds between the last check and the dispatch that lit it are seconds
+    # nobody looked.
+    was_dark = still_dark - went_dark
     if presence.get("screen-off", 0) < was_dark - slack:
         raise Failed(f"the screen was off for {was_dark:.0f}s and the day only records "
-                     f"{presence.get('screen-off', 0)}s of it: {presence}")
+                     f"{presence.get('screen-off', 0)}s of it\n    "
+                     + whole("the dark window is not in the day"))
     print(f"      {'the dark window':16} report   0s   screen {was_dark:5.0f}s  "
           f"(presence: {presence})")
+    print(f"      {last} again once it was lit: {tail:.0f}s of window")
 
     # The journal said so at the time, in the sentence an operator would read.
     journal = vm.journal()
