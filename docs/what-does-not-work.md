@@ -149,27 +149,7 @@ a lone `+` in it and `ok` is born greyed out:
 
 **What to do in the meantime.** Clear the `+` before typing the number.
 
-## 11. Status says time per site is never billed to a budget
-
-**What happens.** `omahouse status` closes its `TIME PER SITE` block with:
-
-```
-  Counted only while the screen says somebody is there, and never billed to a
-  budget: there is no site limit, no warning and no block (docs/design.md §5.2).
-```
-
-It prints that sentence unconditionally. It was true of the observing stage,
-where time per site was counted and nothing acted on it, and it stopped being
-true when site budgets shipped: there is a site limit, it warns, and it blocks.
-On a profile with one written, the same screen contradicts itself — the budget
-table above says `youtube.com … stops opening` while this line says there is no
-such thing.
-
-**What to do in the meantime.** Believe the budget table and
-`omahouse profile show`, which are right. Nothing is mis-billed; the sentence is
-wrong and the arithmetic is not.
-
-## 12. In a narrow window the header overlaps the tabs
+## 11. In a narrow window the header overlaps the tabs
 
 **What happens.** The header draws over the subtitle and the tabs, and the
 result is unreadable.

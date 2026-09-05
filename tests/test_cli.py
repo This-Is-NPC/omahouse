@@ -2211,6 +2211,52 @@ def check_status_and_report_show_the_time_per_site(box):
     assert json.loads(box.run("status", USER, "--json").stdout)["sites"]["now"] is None
 
 
+def check_the_time_per_site_stops_denying_the_budget_above_it(box):
+    """The last line of the block has to agree with the table over it.
+
+    The block was written when a site was counted and nothing else, and it said
+    so out loud. Site budgets grew teeth afterwards, and the sentence stayed:
+    with a limit written, the same screen said `stops opening` in the table and
+    "there is no site limit" two inches below. Defect 11, and this is the case
+    that would have caught it.
+    """
+    document = watching_profile()
+    box.write_profiles(document)
+    box.browsing("www.youtube.com")
+    box.run("watch", "--once")
+
+    # With nothing written about a site, the old sentence is the true one.
+    quiet = box.run("status", USER)
+    assert "never billed to a" in quiet.stdout, quiet.stdout
+
+    written = box.run("limit", USER, "--site", "youtube.com=30m")
+    assert written.returncode == 0, written.stderr
+
+    said = box.run("status", USER)
+    sites = below(said.stdout, "TIME PER SITE")
+    assert "never billed to a" not in sites, said.stdout
+    assert "billed to youtube.com" in sites, said.stdout
+    assert "that budget spends" in sites, said.stdout
+    # And the table above it still says what running out does, so the two halves
+    # of the screen are saying one thing.
+    assert row_for(said.stdout, "youtube.com")[-1] == "stops opening", said.stdout
+
+    # A second one, and the sentence counts.
+    box.run("limit", USER, "--site", "tiktok.com=10m")
+    two = below(box.run("status", USER).stdout, "TIME PER SITE")
+    assert "billed to youtube.com, tiktok.com" in two, two
+    assert "those budgets spend" in two, two
+
+    # A site budget with no limit counts and never runs out, so it is not one of
+    # these: naming it would put the claim back the other way around.
+    only = watching_profile()
+    only["profiles"][0]["budgets"].append(
+        {"id": "wikipedia.org", "match": "wikipedia.org", "kind": "site"})
+    box.write_profiles(only)
+    none = below(box.run("status", USER).stdout, "TIME PER SITE")
+    assert "never billed to a" in none, none
+
+
 # -- the promise of the stage -------------------------------------------------
 
 # -- the package, put on a machine and taken off it --------------------------
@@ -2506,6 +2552,7 @@ def main():
         check_a_site_that_ran_out_is_blocked_and_comes_back_on_its_own,
         check_a_site_budget_composes_with_the_web_rules,
         check_status_and_report_show_the_time_per_site,
+        check_the_time_per_site_stops_denying_the_budget_above_it,
         check_watch_writes_presence_beside_the_budgets_and_never_into_them,
         check_the_removal_covers_what_the_install_makes,
         check_the_reading_verbs_write_nothing,

@@ -215,10 +215,6 @@ pkexec`.
 
 ## What can go wrong
 
-**`status` says time per site is never billed to a budget.** It says so
-unconditionally, and it stopped being true when site budgets shipped.
-[The defect](what-does-not-work.md#11-status-says-time-per-site-is-never-billed-to-a-budget).
-
 **`/` in the window filters all four lists at once.** A needle that misses the
 person on the people list empties the people list, and then the programs view
 has nobody to be about.

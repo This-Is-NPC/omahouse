@@ -184,12 +184,6 @@ than inferring it from the shape of the string.
 
 ## What can go wrong
 
-**`omahouse status` still says site time is never billed to a budget.** The
-sentence under `TIME PER SITE` — *never billed to a budget: there is no site
-limit, no warning and no block* — was true of the observing stage and stopped
-being true when site budgets shipped. It is printed unconditionally.
-[The defect](what-does-not-work.md#11-status-says-time-per-site-is-never-billed-to-a-budget).
-
 **Nothing is reported at all.** Either no browser with the meter in it is open,
 or nobody has it installed — `status` says which. A second browser is a door
 with no clock on it, and browsing done in it is browsing that no site budget can

@@ -545,7 +545,7 @@ void printPresence(const QString &user, const Presence &presence, const SeatRead
     if (!today.isEmpty())
         out() << QStringLiteral("  Today: %1.\n").arg(today);
     out() << "  Measured and reported, and it takes nothing away: an app is still billed for\n"
-             "  running, screen or no screen (docs/design.md §5).\n";
+             "  running, screen or no screen.\n";
 }
 
 // -- time per site -----------------------------------------------------------
@@ -577,15 +577,33 @@ QString sitesToday(const Ledger &ledger)
     return parts.join(QStringLiteral(", "));
 }
 
+/// The ids of the site budgets that can actually run out.
+///
+/// A site budget with no `dailyMinutes` counts and never runs out, so it is not
+/// one of these. Naming it would leave the block claiming a limit that is not
+/// written, which is the same lie the other way around.
+QStringList limitedSites(const Profile *profile)
+{
+    QStringList ids;
+    if (!profile)
+        return ids;
+    for (const Budget &budget : profile->budgets) {
+        if (budget.isSite() && budget.hasLimit())
+            ids.append(budget.id);
+    }
+    return ids;
+}
+
 /// Time per site, on the screen an operator reads.
 ///
-/// It is a count and nothing else: no budget, no warning, no block. That is the
-/// observing stage of docs/design.md §5.2, and it is said out loud on the same
-/// screen for the reason the presence block says its own last line -- somebody
-/// reading a table of sites beside a table of budgets will assume the first one
-/// can take something away, and it cannot.
+/// The block ends by saying what the count is for, because somebody reading a
+/// table of sites beside a table of budgets has to be told whether the first one
+/// can take something away. It could not, once: site budgets grew teeth after
+/// this was written, and until the profile was passed in here the same screen
+/// said `stops opening` in the table above and "there is no site limit" two
+/// inches below. That is why this takes a profile and not only a ledger.
 void printSites(const QString &user, const QString &now, bool counted, bool couldLook,
-                const Ledger &ledger)
+                const Ledger &ledger, const Profile *profile)
 {
     out() << "\nTIME PER SITE\n";
     if (!couldLook) {
@@ -614,9 +632,17 @@ void printSites(const QString &user, const QString &now, bool counted, bool coul
     const QString today = sitesToday(ledger);
     if (!today.isEmpty())
         out() << QStringLiteral("  Today: %1.\n").arg(today);
-    out() << "  Counted only while the screen says somebody is there, and never billed to a\n"
-             "  budget: there is no site limit, no warning and no block "
-             "(docs/design.md §5.2).\n";
+    const QStringList limited = limitedSites(profile);
+    if (limited.isEmpty()) {
+        out() << "  Counted only while the screen says somebody is there, and never billed to a\n"
+                 "  budget: there is no site limit, no warning and no block.\n";
+    } else {
+        out() << QStringLiteral("  Counted only while the screen says somebody is there, and "
+                                "billed to %1\n  above: this is the count %2 spends.\n")
+                     .arg(limited.join(QStringLiteral(", ")),
+                          limited.size() == 1 ? QStringLiteral("that budget")
+                                              : QStringLiteral("those budgets"));
+    }
 }
 
 // -- the sites ---------------------------------------------------------------
@@ -1143,7 +1169,7 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
     }
 
     printPresence(user, presence, seat, ledger);
-    printSites(user, siteNow, presence.present, couldLookAtTheTab, ledger);
+    printSites(user, siteNow, presence.present, couldLookAtTheTab, ledger, profile);
 
     if (profile)
         printWebRules(*profile, profiles.all);
