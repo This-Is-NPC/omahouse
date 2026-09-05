@@ -21,7 +21,10 @@ mise run studio    # open the window
 
 `packaging/` holds the unit, the polkit policy, the desktop entry and the icon.
 The Arch recipe lives in the sibling `omarchy-pkgs` repository. Released under
-the MIT license.
+the MIT license. **A checkout is not an installation** — no PAM line, no
+service, and no browser meter;
+[how to install it, and how to take it off again](docs/how-to-install-and-remove.md)
+is the difference in full.
 
 ## Start here
 
@@ -86,8 +89,17 @@ sees what is left of their own day. Writing needs root, and the window gets ther
 through `pkexec`. `omahouse watch` is the loop that counts, warns and acts;
 `packaging/omahouse.service` runs it.
 
-[The guide](docs/guide.md) walks from an installed omahouse to a profile that
-stands up. Every verb is in [the command line](docs/cli.md).
+**Each of those lines has a page.** [The documentation](docs/README.md) is one
+task at a time — [put an account under
+rules](docs/how-to-put-an-account-under-rules.md), [say which programs may
+run](docs/how-to-release-programs.md), [put a clock on the
+day](docs/how-to-limit-the-time.md), [stop a site
+opening](docs/how-to-block-sites.md), [give a site so many minutes a
+day](docs/how-to-limit-time-on-a-site.md), [hand over more
+time](docs/how-to-hand-over-more-time.md), [read the
+day](docs/how-to-read-the-day.md), [install it and take it off
+again](docs/how-to-install-and-remove.md) — and every verb in full is in
+[the command line](docs/cli.md).
 
 ## The window
 
@@ -117,7 +129,8 @@ with nothing to press.
 
 ![the key sheet](docs/img/04-operator-keys.png)
 
-Every screen the window draws is in [the inventory](docs/screens.md).
+Every screen the window draws is in
+[the walk through it](docs/screens.md), in the order somebody meets them.
 
 ## What it does not do
 
@@ -134,14 +147,13 @@ logout, the counting and the daemon.
 
 ## What is broken
 
-The first four were measured on a real Omarchy; the last three are in the code
-as written. None of them has a fix here yet. [The guide
-§6](docs/guide.md#6-what-does-not-work-yet) has all of them, each with what to
-do in the meantime.
+A sample. None of them has a fix here yet, and
+[what does not work yet](docs/what-does-not-work.md) is the whole list — twelve
+of them, each with what to do in the meantime.
 
 - Programs opened from the Omarchy menu all arrive as one id, `gtk-launch`, so
   they cannot be released by name.
-- `hypridle` locks the screen, and the last warnings go out behind the lock.
+- The idle lock takes the screen, and the last warnings go out behind it.
 - When a session runs out, SDDM stops and the screen stays black until somebody
   brings it back.
 - Chromium turns up as two ids, and both need the rule.
@@ -151,6 +163,8 @@ do in the meantime.
   printed reaches the status bar.
 - A scope nothing can name has no screen in the studio, though the CLI reports
   it.
+- `omahouse status` still says time per site is never billed to a budget, which
+  stopped being true when site budgets shipped.
 
 ## Build
 
