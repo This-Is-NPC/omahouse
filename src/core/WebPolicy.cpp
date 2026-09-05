@@ -149,8 +149,7 @@ QStringList webPolicyReach()
                        "here is"),
         QStringLiteral("blocked for everyone who opens Chromium on it, including you. Chromium "
                        "has no"),
-        QStringLiteral("per-account policy on Linux (docs/proposal-browser.md §3.1), and that "
-                       "was accepted."),
+        QStringLiteral("per-account policy on Linux, and that was accepted."),
     };
 }
 

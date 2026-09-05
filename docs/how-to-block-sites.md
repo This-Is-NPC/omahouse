@@ -26,7 +26,7 @@ the same machine. omahouse says so every time it writes:
 ```
 omahouse: the browser policy is one file for the whole machine. A site blocked here is
           blocked for everyone who opens Chromium on it, including you. Chromium has no
-          per-account policy on Linux (docs/proposal-browser.md §3.1), and that was accepted.
+          per-account policy on Linux (docs/the-browser-half.md §3.1), and that was accepted.
 ```
 
 That cost was weighed and taken rather than worked around.

@@ -432,7 +432,7 @@ sections before writing a line, because both failures are invisible from the
 outside — the ruleset loads, the daemon runs, the set has elements in it, and
 nothing works.
 
-The counting half was picked up by [`proposal-browser.md`](../proposal-browser.md),
+The counting half was picked up by [`the-browser-half.md`](../the-browser-half.md),
 which leaves the network entirely and asks the browser for the name. **That one
 shipped** — the extension, the native host and the crossing with presence are
 [`design.md` §5.2](../design.md), and the budget with teeth on it is §5.3.

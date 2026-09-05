@@ -312,7 +312,7 @@ which is the one number in this program that a dark screen does change.
 
 ### 5.2 Time per site, and the budget on it
 
-`proposal-browser.md` proposed a Chromium extension that reports the site in
+`the-browser-half.md` proposed a Chromium extension that reports the site in
 the front tab, and `.temp/spike-extension.md` measured its whole chain on real
 Omarchy. This is what shipped of it. It counts the number, and — since §5.3 — a
 number that runs out acts.
@@ -337,10 +337,10 @@ omahouse watch        reads that file every cycle, crosses it with §5.1's
                       presence, and debits the tick to the site in the ledger.
 ```
 
-**Why a file and not a socket.** `proposal-browser.md` §8.1 called this "the
+**Why a file and not a socket.** `the-browser-half.md` §8.1 called this "the
 largest single piece of unplanned work": the host is spawned by the browser as
 the child (`.temp/spike-extension.md` §1 measured uid 1001, in her session, with
-her bus in the environment) and the ledger is root's, so the proposal reached for
+her bus in the environment) and the ledger is root's, so the argument there reached for
 a socket in the daemon, with framing and a second writer's worth of validation —
 against §3's "no second process, no IPC, no second reader of the profiles".
 
@@ -443,7 +443,7 @@ close every one of them when it ran out.
 
 ### The signing key, and why there is not one
 
-`proposal-browser.md` §6.3 named the custody of the key as a new problem and did
+`the-browser-half.md` §6.3 named the custody of the key as a new problem and did
 not decide it. It is decided here: **there is no key to keep, because the key is
 made on the machine during `pacman -U` and dies with `pacman -R`.**
 
@@ -695,7 +695,7 @@ said in the words §8 asks the studio to use. There is no second model here, and
 that is the point: **site filtering is a `Rule` with a different selector**, and
 `§2`'s three nouns carried it without a structural change, which is what
 [`not-built/network-control-per-account.md`](not-built/network-control-per-account.md) and
-[`proposal-browser.md`](proposal-browser.md) both predicted.
+[`the-browser-half.md`](the-browser-half.md) both predicted.
 
 A `web` that says nothing is not written into the file at all. That keeps *never
 had web rules* and *had them taken away* one state, which is what the whole of
@@ -706,7 +706,7 @@ shows Chromium's page, which says an administrator blocked it and nothing about
 who or why, and omahouse never learns the attempt happened at all: policy blocks
 inside the browser and reports nothing out. So there is no message to carry, and
 no count of tries for the day's report either. Both wait on the extension of
-[`proposal-browser.md`](proposal-browser.md), and until it exists this half
+[`the-browser-half.md`](the-browser-half.md), and until it exists this half
 blocks well and explains nothing.
 
 ### The mechanism is one Chromium managed policy
@@ -741,12 +741,12 @@ tie and that would turn the block into its opposite.
 ### The policy is per machine, and that was decided
 
 Chromium's policy directory is a compile-time constant —
-`proposal-browser.md` §3.1 reads it out of `policy_paths.cc` — so there is no
+`the-browser-half.md` §3.1 reads it out of `policy_paths.cc` — so there is no
 per-account browser policy on Linux short of a managed cloud account, which is
 exactly what this project is not. **One file therefore decides for every account
 that opens Chromium on the machine, the operator's included.**
 
-That was weighed and taken, not overlooked. `proposal-browser.md` §3.2 offers
+That was weighed and taken, not overlooked. `the-browser-half.md` §3.2 offers
 the way round it — the child on Chromium, the operator on Brave — and §3.4 the
 heavier one, a `bwrap` bind mount per session, which is refused there for the
 same reason §5 refuses eBPF. Neither is built. What is built says the truth once:
@@ -771,7 +771,7 @@ happening, with nothing in that file to tell them why. Being more restrictive
 than one profile asked for is visible the moment somebody opens the site, and the
 verb names the profile that overruled them. The surprise is put where it will be
 noticed. Same choice as `onerr=succeed` in §2, made in the other direction and
-for the same reason: §4.3 of `proposal-browser.md` shows that the restriction
+for the same reason: §4.3 of `the-browser-half.md` shows that the restriction
 here cannot lock anybody out of anything, because an incognito window and a
 blocked site both leave the session budget running exactly as it was.
 
@@ -825,7 +825,7 @@ somebody's browser taken away in the middle of an afternoon.
 
 Everything §10 says. Nothing in the browser stops a child opening a different
 browser; what stops them is the app allowlist, with the same hole — a released
-terminal launches anything. `proposal-browser.md` §3.5 is the honest reading:
+terminal launches anything. `the-browser-half.md` §3.5 is the honest reading:
 an account allowed to run two browsers is filtered in one of them, and the other
 is a door with no lock on it.
 
@@ -967,7 +967,7 @@ old form fails with a parse error and an exit code nobody was checking, which
 would have turned the screen off in the log and not on the machine.
 
 **What this round did not answer.** A suspend and resume
-(`proposal-browser.md` §9, question 9) was not exercised, and neither was an
+(`the-browser-half.md` §9, question 9) was not exercised, and neither was an
 incognito window nor a second browser profile. The keepalive over minutes of
 silence was measured by the spike and not again here: the quick regime's windows
 are seconds, which is what `mise run test:vm:long` exists for.

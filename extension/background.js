@@ -70,7 +70,7 @@ const RECONNECT_MS = 5000;
 // -- the registrable domain ---------------------------------------------------
 //
 // The privacy boundary, and it is kept here rather than at the far end.
-// `docs/proposal-browser.md` §5.4: the URL never leaves the browser process, so
+// `docs/the-browser-half.md` §5.4: the URL never leaves the browser process, so
 // there is no path -- no bug, no compromised host, no file left readable -- by
 // which the page somebody was on can be read out of omahouse. What crosses the
 // wire is `youtube.com`, and the difference between that and
@@ -167,7 +167,7 @@ function open() {
         port = null;
         // Not measured: `.temp/spike-extension.md` §3 held the port for thirty
         // minutes without one of these, and a suspend and resume was never
-        // exercised (`docs/proposal-browser.md` §9, question 9). So the
+        // exercised (`docs/the-browser-half.md` §9, question 9). So the
         // reconnection here is written for a case nobody has seen rather than
         // for one somebody has, and it is deliberately the dullest possible
         // shape: wait, open again, report again.
@@ -209,7 +209,7 @@ async function report(why) {
         site = NOTHING;
     }
     // Sent whether or not it changed, and there is no debounce on the way out.
-    // `docs/proposal-browser.md` §5.7 warned that `windows.onFocusChanged` sends
+    // `docs/the-browser-half.md` §5.7 warned that `windows.onFocusChanged` sends
     // a spurious `WINDOW_ID_NONE` before every window-to-window switch on some
     // Linux window managers and that the lie would have to be damped.
     // `.temp/spike-extension.md` §4 measured it on this compositor: twenty real

@@ -47,7 +47,7 @@ no error that names the rule, which is why it would be a flag and would be off.
 
 ## The browser path — mostly built, and here is the rest
 
-[`proposal-browser.md`](../proposal-browser.md) is the page the browser half was
+[`the-browser-half.md`](../the-browser-half.md) is the page the browser half was
 decided from, and most of it shipped: the extension, the native messaging host,
 time per site, the crossing with presence, blocking a site, incognito, and the
 install and removal of all of it. That is

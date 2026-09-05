@@ -10,7 +10,7 @@ namespace {
 const char *const kSystemConfigDir = "/etc/omahouse";
 const char *const kSystemStateDir = "/var/lib/omahouse";
 // A compile-time constant on the browser's side too -- `policy_paths.cc`, which
-// docs/proposal-browser.md §3.1 quotes -- so there is nothing to look up and
+// docs/the-browser-half.md §3.1 quotes -- so there is nothing to look up and
 // nothing that could differ per account.
 const char *const kSystemChromiumPolicyDir = "/etc/chromium/policies/managed";
 

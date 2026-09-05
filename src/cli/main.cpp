@@ -2320,7 +2320,7 @@ int cmdWebIncognito(const Globals &g, const QStringList &positionals, const Opti
     if (options.deny)
         sayTheReach();
 
-    // An incognito window is not extra screen time -- docs/proposal-browser.md
+    // An incognito window is not extra screen time -- docs/the-browser-half.md
     // §4.3. It is the same browser in the same scope under the same session
     // budget, so what it buys is anonymity about which site and not a minute of
     // anybody's day. Said here because it is the reason `--allow` is a
@@ -2930,7 +2930,7 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
 // what a budget is, does not accumulate, and never touches the ledger -- which
 // it could not write anyway, since /var/lib/omahouse is root's.
 //
-// `docs/proposal-browser.md` §8.1 reached instead for a socket in the root
+// `docs/the-browser-half.md` §8.1 reached instead for a socket in the root
 // daemon, and called the framing and the second writer's worth of validation
 // "the largest single piece of unplanned work on this page". This is what
 // replaced it. The accumulation stays in `watch`, which is already root, already
@@ -2938,7 +2938,7 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
 // screen; there is no new endpoint and nothing listening.
 //
 // It revalidates what the extension sent rather than trusting it -- the one
-// thing `docs/proposal-browser.md` §2 says is worth stealing from the prior art:
+// thing `docs/the-browser-half.md` §2 says is worth stealing from the prior art:
 // a compromised extension must not be able to push a whole URL through the wire
 // by putting one in the field. Anything that is not a plausible registrable
 // domain is written as `-`, which is the same thing the browser says when there

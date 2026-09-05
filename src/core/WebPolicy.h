@@ -18,7 +18,7 @@ namespace omahouse {
 // other side of the line the gate checks.
 //
 // **The policy is per machine, and this is the whole of why.** Chromium's policy
-// directory is a compile-time constant -- `docs/proposal-browser.md` §3.1 reads
+// directory is a compile-time constant -- `docs/the-browser-half.md` §3.1 reads
 // it out of `policy_paths.cc` -- and there is no per-account version of it short
 // of a managed cloud account. So one file decides for every account that opens
 // that browser, including the operator's. That was weighed and accepted rather

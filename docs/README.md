@@ -59,7 +59,7 @@ reach for the same idea should find out in an afternoon what cost a week.
 |---|---|
 | [what was proposed and not built](not-built/README.md) | the register: everything argued for and not built, with the reason for each. Start here rather than in the two pages below. |
 | [network control per account — measured, and not taken](not-built/network-control-per-account.md) | a per-UID `nftables` design, measured in two VMs and abandoned. The browser sends no packet to port 53; a set of addresses named `youtube.com` does not contain the site. What is still a candidate is named as such. |
-| [where the browser half was decided](proposal-browser.md) | the argument the shipped browser half came from — Chromium source reads, the policy constraints, and the ecosystem survey. Most of it shipped; where it disagrees with `design.md`, `design.md` wins. |
+| [where the browser half was decided](the-browser-half.md) | the argument the shipped browser half came from — Chromium source reads, the policy constraints, and the ecosystem survey. Most of it shipped; where it disagrees with `design.md`, `design.md` wins. |
 
 ---
 
