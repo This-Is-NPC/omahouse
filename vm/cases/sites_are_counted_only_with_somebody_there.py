@@ -200,7 +200,23 @@ def run(vm):
     # Stopped, so that the end of the counting is a moment this case knows rather
     # than whenever the report happened to be read.
     vm.stop_daemon()
-    ended = time.time()
+    # And the moment is the daemon's own last write, not the moment the ssh that
+    # stopped it came back. Those are seconds apart -- a `systemctl stop` over
+    # ssh is a connection, an authentication and a unit teardown -- and taking
+    # the later one charged every one of those seconds to the tail as time the
+    # site was in front while the daemon was already dead. It is the same
+    # bookkeeping fault this case fixed at the other end of the window, at
+    # `lit_again`, left standing at this end: one run had it cost 8 seconds and
+    # go red, the next 3 and go green, with the meter behaving identically in
+    # both. A case whose expectation moves by eight seconds between two runs of
+    # the same mechanism is measuring its own ssh and calling it the meter.
+    #
+    # The ledger is written once a cycle whenever it changed, and through a lit
+    # tail it changed every cycle, so its last write is the last cycle that was
+    # counted. `stat` and `date` come back from one call and one clock, so the
+    # age between them carries no skew; only the age crosses to this clock.
+    aged = vm.root(f"sh -c 'stat -c %Y {day}; date +%s'").split()
+    ended = time.time() - (int(aged[1]) - int(aged[0]))
 
     import json
     written = json.loads(vm.root(f"cat {day}"))
