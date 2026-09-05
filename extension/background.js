@@ -4,8 +4,9 @@
 // as it is. The browser is the only thing on the machine that knows the name of
 // the site somebody is looking at -- not the compositor, whose window title is
 // whatever the page decided to write there, and not the network, which
-// `docs/proposal-network.md` §3.2 measured putting 4.5% of a playing video's
-// bytes in the set named after it. So the name has to come from in here. Every
+// `docs/not-built/network-control-per-account.md` §3.2 measured putting 4.5% of
+// a playing video's bytes in the set named after it. So the name has to come
+// from in here. Every
 // other question is answered outside, by the daemon that is already root:
 //
 //   what a profile is                    the daemon reads /etc/omahouse

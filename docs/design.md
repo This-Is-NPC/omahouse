@@ -670,7 +670,7 @@ about a site. `omahouse web kid --only-listed` is `profile default --deny`
 said in the words §8 asks the studio to use. There is no second model here, and
 that is the point: **site filtering is a `Rule` with a different selector**, and
 `§2`'s three nouns carried it without a structural change, which is what
-[`proposal-network.md`](proposal-network.md) and
+[`not-built/network-control-per-account.md`](not-built/network-control-per-account.md) and
 [`proposal-browser.md`](proposal-browser.md) both predicted.
 
 A `web` that says nothing is not written into the file at all. That keeps *never
@@ -1233,7 +1233,7 @@ a structural change when the time comes.
 - **Focus time** instead of running time. Fairer, and it needs IPC from Hyprland
   inside the fiscalised session, which that session can kill.
 - **Site filtering by DNS or proxy** — another problem, another program.
-  [`proposal-network.md`](proposal-network.md) argues that way, per account
+  [`not-built/network-control-per-account.md`](not-built/network-control-per-account.md) argues that way, per account
   through `nft meta skuid`. It is a **proposal**: none of it is built. What *is*
   built is §11, which blocks sites through the browser's own managed policy
   instead, and pays for it by being per machine rather than per account.

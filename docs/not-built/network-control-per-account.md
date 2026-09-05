@@ -1,37 +1,53 @@
-# Proposal — network control per profile · **nothing here is built**
+# Network control per account — measured, and not taken
 
-> **This page is a proposal, not a description of omahouse.**
+> **Nothing on this page is built, and the route it proposed is closed.**
 >
-> None of it exists. There is no code, no verb, no flag, no field in
-> `profiles.json`, no screen in the studio, and no measurement of omahouse doing
-> any of this. Every sentence below about what omahouse would do is a sentence
-> about something that has never run.
+> This is a record of a path that was designed, measured in two virtual machines
+> on 2026-09-04, and abandoned — kept so that the next person who reaches for
+> `nftables` and DNS to control a child's browsing spends an afternoon reading
+> instead of a week measuring. There is no code, no verb, no flag, no field in
+> `profiles.json` and no screen in the window for any of it.
 >
-> **An earlier version of this page proposed a mechanism that has since been
-> measured and does not work.** A proof of concept ran in two virtual machines on
-> 2026-09-04 — the stage 0 the old page asked for — and it took the DNS half of
-> the design away. The page has been rewritten so that the measurement comes
-> first and the failed route is recorded as failed, by name, rather than quietly
-> deleted. §1 to §5 are what a machine did. §6 onwards is what is still only
-> argued, and §6 in particular describes a path that has **not** been measured
-> and says so in as many words.
+> **What killed it, in two sentences.** The child's browser never emits a packet
+> to port 53, so a `dnat` by UID catches nothing (§3.1); and a set of addresses
+> resolved from `youtube.com` does not contain the site — 4.5% of the bytes of a
+> playing video landed in it (§3.2). Both failures are invisible from outside:
+> the ruleset loads, the daemon runs, the set has elements in it, and nothing
+> works.
 >
-> The precedent this box is here for: an earlier `testing.md` in this tree
-> described a `systemd-nspawn` layer that had never been built, and the claim
-> reached `docs/cli.md` before anybody noticed. The repository is public now, so
-> the distinction has to be visible from the file name inwards.
+> **What is still a candidate, and is honest about being unmeasured.** Reading
+> the TLS `server_name` out of the ClientHello through `nfqueue` (§6) would fix
+> the naming problem completely and has **never been run** — §6.5 lists the eight
+> questions that would decide it, and §6.4 names the two it cannot fix (QUIC, and
+> the hand-curation of which domains are a site). `--lock-network` (§7.2), a
+> profile flag that would set the account's `output` policy to `drop`, is the one
+> idea here that survives the death of the mechanism entirely: it needs no
+> resolver, no set and no matcher.
+>
+> **What replaced the parts that mattered.** Blocking sites shipped, through
+> Chromium's own managed policy — [`design.md` §11](../design.md), per machine
+> rather than per account, which is the price. Counting time per site shipped,
+> through a browser extension that reports the name — [`design.md`
+> §5.2 and §5.3](../design.md). Neither is what this page proposed, and both
+> exist because this page failed.
+>
+> §1 to §5 are what a machine did. §6 onwards is argument.
 
-This page is for the owner to say yes or no to. It is written against the model
-of [`design.md`](design.md) — `Profile`, `Rule`, `Budget`, `onExhausted`, the
-two second cycle — and where it does not fit that model, §8 says so rather than
-inventing a second one.
+The measurement is the reason to keep this page. §1 to §5 hold numbers that were
+paid for with two VMs and a day, and several of them are true of **any** design
+that ends in a set of addresses, not only of this one — §4 is the list.
+
+It was written against the model of [`design.md`](../design.md) — `Profile`,
+`Rule`, `Budget`, `onExhausted`, the two second cycle — and §8 is where it did
+not fit, which is worth reading before proposing anything else that adds a
+component to this program.
 
 It also contradicts one line of that page. `design.md`'s own out of scope list
-says **"Site filtering, DNS, proxy — another problem, another program."** That
-reversal is still the first thing to accept or refuse, and it is now a weaker
-case than it was: the argument used to be that the bridge was one `nft`
+says **"Site filtering, DNS, proxy — another problem, another program."** The
+reversal was the first thing to accept or refuse, and the measurement made it a
+weaker case than it was: the argument used to be that the bridge was one `nft`
 expression and the counting reused the loop that already exists. Half of that
-survived the measurement. The other half did not.
+survived. The other half did not.
 
 ## The problem that decides the design
 
@@ -416,9 +432,10 @@ sections before writing a line, because both failures are invisible from the
 outside — the ruleset loads, the daemon runs, the set has elements in it, and
 nothing works.
 
-The counting half is picked up by [`proposal-browser.md`](proposal-browser.md),
-which leaves the network entirely and asks the browser for the name — and which
-is, like this page, unbuilt.
+The counting half was picked up by [`proposal-browser.md`](../proposal-browser.md),
+which leaves the network entirely and asks the browser for the name. **That one
+shipped** — the extension, the native host and the crossing with presence are
+[`design.md` §5.2](../design.md), and the budget with teeth on it is §5.3.
 
 ---
 
@@ -536,7 +553,9 @@ ago, which keeps playing.
 `ERR_CONNECTION_REFUSED` immediately. **It was not measured**, and it should be
 before anything else is decided, because it changes the whole of this section.
 `URLBlocklist` does give an immediate page, and it is per machine, not per
-account (§8.4).
+account (§8.4) — **and that is the one that shipped**, with the per-machine
+reach paid for and said out loud rather than worked around
+([`design.md` §11](../design.md)).
 
 ---
 
@@ -655,6 +674,17 @@ for its predecessor.
 ## 7. What does not depend on the mechanism
 
 Three things that a decision between DNS, SNI and nothing at all does not touch.
+
+> **Most of §7.1 arrived by another road, and it is worth reading for what did
+> not.** The shape below — a rule that is `(match, verdict)`, a site default of
+> its own, a budget on a site, and a fourth view in the window — is what
+> [`design.md` §11](../design.md) and §5.3 shipped, spelled `omahouse web block`
+> and `omahouse limit --site` rather than `omahouse site block`, and holding the
+> web rules in a `web` object of their own rather than through a `kind` field on
+> every rule. Two things in §7.1 are **still not built**: `blockedMessage`, the
+> operator's own sentence on a refusal, which cannot be delivered at all through
+> a managed policy because the browser never tells omahouse the attempt happened;
+> and `lockNetwork`, which is §7.2.
 
 ### 7.1 The shape in the profile, and on the command line
 
@@ -811,7 +841,12 @@ socket, and a good reason to be sure §6 is worth it before starting.
 
 ---
 
-## 9. The order to build it in
+## 9. The order it would be built in — and none of it has started
+
+**Stage 0b has not run, and nothing after it has been begun.** The order below
+is kept as written, because it is the shape of the work if anybody ever picks
+this up, and because the first stage is the one that decides whether there is
+any work at all.
 
 Stage 0 has run once. It is what §1 to §5 are, and it did what a stage 0 is for:
 it ended a design before any code was written for it. The same rule applies to
@@ -839,7 +874,7 @@ error of §3.3 named in whatever `status` prints.
 `omahouse.usage.kdl`.
 
 **Stage 5** — the fourth view in the studio, and its screens added to
-[`screens.md`](screens.md).
+[`screens.md`](../screens.md).
 
 **Stage 6** — VM cases, beside the ones in `vm/`. The case that would justify the
 suite is the mirror of `session_slice_untouched.py`: the operator's own account
