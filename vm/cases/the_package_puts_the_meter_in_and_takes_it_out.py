@@ -113,10 +113,17 @@ def run(vm):
         if identifier not in text:
             raise Failed(f"{path} does not name {identifier}:\n{text}")
 
+    # The archive is owned by no package, and that is the fact rather than an
+    # accident: it did not exist when the package was built, because the key that
+    # decides its contents did not either. It is why `post_remove` removes it by
+    # hand and why this case checks by hand that it did.
     owner = vm.root("pacman -Qo /usr/share/omahouse/chromium/omahouse-meter.crx",
                     check=False)[1].strip()
+    if "No package owns" not in owner:
+        raise Failed(f"the archive is a packaged file after all: {owner}")
     print(f"      extension id on this machine  {identifier}")
-    print(f"      the archive itself            {owner}")
+    print("      the archive itself            written by the scriptlet, owned by "
+          "no package")
 
     # -- 2. a browser that has never heard of any of it -----------------------
 
@@ -130,12 +137,25 @@ def run(vm):
     # fetched, the `.crx` verified against an id derived from a key made during a
     # pacman transaction, the extension installed, its service worker started, and
     # Chromium spawned the shim as julia.
-    vm.wait_for(lambda: vm.ssh("pgrep -f 'omahouse meter'", check=False)[0] == 0,
-                vm.pace["patience_seconds"],
+    #
+    # Asked as `pgrep -u julia -x omahouse` and **never** as
+    # `pgrep -f 'omahouse meter'`. The first version of this case used the second
+    # and it is an assertion that cannot fail: the harness reaches the guest over
+    # ssh, sshd runs the command inside a shell, and that shell's own command line
+    # holds the words being searched for. It answered a pid every time -- its own
+    # -- and the first run of this case failed on exactly that pid after the
+    # removal, reporting a host that had never existed. `-x` matches the process
+    # name and `-u` the account, and neither can be satisfied by the question.
+    def host_pids():
+        return vm.root(f"pgrep -u {julia} -x omahouse || true", check=False)[1].split()
+
+    vm.wait_for(lambda: bool(host_pids()), vm.pace["patience_seconds"],
                 "the meter's native messaging host to be spawned by the browser")
-    who = vm.ssh("ps -o user= -C omahouse | sort -u", check=False)[1]
-    if julia not in who:
-        raise Failed(f"the host is not running as {julia}: {who!r}")
+    running = vm.root(f"ps -o user=,args= -p {' -p '.join(host_pids())}",
+                      check=False)[1].strip()
+    if julia not in running or "meter" not in running:
+        raise Failed(f"what is running as {julia} is not the meter: {running!r}")
+    print(f"      the host Chromium spawned     {running}")
 
     # The directory Chromium made for it, named with the id it worked out of the
     # archive's own signature. This is the equality the case exists for: a key
@@ -182,6 +202,14 @@ def run(vm):
 
     pam_before = vm.root("grep -c omahouse /etc/pam.d/system-login || true",
                          check=False)[1].strip()
+    # The host's pid, kept across the removal. A native messaging host is spawned
+    # by the browser and lives as long as the pipe does, so with Chromium still
+    # running nothing but `post_remove` can end it -- which makes "this pid is
+    # gone and Chromium is not" a measurement of the kill and not of a coincidence.
+    was_hosting = host_pids()
+    if not was_hosting:
+        raise Failed("the host had already gone before the removal, so nothing here "
+                     "can say whether `pacman -R` would have ended it")
     code, said = vm.root("pacman -R --noconfirm omahouse", check=False)
     if code != 0:
         raise Failed(f"pacman -R said:\n{said}")
@@ -229,6 +257,21 @@ def run(vm):
                      check=False)[1].strip()
     print(f"      pam lines before {pam_before}, after 0 · omahouse.service {active}")
 
+    # The host the browser had spawned, ended by the removal itself and not by
+    # anything this case did. Chromium was still running at that moment -- checked
+    # before the pid is -- so the pipe was still open and nothing but `post_remove`
+    # could have closed it. Without that kill it is julia's process, holding a
+    # deleted binary, appending sites she visits to a file the same `post_remove`
+    # had just deleted, on a machine with nothing left on it to explain either.
+    if not vm.pid_of("chromium"):
+        raise Failed("Chromium closed during the removal, so the host dying proves "
+                     "nothing about post_remove having ended it")
+    for pid in was_hosting:
+        if there(f"/proc/{pid}"):
+            raise Failed(f"the host at pid {pid} outlived `pacman -R` with Chromium "
+                         "still open")
+    print(f"      the host at {was_hosting} died with the removal, Chromium still open")
+
     # And the browser, once it is started again with no policy naming anything.
     # A force-installed extension is removed when the policy stops naming it; if
     # this ever changed, a household would be left with an extension the child
@@ -240,14 +283,16 @@ def run(vm):
                 "Chromium to open again with no omahouse on the machine")
     time.sleep(8)
     still = vm.root(f"ls {profile}/Extensions 2>/dev/null || true", check=False)[1].split()
-    hosts = vm.ssh("pgrep -f 'omahouse meter' || true", check=False)[1].strip()
+    left_hosting = host_pids()
     print(f"      Chromium's extensions now     {still or '(none)'}")
-    print(f"      native hosts running now      {hosts or '(none)'}")
+    print(f"      hosts as {julia} now        {left_hosting or '(none)'}")
     if identifier in still:
         raise Failed(f"{identifier} is still installed in {julia}'s profile after the "
                      "policy that forced it was removed")
-    if hosts:
-        raise Failed(f"something is still running as the meter's host: {hosts}")
+    if left_hosting:
+        raise Failed(f"something is still running as the meter's host: {left_hosting}\n"
+                     "      It is julia's process, it holds a deleted binary, and it "
+                     "goes on writing the file that names the sites she visits.")
 
     # -- 6. and the machine put back, which prices the reinstall ---------------
 

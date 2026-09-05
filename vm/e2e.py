@@ -548,6 +548,16 @@ class VM:
         self.root(f"loginctl terminate-user {self.subject} || true", check=False)
         self.root("systemctl restart sddm", check=False)
 
+        # A case may have removed the package on purpose -- `pacman -R` is half of
+        # what the browser half has to prove -- and one that failed part way
+        # through the removal leaves this machine with no omahouse on it at all.
+        # It is the owner's demonstration VM and it is not handed back stripped,
+        # so it is put back with the very bytes this run installed.
+        if getattr(self, "the_package", None) and \
+                self.ssh("test -x /usr/bin/omahouse", check=False)[0] != 0:
+            say("  a case left this machine with no omahouse on it; installing it again")
+            self.install_the_package()
+
         # And the one thing left changed on purpose, named rather than left for
         # somebody to find. See `remember_the_state`.
         #

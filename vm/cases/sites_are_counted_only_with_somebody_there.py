@@ -114,7 +114,17 @@ def run(vm):
     # The native messaging host, which is the whole chain in one fact: the
     # extension installed off-store under policy, its service worker started, it
     # opened the port, and Chromium spawned `omahouse meter` as julia.
-    vm.wait_for(lambda: vm.ssh("pgrep -f 'omahouse meter'", check=False)[0] == 0,
+    #
+    # Asked as `pgrep -u julia -x omahouse`. It used to be
+    # `pgrep -f 'omahouse meter'`, which is an assertion that cannot fail: the
+    # harness reaches the guest over ssh, sshd runs the command inside a shell,
+    # and that shell's own command line holds the words being searched for -- so
+    # it answered its own pid, every time, whether or not a host existed. The
+    # line below it saved this case from being green on nothing;
+    # `the_package_puts_the_meter_in_and_takes_it_out` is where the same mistake
+    # was caught, by failing on a host that had never been there.
+    vm.wait_for(lambda: bool(vm.root(f"pgrep -u {julia} -x omahouse || true",
+                                     check=False)[1].split()),
                 vm.pace["patience_seconds"],
                 "the meter's native messaging host to be spawned by the browser")
     who = vm.ssh("ps -o user= -C omahouse | sort -u", check=False)[1]
