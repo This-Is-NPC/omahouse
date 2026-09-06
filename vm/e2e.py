@@ -334,8 +334,19 @@ class VM:
                          check=False)[1]
         return [line for line in found.split() if line.strip()]
 
-    def pid_of(self, name):
-        rc, out = self.ssh(f"pgrep -u {self.subject} -x {shlex.quote(name)}", check=False)
+    def pid_of(self, name, user=None):
+        """A process of `user`'s, the subject's by default.
+
+        The default is the subject because almost everything here is about the
+        account under rules. `user` is for the one thing that is not: on this
+        machine the greeter's own compositor is Hyprland running as `sddm`, and
+        a session belongs to whoever SDDM let through -- so "is there a session"
+        has to name whose, or it asks about julia while howl is the one logging
+        in and answers no forever.
+        """
+        who = user or self.subject
+        rc, out = self.ssh(f"pgrep -u {shlex.quote(who)} -x {shlex.quote(name)}",
+                           check=False)
         return out.split()[0] if rc == 0 and out.split() else None
 
     def session_slice_pids(self):
@@ -625,6 +636,10 @@ class VM:
     # the key codes come from: `<keycode>:<1 down|0 up>`, modifier down first and
     # up last, nesting closing from the inside out.
 
+    def keyboard(self):
+        """A virtual keyboard on this machine's own seat. See `keyboard()` below."""
+        keyboard(self)
+
     def press(self, keys):
         self.root("env YDOTOOL_SOCKET=/run/ydotoold.socket ydotool key " + keys,
                   check=False)
@@ -900,7 +915,7 @@ def install_the_package(vm, package):
     vm.root("systemctl daemon-reload")
 
 
-def load_cases(wanted, machine):
+def load_cases(wanted, machine, demo=False):
     import importlib.util
 
     cases = []
@@ -919,9 +934,14 @@ def load_cases(wanted, machine):
         # that is pointed at it.
         if getattr(module, "MACHINE", "poc") != machine:
             continue
+        # A demo is not a case. It walks slowly on purpose so a person can read
+        # the screen, and a suite that ran it would be paying for pauses nobody
+        # is watching. `--demo` asks for those and only those.
+        if bool(getattr(module, "DEMO", False)) != demo:
+            continue
         cases.append((path.stem, module))
     if not cases:
-        raise Blocked(f"no case matches {wanted!r} on {machine}")
+        raise Blocked(f"no {'demo' if demo else 'case'} matches {wanted!r} on {machine}")
     return cases
 
 
@@ -930,6 +950,8 @@ def main():
     parser.add_argument("--keep", action="store_true",
                         help="leave the machine running afterwards")
     parser.add_argument("--case", default=None, help="run the cases whose name holds this")
+    parser.add_argument("--demo", action="store_true",
+                        help="run the walkthroughs meant to be filmed, and only those")
     # The one knob. Every second this run waits on and every second of budget it
     # seeds comes out of the regime this picks, and out of nowhere else -- a case
     # with a number of its own would be a case nobody could cost from the
@@ -973,7 +995,7 @@ def main():
         deploy(vm)
         say()
 
-        for name, case in load_cases(options.case, options.machine):
+        for name, case in load_cases(options.case, options.machine, options.demo):
             say(f"  {name}")
             say(f"    {case.WHY}")
             if vm.disposable:

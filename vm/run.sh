@@ -25,6 +25,7 @@
 #     vm/run.sh --machine omarchy   the browser case, on real Omarchy
 #     vm/run.sh --keep          leave it running, for looking at
 #     vm/run.sh --case grace    one case, by a piece of its name
+#     vm/run.sh --demo          the walkthroughs meant to be filmed, and only those
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"

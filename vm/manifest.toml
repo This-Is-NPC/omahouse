@@ -74,6 +74,12 @@ uid = 1001
 # demonstration VM and this is written down in `.temp/docs/vm-runbook.md`
 # already; there is no secret here to keep.
 password = "julia"
+# The operator's, for the walkthrough that films `docs/screens.md` §1 to §7 --
+# those are about the face somebody in wheel gets, and the subject's face has
+# nothing to press. Written down here for the same reason the one above is:
+# `vm/provision-omarchy.sh` sets both, this is a demonstration machine, and
+# there is no secret here to keep.
+operator_password = "howl"
 disposable = false
 
 # -- the two regimes ----------------------------------------------------------
