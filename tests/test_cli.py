@@ -2459,6 +2459,62 @@ def check_the_machine_verbs_refuse_what_they_cannot_do(box):
     assert "twice" in twice.stderr, twice.stderr
 
 
+def check_the_house_adds_up_what_every_machine_spent(box):
+    """What the house spent, as opposed to what this computer spent.
+
+    The profile's number is the household's: two hours in the house, not two
+    hours per computer. A machine on its own enforces the whole thing, which is
+    what makes one computer complete; a house with three of them has to add the
+    three up.
+    """
+    box.write_profiles(watching_profile())
+    box.run("machine", "add", "laptop", "--node", "omk1_a", "--at", "10.0.0.2:7879")
+    box.run("machine", "add", "workstation", "--node", "omk1_b", "--at", "10.0.0.3:7879")
+
+    box.write_day(TODAY, {"session": 1800, "chromium": 600})
+    elsewhere = box.state / "elsewhere" / "laptop" / USER
+    elsewhere.mkdir(parents=True)
+    (elsewhere / f"{TODAY.isoformat()}.json").write_text(json.dumps({
+        "schemaVersion": 1, "user": USER, "date": TODAY.isoformat(),
+        "budgets": {"session": 2400, "chromium": 1200},
+        "grants": [], "events": [], "sites": {}, "presence": {},
+    }))
+
+    document = json.loads(box.run("house", USER, "--json").stdout)
+    session = [b for b in document["budgets"] if b["id"] == "session"][0]
+    assert session["totalSeconds"] == 4200, session
+    assert session["limitSeconds"] == 7200, session
+    assert session["leftSeconds"] == 3000, session
+    assert [c["machine"] for c in session["spent"]] == ["here", "laptop"], session
+
+    # The machine nobody heard from is not in the sum, and the answer says so.
+    # A total quietly missing a computer reads exactly like a total of a quiet
+    # afternoon, and one of those is a fact.
+    assert document["notHeardFrom"] == ["workstation"], document
+    assert document["machines"] == 2, document
+
+    said = box.run("house", USER)
+    assert "Nothing today from workstation" in said.stdout, said.stdout
+    assert "LAPTOP" in said.stdout and "IN ALL" in said.stdout, said.stdout
+
+
+def check_the_house_refuses_what_it_cannot_add_up(box):
+    """A house of one computer, and the two ways to ask about nobody."""
+    box.write_profiles(watching_profile())
+
+    # No machines written down: the sum is this computer, which is the whole
+    # house, and that is an answer rather than an error.
+    alone = json.loads(box.run("house", USER, "--json").stdout)
+    assert alone["machines"] == 1 and alone["notHeardFrom"] == [], alone
+
+    nobody = box.run("house", "stranger")
+    assert nobody.returncode == 2, nobody.stderr
+    assert "no profile for stranger" in nobody.stderr, nobody.stderr
+
+    which = box.run("house")
+    assert which.returncode == 1 and "which user" in which.stderr, which.stderr
+
+
 # -- the promise of the stage -------------------------------------------------
 
 # -- the package, put on a machine and taken off it --------------------------
@@ -2761,6 +2817,8 @@ def main():
         check_the_time_per_site_stops_denying_the_budget_above_it,
         check_watch_writes_presence_beside_the_budgets_and_never_into_them,
         check_the_house_writes_down_its_machines,
+        check_the_house_adds_up_what_every_machine_spent,
+        check_the_house_refuses_what_it_cannot_add_up,
         check_the_machine_verbs_refuse_what_they_cannot_do,
         check_the_removal_covers_what_the_install_makes,
         check_the_reading_verbs_write_nothing,

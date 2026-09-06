@@ -2994,6 +2994,150 @@ int cmdLeave(const Globals &g, const QStringList &positionals, const Options &op
     return kOk;
 }
 
+int cmdHouse(const Globals &g, const QStringList &positionals)
+{
+    // What the house spent, as opposed to what this computer spent.
+    //
+    // The profile's number is the household's: `session: 120` means two hours in
+    // the house and not two hours per computer. A machine on its own enforces
+    // the whole thing, which is right and is what makes one computer complete;
+    // a house with three of them has to add the three up, and this is where
+    // that happens.
+    //
+    // It reads days and nothing else. The other machines' are collected into
+    // `<stateDir>/elsewhere/<machine>/`, by whatever brings them, and a machine
+    // whose day is not there is simply not in the sum -- said out loud, because
+    // a total quietly missing a computer is worse than no total at all.
+    if (positionals.size() != 1) {
+        fail(QStringLiteral("house: which user? (try omahouse --help)"));
+        return kUsage;
+    }
+    const QString user = positionals.first();
+    const QDate today = QDate::currentDate();
+
+    int status = kOk;
+    Profiles profiles;
+    if (!loadProfiles(&profiles, &status))
+        return status;
+    const Profile *profile = nullptr;
+    for (const Profile &one : profiles.all) {
+        if (one.user == user)
+            profile = &one;
+    }
+    if (!profile) {
+        fail(QStringLiteral("house: no profile for %1 in %2")
+                 .arg(user, paths::profilesFile()));
+        return kMissing;
+    }
+
+    Fleet fleet;
+    if (!loadMachines(&fleet, &status))
+        return status;
+
+    QVector<QPair<QString, Ledger>> days;
+    QStringList quiet;
+
+    // This machine first, and named `here` rather than by a hostname: the
+    // household's word for a computer is in `machines.json`, and the one you are
+    // sitting at has not necessarily been written down.
+    Ledger mine;
+    bool missing = false;
+    if (!loadLedger(user, today, &mine, &missing, &status))
+        return status;
+    days.append({QStringLiteral("here"), mine});
+
+    for (const Machine &machine : fleet.all) {
+        Ledger theirs;
+        bool absent = false;
+        QString error;
+        const QString path = paths::elsewhereLedgerFile(machine.name, user, today);
+        if (!readLedger(path, &theirs, &error, &absent)) {
+            fail(QStringLiteral("house: %1").arg(error));
+            return kUsage;
+        }
+        if (absent) {
+            quiet.append(machine.name);
+            continue;
+        }
+        days.append({machine.name, theirs});
+    }
+
+    const QVector<HouseBudget> house = consolidate(*profile, days);
+
+    if (g.json) {
+        QJsonArray budgets;
+        for (const HouseBudget &budget : house) {
+            QJsonArray spent;
+            for (const Contribution &one : budget.spent) {
+                spent.append(QJsonObject {{QStringLiteral("machine"), one.machine},
+                                          {QStringLiteral("seconds"), one.seconds}});
+            }
+            QJsonObject object {
+                {QStringLiteral("id"), budget.id},
+                {QStringLiteral("spent"), spent},
+                {QStringLiteral("totalSeconds"), budget.totalSeconds},
+            };
+            object.insert(QStringLiteral("limitSeconds"),
+                          budget.hasLimit() ? QJsonValue(budget.limitSeconds) : QJsonValue());
+            object.insert(QStringLiteral("leftSeconds"),
+                          budget.hasLimit() ? QJsonValue(budget.leftSeconds()) : QJsonValue());
+            budgets.append(object);
+        }
+        QJsonArray silent;
+        for (const QString &name : quiet)
+            silent.append(name);
+        printJson(QJsonObject {
+            {QStringLiteral("user"), user},
+            {QStringLiteral("date"), today.toString(Qt::ISODate)},
+            {QStringLiteral("machines"), static_cast<int>(days.size())},
+            {QStringLiteral("budgets"), budgets},
+            {QStringLiteral("notHeardFrom"), silent},
+        });
+        return kOk;
+    }
+
+    out() << QStringLiteral("the house — %1, %2\n").arg(user, today.toString(Qt::ISODate));
+    if (house.isEmpty()) {
+        out() << QStringLiteral("\nNo budgets: %1 has no time limits, only verdicts.\n")
+                     .arg(user);
+        return kOk;
+    }
+
+    QStringList headers {QStringLiteral("BUDGET")};
+    QVector<bool> right {false};
+    for (const auto &day : days) {
+        headers.append(day.first.toUpper());
+        right.append(true);
+    }
+    headers << QStringLiteral("IN ALL") << QStringLiteral("OF") << QStringLiteral("LEFT");
+    right << true << true << true;
+
+    QVector<QStringList> rows;
+    for (const HouseBudget &budget : house) {
+        QStringList row {budget.id};
+        for (const Contribution &one : budget.spent)
+            row.append(humanDuration(one.seconds));
+        row << humanDuration(budget.totalSeconds)
+            << (budget.hasLimit() ? humanDuration(budget.limitSeconds) : kNothing)
+            << (budget.hasLimit() ? humanDuration(budget.leftSeconds()) : kNothing);
+        rows.append(row);
+    }
+    out() << '\n';
+    printTable(headers, rows, right);
+
+    if (!quiet.isEmpty()) {
+        // The sentence that keeps the number honest. A total missing a computer
+        // reads exactly like a total of a quiet afternoon, and one of those is a
+        // fact while the other is a machine nobody has heard from.
+        out() << QStringLiteral("\n  Nothing today from %1, so %2 not in the sum "
+                                "above.\n")
+                     .arg(quiet.join(QStringLiteral(", ")),
+                          quiet.size() == 1 ? QStringLiteral("it is")
+                                            : QStringLiteral("they are"));
+    }
+    return kOk;
+}
+
 // -- watch -------------------------------------------------------------------
 //
 // The loop of docs/design.md §5, and the one verb of this build that keeps running.
@@ -3718,6 +3862,7 @@ Reading, and no privilege needed:
   profile list             who is under rules
   profile show <user>      the rules, the budgets and what happens when they end
   machines                 the computers this household owns
+  house <user>             what the house spent today, every machine added up
 
 Writing, and root needed — the studio gets there by pkexec:
   profile add <user>       a new profile: observing, and allowing everything
@@ -3858,6 +4003,11 @@ int dispatch(const Globals &g, const QStringList &args)
                               verb))
             return kUsage;
         return cmdLimit(g, positionals, options);
+    }
+    if (verb == QLatin1String("house")) {
+        if (!onlyTheseOptions(options, {}, verb))
+            return kUsage;
+        return cmdHouse(g, positionals);
     }
     if (verb == QLatin1String("leave")) {
         if (!onlyTheseOptions(options, {QStringLiteral("--session"),

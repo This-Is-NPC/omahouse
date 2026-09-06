@@ -199,6 +199,22 @@ The settings, the rules in the order they are read -- the first that names an ap
 ### Arguments
 - **`<user>`**
 
+## `omahouse house`
+
+- **Usage:** `omahouse house`
+
+What the house spent today, as opposed to what this computer spent.
+
+The profile's number is the household's. `session: 120` means two hours in the house and not two hours per computer -- so a machine on its own enforces the whole thing, which is right and is what makes one computer complete, and a house with three of them has to add the three up and push the truth back down with `omahouse leave`.
+
+It reads days and nothing else. This machine's is where it always was; the others are collected into `<stateDir>/elsewhere/<machine>/<user>/<date>.json`, in the same shape and read with the same reader, by whatever brings them. A central that held a database of everybody's days would be a second answer to what a day is, and the first one is already on disk.
+
+A machine whose day is not there is not in the sum, and the answer says which ones. A total quietly missing a computer reads exactly like a total of a quiet afternoon, and only one of those is a fact.
+
+Grants are added with the seconds they were given on: ten minutes handed over on the laptop raised the laptop's limit, and what the house has to know is that the day's number moved. Not adding them would make `leave` fight every grant an operator gives.
+
+A house that went over has nothing left rather than less than nothing, because a negative would only invite somebody to subtract it twice.
+
 ## `omahouse machines`
 
 - **Usage:** `omahouse machines`
