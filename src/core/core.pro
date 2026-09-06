@@ -19,6 +19,7 @@ TARGET    = omahousecore
 HEADERS += \
     AppScope.h \
     Duration.h \
+    Fleet.h \
     Focus.h \
     Furniture.h \
     Json.h \
@@ -31,6 +32,7 @@ HEADERS += \
 SOURCES += \
     AppScope.cpp \
     Duration.cpp \
+    Fleet.cpp \
     Focus.cpp \
     Furniture.cpp \
     Json.cpp \

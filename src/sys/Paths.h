@@ -37,6 +37,12 @@ QString profilesFile();
 /// module of ours. So this is the one file omahouse writes that it did not
 /// choose the format of.
 QString blockedFile();
+/// `<configDir>/machines.json` -- the machines of this household.
+///
+/// Beside `profiles.json` and read the same way: root writes it, everybody
+/// reads it. Its absence is the ordinary state of a machine that is the only
+/// one there is, which is most of them, and it is never an error.
+QString machinesFile();
 /// `<configDir>/furniture` -- what this machine starts for itself, one name per
 /// line, beyond the two `src/core/Furniture.h` was measured with.
 ///

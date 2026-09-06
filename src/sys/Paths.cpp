@@ -79,6 +79,11 @@ QString blockedFile()
     return configDir() + QStringLiteral("/blocked");
 }
 
+QString machinesFile()
+{
+    return configDir() + QStringLiteral("/machines.json");
+}
+
 QString furnitureFile()
 {
     return configDir() + QStringLiteral("/furniture");
