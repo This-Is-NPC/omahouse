@@ -36,6 +36,7 @@ HEADERS += \
     FocusFile.h \
     FurnitureFile.h \
     Notify.h \
+    Omakure.h \
     Paths.h \
     Presence.h \
     Proc.h \
@@ -49,6 +50,7 @@ SOURCES += \
     FocusFile.cpp \
     FurnitureFile.cpp \
     Notify.cpp \
+    Omakure.cpp \
     Paths.cpp \
     Presence.cpp \
     Proc.cpp \
