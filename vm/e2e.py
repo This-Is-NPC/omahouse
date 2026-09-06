@@ -839,12 +839,35 @@ def wait_for_the_session(vm, timeout=None):
 
     # mako, because `grace_warns_before_closing` asserts a notification arrived
     # and there has to be something on the far side of the bus to receive it.
+    #
+    # Waited for rather than slept at. A fixed two seconds is a race against a
+    # session that is still coming up, and it lost twice: once as a run blocked
+    # on "mako would not start" with mako running a moment later, and once as a
+    # warning that was really sent to a bus nobody was on yet.
     if not vm.pid_of("mako"):
         vm.julia("setsid --fork sh -c 'cd /tmp && exec mako' </dev/null >/dev/null 2>&1",
                  check=False)
-        time.sleep(2)
+    deadline = time.time() + (timeout or vm.pace["boot_seconds"])
+    while time.time() < deadline and not vm.pid_of("mako"):
+        time.sleep(1)
     if not vm.pid_of("mako"):
-        raise Blocked("mako would not start in the subject's session")
+        # What is actually there, because "would not start" on its own sends
+        # somebody looking at mako when the answer is usually that the session
+        # it belongs to is not up yet.
+        raise Blocked(
+            "mako would not start in the subject's session.\n"
+            f"    any mako:  {vm.ssh('pgrep -a mako || echo none', check=False)[1].strip()}\n"
+            f"    sessions:  {vm.ssh('loginctl list-sessions --no-legend', check=False)[1].strip()[:200]}\n"
+            f"    hyprland:  {vm.ssh('pgrep -a Hyprland || echo none', check=False)[1].strip()}")
+    # And running is not the same as listening. What a warning needs is
+    # something answering on the session bus, and `makoctl` asking mako a
+    # question is the only honest way to know that from here.
+    while time.time() < deadline:
+        if vm.julia("makoctl list", check=False)[0] == 0:
+            break
+        time.sleep(1)
+    else:
+        raise Blocked("mako is running but does not answer on the session bus")
 
     # And the session plumbing, started by hand. The VM is not a full
     # Omarchy -- there is no quickshell on it -- but pipewire is the other unit

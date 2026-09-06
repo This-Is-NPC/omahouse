@@ -49,9 +49,13 @@ def run(vm):
     here, there = vm.address, dad.address
 
     for box in (vm, dad):
-        box.put(str(vm.omakure_binary), "/tmp/omakure")
-        box.ssh("chmod +x /tmp/omakure")
-        box.root("install -m 0755 /tmp/omakure /usr/local/bin/omakure")
+        # The binary, the service account, the directories -- and, first, any
+        # node service already running. omahouse's own pairing verbs install one
+        # now, so a case that wiped `/var/lib/omakure` without stopping it would
+        # be pulling the state out from under a live process: both machines then
+        # listen on the wire and neither can hold a session, which reads as a
+        # peering problem and is a housekeeping one.
+        box.fresh_omakure()
         box.ssh("command -v git >/dev/null || sudo pacman -S --noconfirm --needed git",
                 timeout=300, check=False)
 
@@ -93,33 +97,14 @@ def run(vm):
         box.root("chmod 0640 /etc/omakure/node.toml")
 
     def identity(box):
-        # The node principal the shipped installer makes. Without it, `node
-        # status` refuses with `node path is insecure: configured node service
-        # user does not exist` -- the state directory is a 0700 secrets
-        # directory and it will not be read by nobody in particular.
+        # The principal, the wipe and the modes were `fresh_omakure` above.
+        # Without the principal, `node status` refuses with "node path is
+        # insecure: configured node service user does not exist" -- the state
+        # directory is 0700 secrets and will not be read by nobody in
+        # particular. Its home is the workspace and never `/var/lib/omakure`,
+        # which is the one place an omakure command's own scratch files brick
+        # the node.
         #
-        # The home is the workspace and never `/var/lib/omakure`: that is the
-        # secrets directory, guarded by a closed allow-list, and any omakure
-        # command run as this account without `OMAKURE_SCRIPTS_DIR` would point
-        # its own scratch files at the one place that bricks the node.
-        box.root("sh -c 'getent group omakure >/dev/null || groupadd --system omakure'")
-        box.root("sh -c 'id omakure >/dev/null 2>&1 || useradd --system --gid omakure "
-                 "--home-dir /var/lib/omakure-workspace --shell /usr/sbin/nologin "
-                 "omakure'")
-        # From nothing, every time. `node init` refuses to replace an existing
-        # identity, so a half-made one from an earlier attempt is a machine that
-        # can never be initialised again -- and this state belongs to the case
-        # rather than to the machine, which is what makes wiping it honest here
-        # and wrong anywhere else.
-        box.root("rm -rf /var/lib/omakure /var/lib/omakure-workspace")
-        box.root("mkdir -p /etc/omakure /var/lib/omakure /var/lib/omakure-workspace")
-        # `-R`, because a `node init` that ran before the principal existed
-        # leaves a root-owned lock file behind and every later run refuses:
-        # "is owned by 0:0 but must be owned by 964:964". The refusal is right
-        # -- that directory is 0700 secrets -- and it says its own fix.
-        box.root("chown -R omakure:omakure /var/lib/omakure /var/lib/omakure-workspace")
-        box.root("chmod 0700 /var/lib/omakure")
-        box.root("chmod 0750 /var/lib/omakure-workspace")
         # The config is root's to write and the node's to read: `root:omakure`,
         # 0640, exactly as the shipped installer leaves it -- and it is written
         # *before* `node init`, because init runs as the node's account and
