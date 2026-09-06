@@ -24,6 +24,8 @@ HEADERS += \
     Furniture.h \
     Json.h \
     Ledger.h \
+    NodeConfig.h \
+    Pairing.h \
     Policy.h \
     Profile.h \
     Version.h \
@@ -37,6 +39,8 @@ SOURCES += \
     Furniture.cpp \
     Json.cpp \
     Ledger.cpp \
+    NodeConfig.cpp \
+    Pairing.cpp \
     Policy.cpp \
     Profile.cpp \
     Version.cpp \

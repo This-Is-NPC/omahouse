@@ -25,7 +25,8 @@ SOURCES += \
     tst_watch.cpp \
     tst_enforce.cpp \
     tst_webpolicy.cpp \
-    tst_fleet.cpp
+    tst_fleet.cpp \
+    tst_pairing.cpp
 
 # The suite links the same archive the CLI links, rather than recompiling the
 # core's sources into itself: a test that builds its own copy of the library can
