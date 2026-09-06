@@ -22,7 +22,9 @@
 #include <QCoreApplication>
 #include <QDate>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QSysInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -112,6 +114,11 @@ struct Options {
     /// The Battery whose scripts a prepared machine will run when cued. Named
     /// rather than assumed, because it is the widest thing pairing turns on.
     QString battery;
+    /// Which day. Only `day` takes it, and it exists because a machine that was
+    /// off at midnight still owes the house yesterday. `--date` and not `--on`:
+    /// `profile enforce --on` already means something else, and one flag name
+    /// with two meanings is a flag somebody gets wrong once.
+    QString date;
     /// How long `watch` should keep going before it stops of its own accord.
     ///
     /// The middle ground between `--once`, which measures a single instant, and
@@ -206,6 +213,7 @@ bool parseOptions(const QStringList &args, Options *options, QStringList *positi
         {"--invite", &Options::invite, "the line the operator's machine printed"},
         {"--pair", &Options::pair, "the line the prepared machine printed"},
         {"--battery", &Options::battery, "a Battery name, like omahouse"},
+        {"--date", &Options::date, "a date like 2026-09-06"},
     };
     struct Flag {
         const char *name;
@@ -1661,6 +1669,14 @@ int cmdMachineInvite(const Globals &g, const Options &options)
         return kUsage;
     }
 
+    // The token before anything can start. `node serve` refuses to run at all
+    // without auth material -- and then nothing is listening on the wire
+    // either, which reads like a peering problem and is a startup one.
+    if (!Omakure::provisionToken(&error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+
     Pairing mine;
     if (!Omakure::describe(options.at, &mine, &error)) {
         fail(QStringLiteral("%1: %2").arg(verb, error));
@@ -1759,14 +1775,7 @@ int cmdMachinePrepare(const Globals &g, const Options &options)
         return kUsage;
     }
 
-    QString token;
-    QString entry;
-    if (!Omakure::generateToken(QStringLiteral("household"), &token, &entry, &error)) {
-        fail(QStringLiteral("%1: %2").arg(verb, error));
-        return kUsage;
-    }
-    if (!Omakure::writeSystemFile(Omakure::configDir() + QStringLiteral("/tokens.toml"),
-                                  entry, Omakure::account(), 0640, &error)) {
+    if (!Omakure::provisionToken(&error)) {
         fail(QStringLiteral("%1: %2").arg(verb, error));
         return kUsage;
     }
@@ -3419,6 +3428,165 @@ int cmdLeave(const Globals &g, const QStringList &positionals, const Options &op
     return kOk;
 }
 
+// -- the transport, which is two verbs and no daemon --------------------------
+//
+// `house` adds up the days of every machine. Getting those days to the machine
+// doing the adding is transport, and transport is deliberately not a service:
+// it is one machine publishing a document and another accepting it, with
+// something outside deciding when. That something is a scheduled Battery script
+// on the operator's computer, and it can be replaced by a person with `ssh` and
+// a pipe without omahouse noticing -- which is the test of whether the seam is
+// in the right place.
+//
+// The document is the ledger, unchanged. No summary, no envelope, no version of
+// its own: the file on the machine that spent the time is already the answer to
+// what a day was, and every transformation between there and the sum is a place
+// the two can come to disagree.
+
+int cmdDay(const Globals &g, const QStringList &positionals, const Options &options)
+{
+    if (positionals.size() != 1) {
+        fail(QStringLiteral("day: which user? (try omahouse --help)"));
+        return kUsage;
+    }
+    const QString user = positionals.first();
+
+    QDate when = QDate::currentDate();
+    if (!options.date.isEmpty()) {
+        when = QDate::fromString(options.date, Qt::ISODate);
+        if (!when.isValid()) {
+            fail(QStringLiteral("day: --date wants a date like 2026-09-06, not '%1'")
+                     .arg(options.date));
+            return kUsage;
+        }
+    }
+
+    Ledger ledger;
+    QString error;
+    bool missing = false;
+    if (!readLedger(paths::ledgerFile(user, when), &ledger, &error, &missing)) {
+        fail(QStringLiteral("day: %1").arg(error));
+        return kUsage;
+    }
+    // `missing` and not the return value: a file that is not there is not a
+    // failure to read, which is right everywhere else in omahouse and wrong
+    // here. Exit 2 and no document, because a day nobody spent and a machine
+    // that is not reporting must never look the same to the thing adding them
+    // up -- and an empty ledger printed here would be a day of zeroes filed
+    // under a real date, which is worse than no answer.
+    if (missing) {
+        fail(QStringLiteral("day: nothing for %1 on %2 (%3)")
+                 .arg(user, when.toString(Qt::ISODate),
+                      paths::ledgerFile(user, when)));
+        return kMissing;
+    }
+
+    // One shape, whether or not `--json` was asked for, and the help says so.
+    // This verb exists to be read by another computer; a second, prettier form
+    // would be a second answer to what a day was.
+    printJson(ledger.toJson());
+    Q_UNUSED(g);
+    return kOk;
+}
+
+int cmdCollect(const Globals &g, const QStringList &positionals)
+{
+    if (positionals.size() != 2) {
+        fail(QStringLiteral("collect: which machine, and whose day? "
+                            "(try omahouse --help)"));
+        return kUsage;
+    }
+    const QString machine = positionals.at(0);
+    const QString user = positionals.at(1);
+
+    int status = kOk;
+    Fleet fleet;
+    if (!loadMachines(&fleet, &status))
+        return status;
+    if (indexOfMachine(fleet.all, machine) < 0) {
+        // Refused, and this is the whole of what stands between the sum and a
+        // stranger. A day is accepted only for a computer the household has
+        // written down; anything else would let whatever can reach this machine
+        // decide what the house spent.
+        fail(QStringLiteral("collect: no machine called %1 in %2")
+                 .arg(machine, paths::machinesFile()));
+        return kMissing;
+    }
+
+    QFile input;
+    if (!input.open(stdin, QIODevice::ReadOnly)) {
+        fail(QStringLiteral("collect: cannot read the day on standard input"));
+        return kUsage;
+    }
+    const QByteArray raw = input.readAll();
+    input.close();
+    if (raw.trimmed().isEmpty()) {
+        fail(QStringLiteral("collect: nothing came in on standard input. The day "
+                            "goes in by pipe: omahouse day %1 | omahouse collect %2 %1")
+                 .arg(user, machine));
+        return kUsage;
+    }
+
+    QJsonParseError parsed {};
+    const QJsonDocument document = QJsonDocument::fromJson(raw, &parsed);
+    if (!document.isObject()) {
+        fail(QStringLiteral("collect: what came in is not a day: %1")
+                 .arg(parsed.errorString()));
+        return kUsage;
+    }
+    Ledger ledger;
+    QString error;
+    if (!Ledger::fromJson(document.object(), &ledger, &error)) {
+        fail(QStringLiteral("collect: what came in is not a day: %1").arg(error));
+        return kUsage;
+    }
+
+    // The document names its own person and its own date, and both are checked
+    // against what was asked for rather than trusted. A day filed under the
+    // wrong name is time added to somebody who did not spend it, and nothing
+    // downstream would ever notice: `house` reads whatever is in the directory.
+    if (ledger.user != user) {
+        fail(QStringLiteral("collect: that day belongs to %1, and it was offered as "
+                            "%2's").arg(ledger.user, user));
+        return kUsage;
+    }
+    if (ledger.date > QDate::currentDate()) {
+        // A machine whose clock is ahead writes a day this one has not reached.
+        // Accepting it puts a file in tomorrow's name that today's sum will not
+        // read and tomorrow's will, which is a total that changes overnight for
+        // no reason anybody can see.
+        fail(QStringLiteral("collect: that day is dated %1, which has not happened "
+                            "here yet").arg(ledger.date.toString(Qt::ISODate)));
+        return kUsage;
+    }
+
+    const QString path = paths::elsewhereLedgerFile(machine, user, ledger.date);
+    if (!mayWrite(QStringLiteral("collect"), path, paths::stateDirIsTheSystems(), g))
+        return kUsage;
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
+        fail(QStringLiteral("collect: cannot make %1")
+                 .arg(QFileInfo(path).absolutePath()));
+        return kUsage;
+    }
+    // The same writer this machine's own days go through, so a collected day and
+    // a local one are the same bytes read by the same reader.
+    if (!writeLedger(path, ledger, &error)) {
+        fail(QStringLiteral("collect: %1").arg(error));
+        return kUsage;
+    }
+
+    if (g.json) {
+        printJson(QJsonObject {{QStringLiteral("machine"), machine},
+                               {QStringLiteral("user"), user},
+                               {QStringLiteral("date"), ledger.date.toString(Qt::ISODate)},
+                               {QStringLiteral("path"), path}});
+        return kOk;
+    }
+    out() << QStringLiteral("%1: %2's %3 is in, and counts towards the house.\n")
+                 .arg(machine, user, ledger.date.toString(Qt::ISODate));
+    return kOk;
+}
+
 int cmdHouse(const Globals &g, const QStringList &positionals)
 {
     // What the house spent, as opposed to what this computer spent.
@@ -4292,6 +4460,9 @@ Reading, and no privilege needed:
 Writing, and root needed — the studio gets there by pkexec:
   profile add <user>       a new profile: observing, and allowing everything
               [--name "Júlia"] [--create-user]
+  day <user> [--date YYYY-MM-DD]
+                           what this computer spent, as a document another one
+                           can read. Exit 2 when there is no such day
   machine invite --at host:port
                            print the line that lets another computer trust this
                            one. Run it where the operator sits
@@ -4305,6 +4476,8 @@ Writing, and root needed — the studio gets there by pkexec:
                            write a computer down without pairing it; a note to
                            self, and nothing can be asked of it yet
   machine remove <name>    out of the list. The machine itself is untouched
+  collect <machine> <user> take in a day another computer spent, on stdin:
+                           omahouse day julia | ssh study omahouse collect …
   profile remove <user> [--keep-account]
   profile enforce <user> --on | --off
   profile default <user> --allow | --deny
@@ -4437,6 +4610,16 @@ int dispatch(const Globals &g, const QStringList &args)
                               verb))
             return kUsage;
         return cmdLimit(g, positionals, options);
+    }
+    if (verb == QLatin1String("day")) {
+        if (!onlyTheseOptions(options, {QStringLiteral("--date")}, verb))
+            return kUsage;
+        return cmdDay(g, positionals, options);
+    }
+    if (verb == QLatin1String("collect")) {
+        if (!onlyTheseOptions(options, {}, verb))
+            return kUsage;
+        return cmdCollect(g, positionals);
     }
     if (verb == QLatin1String("house")) {
         if (!onlyTheseOptions(options, {}, verb))

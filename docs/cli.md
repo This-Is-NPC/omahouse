@@ -199,6 +199,52 @@ The settings, the rules in the order they are read -- the first that names an ap
 ### Arguments
 - **`<user>`**
 
+## `omahouse day`
+
+- **Usage:** `omahouse day [--date <date>] <user>`
+
+What this computer spent, as a document another computer can read.
+
+The ledger, unchanged. No summary, no envelope and no version of its own: the file on the machine that spent the time is already the answer to what a day was, and every transformation between there and the sum is a place the two can come to disagree. `omahouse report` is the verb for a person; this one is for a machine.
+
+One shape, whether or not `--json` was asked for. This verb exists to be read by another computer, and a second, prettier form would be a second answer to the same question.
+
+It needs no privilege: a ledger is 0644 and always has been.
+
+A day nobody spent is exit 2 and no document at all. That is the whole point of the exit code here -- a quiet afternoon and a machine that is not reporting must never look the same to the thing adding them up, and a ledger of zeroes printed under a real date would make them identical.
+
+`--date` because a machine that was off at midnight still owes the house yesterday. `--date` and not `--on`: `profile enforce --on` already means something else, and one flag name with two meanings is a flag somebody gets wrong once.
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--date <date>`** — Which day, YYYY-MM-DD; today by default
+
+## `omahouse collect`
+
+- **Usage:** `omahouse collect <machine> <user>`
+
+Take in a day another computer spent, and file it where the sum will find it.
+
+The other end of `omahouse day`. The document comes in on standard input, which is what makes the seam replaceable: a scheduled Battery script, or a person with `ssh` and a pipe, and omahouse cannot tell the difference.
+
+    omahouse day julia | ssh study omahouse collect laptop julia
+
+What moves the bytes is deliberately not omahouse's. A daemon here would be a second thing to run, to supervise and to secure, for a job that is one file arriving.
+
+**A day is accepted only for a computer written down in `machines.json`**, and that refusal is the whole of what stands between the sum and a stranger: without it, whatever can reach this machine decides what the house spent.
+
+The document names its own person and its own date, and both are checked rather than trusted. A day filed under the wrong name is time added to somebody who did not spend it, and nothing downstream would ever notice -- `house` reads whatever is in the directory. A day dated later than today is refused too: accepting it puts a file in tomorrow's name that today's sum will not read and tomorrow's will, which is a total that changes overnight for no reason anybody can see.
+
+It is written through the same writer this machine's own days go through, so a collected day and a local one are the same bytes read by the same reader.
+
+Writing needs root, exactly as everything under `/var/lib/omahouse` does.
+
+### Arguments
+- **`<machine>`** — The household's name for the computer the day came from
+- **`<user>`**
+
 ## `omahouse house`
 
 - **Usage:** `omahouse house`

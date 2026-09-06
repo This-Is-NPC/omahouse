@@ -339,7 +339,7 @@ class Box:
         script.chmod(0o755)
         return script, recorded
 
-    def run(self, *args, extra_env=None, system_roots=False):
+    def run(self, *args, extra_env=None, system_roots=False, stdin=None):
         env = {
             **os.environ,
             "OMAHOUSE_CGROUP_ROOT": str(self.cgroup),
@@ -370,8 +370,11 @@ class Box:
             [str(CLI), *map(str, args)],
             cwd=str(ROOT), env=env, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            # Never the terminal the suite was started from.
-            stdin=subprocess.DEVNULL,
+            # Never the terminal the suite was started from. `collect` is the
+            # one verb that reads a document from the pipe, so it gets one when
+            # a case hands it text and the closed door otherwise.
+            input=stdin,
+            stdin=None if stdin is not None else subprocess.DEVNULL,
             # `watch` is the one verb that can decide to keep running, and a
             # suite that hangs is a suite nobody can read the failure of.
             timeout=60,
@@ -2552,6 +2555,95 @@ def check_pairing_says_when_there_is_no_omakure_to_pair_with(box):
     assert "no omakure on this machine" in said.stderr, said.stderr
 
 
+def check_a_day_travels_from_one_machine_to_another(box):
+    """The two ends of the transport, and nothing between them.
+
+    `day` publishes what this computer spent; `collect` accepts what another
+    one did. What moves the bytes is outside omahouse on purpose -- a scheduled
+    script, a person with ssh and a pipe -- and the proof that the seam is in
+    the right place is that this case is a pipe.
+    """
+    box.write_profiles(watching_profile())
+    box.write_day(TODAY, {"session": 1800, "chromium": 600})
+
+    # The document is the ledger unchanged. No envelope and no summary: every
+    # transformation between the machine that spent the time and the sum is a
+    # place the two can come to disagree.
+    published = json.loads(box.run("day", USER).stdout)
+    assert published["user"] == USER, published
+    assert published["date"] == TODAY.isoformat(), published
+    assert published["budgets"] == {"session": 1800, "chromium": 600}, published
+
+    # A day is accepted only for a computer the household has written down.
+    # This refusal is the whole of what stands between the sum and a stranger.
+    stranger = box.run("collect", "laptop", USER, stdin=json.dumps(published))
+    assert stranger.returncode == 2, stranger.stdout
+    assert "no machine called laptop" in stranger.stderr, stranger.stderr
+
+    box.run("machine", "add", "laptop", "--node", "omk1_a", "--at", "10.0.0.2:7879")
+    landed = json.loads(box.run("collect", "laptop", USER, "--json",
+                                stdin=json.dumps(published)).stdout)
+    assert landed["machine"] == "laptop", landed
+    assert landed["path"].endswith(f"elsewhere/laptop/{USER}/{TODAY.isoformat()}.json")
+
+    # And the loop closes: what `collect` wrote is what `house` adds up, with
+    # nobody having placed a file by hand.
+    document = json.loads(box.run("house", USER, "--json").stdout)
+    session = [b for b in document["budgets"] if b["id"] == "session"][0]
+    assert [c["machine"] for c in session["spent"]] == ["here", "laptop"], session
+    assert session["totalSeconds"] == 3600, session
+    assert document["notHeardFrom"] == [], document
+
+
+def check_the_transport_refuses_a_day_it_should_not_file(box):
+    """Every refusal, because a day filed wrong is time added to the wrong person.
+
+    Nothing downstream would ever notice: `house` reads whatever is in the
+    directory. So the checking has to happen where the day comes in.
+    """
+    box.write_profiles(watching_profile())
+    box.write_day(TODAY, {"session": 1800})
+    box.run("machine", "add", "laptop", "--node", "omk1_a", "--at", "10.0.0.2:7879")
+    published = json.loads(box.run("day", USER).stdout)
+
+    # A day that names somebody else, offered under this name.
+    wrong = box.run("collect", "laptop", "pedro", stdin=json.dumps(published))
+    assert wrong.returncode == 1, wrong.stdout
+    assert "belongs to" in wrong.stderr, wrong.stderr
+
+    # A machine whose clock is ahead. Accepting it puts a file in tomorrow's
+    # name that today's sum will not read and tomorrow's will, which is a total
+    # that changes overnight for no reason anybody can see.
+    ahead = dict(published, date=(TODAY + timedelta(days=1)).isoformat())
+    tomorrow = box.run("collect", "laptop", USER, stdin=json.dumps(ahead))
+    assert tomorrow.returncode == 1, tomorrow.stdout
+    assert "has not happened here yet" in tomorrow.stderr, tomorrow.stderr
+
+    for body, says in (
+        ("", "nothing came in"),
+        ("not json at all", "is not a day"),
+        ("[]", "is not a day"),
+        (json.dumps({"schemaVersion": 99, "user": USER, "date": TODAY.isoformat(),
+                     "budgets": {}, "grants": [], "events": []}), "is not a day"),
+    ):
+        said = box.run("collect", "laptop", USER, stdin=body)
+        assert said.returncode == 1, f"{body[:30]!r} came back {said.returncode}"
+        assert says in said.stderr, said.stderr
+
+    # And nothing was written by any of them.
+    assert not (box.state / "elsewhere").exists(), "a refused day was filed anyway"
+
+    # A day nobody spent is exit 2 and never an empty document: a quiet
+    # afternoon and a machine that is not reporting must not look the same.
+    quiet = box.run("day", USER, "--date", "2020-01-01")
+    assert quiet.returncode == 2, quiet.stdout
+    assert "nothing for" in quiet.stderr, quiet.stderr
+    assert not quiet.stdout.strip(), quiet.stdout
+
+    bad = box.run("day", USER, "--date", "yesterday")
+    assert bad.returncode == 1 and "--date wants a date" in bad.stderr, bad.stderr
+
+
 def check_the_house_adds_up_what_every_machine_spent(box):
     """What the house spent, as opposed to what this computer spent.
 
@@ -2911,6 +3003,8 @@ def main():
         check_watch_writes_presence_beside_the_budgets_and_never_into_them,
         check_the_house_writes_down_its_machines,
         check_the_house_adds_up_what_every_machine_spent,
+        check_a_day_travels_from_one_machine_to_another,
+        check_the_transport_refuses_a_day_it_should_not_file,
         check_the_house_refuses_what_it_cannot_add_up,
         check_the_machine_verbs_refuse_what_they_cannot_do,
         check_pairing_refuses_a_line_that_did_not_arrive_whole,
