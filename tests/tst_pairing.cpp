@@ -119,6 +119,79 @@ private slots:
         QVERIFY(!looksLikeEndpoint(QStringLiteral(":7879")));
     }
 
+    // -- the half that is a credential ---------------------------------------
+
+    void aPairingCanCarryTheWayBackIn()
+    {
+        Pairing sent = anOrdinaryOne();
+        sent.apiEndpoint = QStringLiteral("192.168.1.20:8787");
+        sent.token = QStringLiteral("omk_live_68656c6c6f_abc123");
+        Pairing got;
+        QString error;
+        QVERIFY2(decodePairing(encodePairing(sent), &got, &error), qPrintable(error));
+        QCOMPARE(got.apiEndpoint, sent.apiEndpoint);
+        QCOMPARE(got.token, sent.token);
+        QVERIFY(got.isReachableForReading());
+        QVERIFY(carriesASecret(got));
+    }
+
+    void anInvitationCarriesNoSecretAndSaysSo()
+    {
+        // The two lines look identical and are not. An invitation is four
+        // public facts; a pairing is a key to a machine's console.
+        Pairing got;
+        QString error;
+        QVERIFY2(decodePairing(encodePairing(anOrdinaryOne()), &got, &error),
+                 qPrintable(error));
+        QVERIFY(!carriesASecret(got));
+        QVERIFY(!got.isReachableForReading());
+        // And it is still a complete, usable line: an invitation is not a
+        // pairing that lost something.
+        QVERIFY(got.isValid());
+    }
+
+    void halfOfTheWayBackInIsRefused()
+    {
+        // An address with no bearer is a door nobody can open; a bearer with no
+        // address is a key to nowhere. Either on its own is a line that lost a
+        // field on the way, which is exactly what this catches.
+        Pairing noToken = anOrdinaryOne();
+        noToken.apiEndpoint = QStringLiteral("192.168.1.20:8787");
+        Pairing noAddress = anOrdinaryOne();
+        noAddress.token = QStringLiteral("omk_live_abc");
+
+        Pairing got;
+        QString error;
+        QVERIFY(!decodePairing(encodePairing(noToken), &got, &error));
+        QVERIFY2(error.contains(QStringLiteral("missing half")), qPrintable(error));
+        QVERIFY(!decodePairing(encodePairing(noAddress), &got, &error));
+        QVERIFY2(error.contains(QStringLiteral("missing half")), qPrintable(error));
+    }
+
+    void aConsoleAddressThatIsNotOneIsRefusedByName()
+    {
+        Pairing wrong = anOrdinaryOne();
+        wrong.apiEndpoint = QStringLiteral("192.168.1.20");
+        wrong.token = QStringLiteral("omk_live_abc");
+        Pairing got;
+        QString error;
+        QVERIFY(!decodePairing(encodePairing(wrong), &got, &error));
+        QVERIFY2(error.contains(QStringLiteral("console")), qPrintable(error));
+    }
+
+    void theConsoleOnTheNetworkIsVisibleInTheConfig()
+    {
+        // The unit's `--allow-non-loopback` is decided by reading this back, so
+        // the two can never disagree about whether the door is open.
+        NodeConfig open;
+        open.displayName = QStringLiteral("the kitchen laptop");
+        open.apiBind = QStringLiteral("0.0.0.0:8787");
+        NodeConfig back;
+        QVERIFY(readRenderedNodeConfig(renderNodeConfig(open), &back));
+        QCOMPARE(back.apiBind, QStringLiteral("0.0.0.0:8787"));
+        QVERIFY(!back.apiBind.startsWith(QStringLiteral("127.")));
+    }
+
     // -- the config that line writes -----------------------------------------
 
     void theConfigCarriesWhatOmakureRefusesToStartWithout()

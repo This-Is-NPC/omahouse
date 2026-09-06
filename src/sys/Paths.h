@@ -43,6 +43,13 @@ QString blockedFile();
 /// reads it. Its absence is the ordinary state of a machine that is the only
 /// one there is, which is most of them, and it is never an error.
 QString machinesFile();
+/// `<configDir>/machine-tokens.json` -- how to read the other machines.
+///
+/// Beside `machines.json` and deliberately not in it. That file is 0644 because
+/// a household reads its own list; this one is 0600 because it holds a bearer
+/// per machine, and one file that is half public and half secret is a file
+/// somebody eventually publishes.
+QString machineTokensFile();
 /// `<stateDir>/elsewhere/<machine>/<user>/<YYYY-MM-DD>.json` -- a day that was
 /// spent on another computer.
 ///

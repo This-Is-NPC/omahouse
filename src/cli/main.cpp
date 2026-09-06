@@ -1570,6 +1570,17 @@ QString wireBindFor(const QString &endpoint)
             .arg(endpoint.mid(endpoint.lastIndexOf(QLatin1Char(':'))));
 }
 
+/// Where this machine's console answers, given where its wire does.
+///
+/// The same host, on Omakure's own API port. Derived rather than asked for: two
+/// addresses a household has to keep in agreement are two addresses that will
+/// one day disagree, and the failure of that is a machine that pairs and then
+/// cannot be read.
+QString apiEndpointFor(const QString &wire)
+{
+    return wire.left(wire.lastIndexOf(QLatin1Char(':'))) + QStringLiteral(":8787");
+}
+
 /// Whether the Omakure this run would touch is the machine's own.
 bool omakureConfigIsTheSystems()
 {
@@ -1613,6 +1624,60 @@ bool omakureIsReady(const QString &verb)
     fail(QStringLiteral("%1    sudo omakure-install --install-node-service")
                  .arg(QString(verb.size(), QLatin1Char(' '))));
     return false;
+}
+
+/// The bearers, by machine name. Kept apart from `machines.json` on purpose:
+/// that file is 0644 because a household reads its own list, and one file that
+/// is half public and half secret is a file somebody eventually publishes.
+QJsonObject readMachineTokens()
+{
+    QFile file(paths::machineTokensFile());
+    if (!file.open(QIODevice::ReadOnly))
+        return QJsonObject();
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    file.close();
+    return document.object();
+}
+
+bool writeMachineTokens(const QJsonObject &tokens, QString *error)
+{
+    return Omakure::writeSystemFile(
+            paths::machineTokensFile(),
+            QString::fromUtf8(QJsonDocument(tokens).toJson(QJsonDocument::Indented)),
+            QString(), 0600, error);
+}
+
+int cmdMachineToken(const Globals &g, const QStringList &positionals)
+{
+    if (positionals.isEmpty()) {
+        fail(QStringLiteral("machine token: which machine?"));
+        return kUsage;
+    }
+    const QString name = positionals.first();
+    if (!mayWrite(QStringLiteral("machine token"), paths::machineTokensFile(),
+                  paths::configDirIsTheSystems(), g))
+        return kUsage;
+
+    const QJsonObject tokens = readMachineTokens();
+    const QJsonObject one = tokens.value(name).toObject();
+    const QString bearer = one.value(QStringLiteral("token")).toString();
+    if (bearer.isEmpty()) {
+        fail(QStringLiteral("machine token: nothing to read %1 with. It was written "
+                            "down without pairing, or paired by an older build")
+                 .arg(name));
+        return kMissing;
+    }
+    if (g.json) {
+        printJson(QJsonObject {{QStringLiteral("machine"), name},
+                               {QStringLiteral("at"), one.value(QStringLiteral("api"))},
+                               {QStringLiteral("token"), bearer}});
+        return kOk;
+    }
+    // The bearer alone on stdout, and the address on the line before it, so
+    // that a script can take either without parsing. This verb exists to be
+    // read by the thing that fetches days.
+    out() << one.value(QStringLiteral("api")).toString() << '\n' << bearer << '\n';
+    return kOk;
 }
 
 int cmdMachineInvite(const Globals &g, const Options &options)
@@ -1745,6 +1810,13 @@ int cmdMachinePrepare(const Globals &g, const Options &options)
     if (config.displayName.isEmpty())
         config.displayName = QSysInfo::machineHostName();
     config.directBind = wireBindFor(options.at);
+    // The console goes on the network here and nowhere else. It is the one way
+    // a day can come back: Omakure's wire carries `cue_dispatch` and `cue_ack`
+    // and the ack has no body, so a Cue can tell this machine to do something
+    // and can never bring a document. Only the machine being administered opens
+    // this door -- the operator's stays on loopback, because nobody pulls from
+    // it.
+    config.apiBind = wireBindFor(apiEndpointFor(options.at));
     config.staticPeers = {staticPeer(conductor.nodeId, conductor.endpoint)};
     config.cueBatteries = {options.battery.isEmpty() ? QStringLiteral("omahouse")
                                                      : options.battery};
@@ -1779,6 +1851,11 @@ int cmdMachinePrepare(const Globals &g, const Options &options)
         fail(QStringLiteral("%1: %2").arg(verb, error));
         return kUsage;
     }
+    QString reading;
+    if (!Omakure::provisionReadingToken(&reading, &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
 
     // One binary, and no arguments constrained. The account that answers a Cue
     // is the node's, it has no shell and no sudo, and omahouse's writing verbs
@@ -1806,12 +1883,15 @@ int cmdMachinePrepare(const Globals &g, const Options &options)
         return kUsage;
     }
     mine.name = config.displayName;
+    mine.apiEndpoint = apiEndpointFor(options.at);
+    mine.token = reading;
     const QString line = encodePairing(mine);
 
     if (g.json) {
         printJson(QJsonObject {{QStringLiteral("name"), mine.name},
                                {QStringLiteral("nodeId"), mine.nodeId},
                                {QStringLiteral("endpoint"), mine.endpoint},
+                               {QStringLiteral("apiEndpoint"), mine.apiEndpoint},
                                {QStringLiteral("conductor"), conductor.nodeId},
                                {QStringLiteral("battery"), config.cueBatteries.value(0)},
                                {QStringLiteral("serving"), serving},
@@ -1834,8 +1914,16 @@ int cmdMachinePrepare(const Globals &g, const Options &options)
     out() << QStringLiteral("\nTake this line back to the computer that will administer "
                             "it, and run there:\n\n");
     out() << QStringLiteral("  sudo omahouse machine add <a name for this one> \\\n"
-                            "    --pair %1\n")
+                            "    --pair %1\n\n")
                  .arg(line);
+    // Said, and said differently from the invitation, because the two lines
+    // look identical and are not. The invitation is four public facts. This one
+    // carries a key to this machine's console, and a household that learned
+    // from the first line that these are safe to paste anywhere would be
+    // learning the wrong thing.
+    out() << QStringLiteral("Unlike the invitation, that line is a key to this "
+                            "computer. Carry it once,\nto that one computer, and do "
+                            "not leave it where the line can be read.\n");
     return kOk;
 }
 
@@ -1942,6 +2030,21 @@ int cmdMachineAdd(const Globals &g, const QStringList &positionals, const Option
             return kUsage;
         }
         serving = Omakure::enableService(&notStarted);
+
+        // The bearer last, and only once everything it is for exists. A token
+        // written down for a machine this one never came to trust is a
+        // credential with nothing to open, kept forever.
+        if (paired.isReachableForReading()) {
+            QJsonObject tokens = readMachineTokens();
+            tokens.insert(name, QJsonObject {
+                {QStringLiteral("api"), paired.apiEndpoint},
+                {QStringLiteral("token"), paired.token},
+            });
+            if (!writeMachineTokens(tokens, &error)) {
+                fail(QStringLiteral("machine add: %1").arg(error));
+                return kUsage;
+            }
+        }
     }
 
     if (!writeMachines(paths::machinesFile(), fleet.all, &error)) {
@@ -2004,6 +2107,17 @@ int cmdMachineRemove(const Globals &g, const QStringList &positionals)
         fail(QStringLiteral("machine remove: %1").arg(error));
         return kUsage;
     }
+    // And the bearer with it. Forgetting a machine while keeping the key to it
+    // is the shape of every credential nobody remembers they still hold.
+    QJsonObject tokens = readMachineTokens();
+    if (tokens.contains(name)) {
+        tokens.remove(name);
+        QString why;
+        if (!writeMachineTokens(tokens, &why))
+            fail(QStringLiteral("machine remove: the machine is out of the list, but "
+                                "its key is still in %1: %2")
+                     .arg(paths::machineTokensFile(), why));
+    }
     if (g.json) {
         printJson(QJsonObject {{QStringLiteral("name"), name},
                                {QStringLiteral("removed"), true}});
@@ -2048,8 +2162,13 @@ int cmdMachine(const Globals &g, const QStringList &positionals, const Options &
             return kUsage;
         return cmdMachineRemove(g, rest);
     }
-    fail(QStringLiteral("machine: invite, prepare, add or remove, not '%1'")
-             .arg(what));
+    if (what == QLatin1String("token")) {
+        if (!onlyTheseOptions(options, {}, QStringLiteral("machine token")))
+            return kUsage;
+        return cmdMachineToken(g, rest);
+    }
+    fail(QStringLiteral("machine: invite, prepare, add, remove or token, "
+                        "not '%1'").arg(what));
     return kUsage;
 }
 

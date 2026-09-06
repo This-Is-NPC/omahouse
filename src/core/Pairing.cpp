@@ -18,6 +18,11 @@ QString stringAt(const QJsonObject &object, const char *key)
 
 } // namespace
 
+bool carriesASecret(const Pairing &pairing)
+{
+    return !pairing.token.isEmpty();
+}
+
 bool looksLikeCertificate(const QString &hex)
 {
     if (hex.isEmpty() || hex.size() % 2 != 0)
@@ -51,13 +56,21 @@ bool Pairing::isValid() const
 
 QString encodePairing(const Pairing &pairing)
 {
-    const QJsonObject object {
+    QJsonObject object {
         {QStringLiteral("name"), pairing.name},
         {QStringLiteral("node"), pairing.nodeId},
         {QStringLiteral("key"), pairing.publicKey},
         {QStringLiteral("cert"), pairing.transportCert},
         {QStringLiteral("at"), pairing.endpoint},
     };
+    // Left out entirely when there is none, rather than written empty. An
+    // invitation and a pairing are then different lengths as well as different
+    // contents, which is one more way a line pasted the wrong way round fails
+    // early instead of late.
+    if (!pairing.apiEndpoint.isEmpty())
+        object.insert(QStringLiteral("api"), pairing.apiEndpoint);
+    if (!pairing.token.isEmpty())
+        object.insert(QStringLiteral("tok"), pairing.token);
     const QByteArray json = QJsonDocument(object).toJson(QJsonDocument::Compact);
     // Url alphabet and no padding: this line gets pasted into a shell, and `+`
     // and `=` are both things a shell has opinions about.
@@ -101,6 +114,8 @@ bool decodePairing(const QString &line, Pairing *out, QString *error)
     pairing.publicKey = stringAt(object, "key");
     pairing.transportCert = stringAt(object, "cert");
     pairing.endpoint = stringAt(object, "at");
+    pairing.apiEndpoint = stringAt(object, "api");
+    pairing.token = stringAt(object, "tok");
 
     // One field at a time, because "invalid" is not something a person can act
     // on and "no certificate in it" is.
@@ -120,6 +135,19 @@ bool decodePairing(const QString &line, Pairing *out, QString *error)
     if (!looksLikeEndpoint(pairing.endpoint)) {
         *error = QStringLiteral("the pairing line has no address to answer at "
                                 "(host:port)");
+        return false;
+    }
+    // Both or neither. An address with no bearer is a door nobody can open and
+    // a bearer with no address is a key to nowhere; either on its own is a line
+    // that lost a field on the way, which is exactly what this refuses.
+    if (pairing.apiEndpoint.isEmpty() != pairing.token.isEmpty()) {
+        *error = QStringLiteral("the pairing line is missing half of how to read "
+                                "that machine");
+        return false;
+    }
+    if (!pairing.apiEndpoint.isEmpty() && !looksLikeEndpoint(pairing.apiEndpoint)) {
+        *error = QStringLiteral("the pairing line has no usable address for that "
+                                "machine's console");
         return false;
     }
 

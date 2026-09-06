@@ -2445,8 +2445,10 @@ def check_the_machine_verbs_refuse_what_they_cannot_do(box):
         (("machine", "add"), 1, "which machine"),
         (("machine", "remove"), 1, "which machine"),
         (("machine", "remove", "nobody"), 2, "no machine called"),
-        (("machine",), 1, "add or remove"),
-        (("machine", "polish"), 1, "add or remove"),
+        (("machine",), 1, "invite, prepare, add, remove or token"),
+        (("machine", "polish"), 1, "invite, prepare, add, remove or token"),
+        (("machine", "token"), 1, "which machine"),
+        (("machine", "token", "nobody"), 2, "nothing to read nobody with"),
     ):
         said = box.run(*wrong)
         assert said.returncode == code, f"{' '.join(wrong)} came back {said.returncode}"

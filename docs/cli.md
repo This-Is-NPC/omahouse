@@ -356,6 +356,23 @@ It takes the name from the line when none is given, and refuses `--node` or `--a
 - **`--at <host:port>`** — Where its wire answers, like 192.168.1.20:7879
 - **`--pair <line>`** — The line `omahouse machine prepare` printed
 
+## `omahouse machine token`
+
+- **Usage:** `omahouse machine token <machine>`
+
+How to read one computer: where its console answers, and the bearer that opens it.
+
+Two lines on stdout -- the address, then the bearer -- so a script can take either without parsing. This verb exists to be read by whatever fetches days, and it is a verb rather than a file so that the format stays omahouse's.
+
+It needs root, because what it prints is a credential. The bearers live in `/etc/omahouse/machine-tokens.json` at 0600, beside `machines.json` and deliberately not in it: that file is 0644 because a household reads its own list, and one file that is half public and half secret is a file somebody eventually publishes.
+
+A machine written down without pairing has nothing to read it with, and that is exit 2 rather than an empty line.
+
+The bearer is scoped to running the scripts that machine already declares and reading what they printed -- never `node:write`. It is the same power the Cue path grants, because they are the same scripts; what withholding `node:write` buys is that a stolen bearer cannot re-trust peers or rewrite the config, which are the two things that would make it permanent.
+
+### Arguments
+- **`<machine>`**
+
 ## `omahouse machine remove`
 
 - **Usage:** `omahouse machine remove`
@@ -363,6 +380,8 @@ It takes the name from the line when none is given, and refuses `--node` or `--a
 Take a computer out of the household's list.
 
 It does nothing to the machine. Its rules, its daemon, its accounts and its day are all exactly where they were, and the answer says so -- a verb that read as `remove` and left a fiscalised computer running would be a verb somebody trusts once.
+
+The bearer for it goes too. Forgetting a machine while keeping the key to it is the shape of every credential nobody remembers they still hold.
 
 Unpairing it in Omakure, and taking the rules off whoever lives there, are separate acts with separate verbs. This one only forgets.
 

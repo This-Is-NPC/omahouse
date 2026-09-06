@@ -1,5 +1,8 @@
 #include "Omakure.h"
 
+#include "NodeConfig.h"
+#include "Paths.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -345,21 +348,74 @@ bool Omakure::writeSystemFile(const QString &path, const QString &contents,
     return true;
 }
 
+/// Whether this machine's own config puts the console on the network.
+///
+/// Read back from the file rather than passed in, so the flag and the bind can
+/// never disagree: `node serve` refuses a non-loopback API without the flag,
+/// and a unit carrying the flag for a loopback bind would be a machine that
+/// looks open and is not, which is the more dangerous of the two mistakes to
+/// make about a door.
+bool Omakure::apiOnTheNetwork()
+{
+    QFile file(nodeConfigFile());
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    NodeConfig config;
+    const bool ours = readRenderedNodeConfig(QString::fromUtf8(file.readAll()), &config);
+    file.close();
+    return ours && !config.apiBind.startsWith(QLatin1String("127."));
+}
+
 bool Omakure::enableService(QString *error)
 {
     const QString unit = QStringLiteral("omakure-node.service");
-    const QString dropIn = environmentOr("OMAHOUSE_SYSTEMD_DIR",
-                                         QStringLiteral("/etc/systemd/system"))
-            + QStringLiteral("/") + unit + QStringLiteral(".d/omahouse.conf");
+    const QString systemd = environmentOr("OMAHOUSE_SYSTEMD_DIR",
+                                          QStringLiteral("/etc/systemd/system"));
+    const QString unitFile = systemd + QStringLiteral("/") + unit;
+    const QString dropIn = systemd + QStringLiteral("/") + unit
+            + QStringLiteral(".d/omahouse.conf");
+
+    // The unit, only when there is none. Omakure ships one, but its installer
+    // will only provision it alongside a tokens file that already holds hashed
+    // entries -- and the entries are made by the node this is about to start,
+    // so a household following that order has nowhere to begin. Writing it here
+    // when it is absent is what breaks the circle; writing it when it is
+    // present would be overwriting Omakure's own file, which is what the
+    // drop-in below exists to avoid.
+    if (!QFileInfo::exists(unitFile)) {
+        const QString shipped = QStringLiteral(
+                "# Written by omahouse because there was none. Omakure's own\n"
+                "# installer will replace this file, and the drop-in beside it\n"
+                "# survives that, which is the point of the two being separate.\n"
+                "[Unit]\n"
+                "Description=Omakure machine node service\n"
+                "After=network-online.target\n"
+                "Wants=network-online.target\n"
+                "\n[Service]\n"
+                "Type=simple\n"
+                "User=%1\n"
+                "Group=%1\n"
+                "Environment=OMAKURE_SCRIPTS_DIR=%2\n"
+                "Environment=OMAKURE_TOKENS_FILE=%3/tokens.toml\n"
+                "ExecStart=%4 node serve\n"
+                "Restart=on-failure\n"
+                "PrivateTmp=true\n"
+                "\n[Install]\n"
+                "WantedBy=multi-user.target\n")
+                .arg(account(), workspace(), configDir(), binary());
+        if (!writeSystemFile(unitFile, shipped, QString(), 0644, error))
+            return false;
+    }
     const QString contents = QStringLiteral(
             "# Written by omahouse. The unit itself is Omakure's and is left alone:\n"
             "# it is rewritten by every reinstall, and a household that upgrades\n"
             "# Omakure must not silently lose its wire.\n"
             "[Service]\n"
             "ExecStart=\n"
-            "ExecStart=%1 node serve --allow-non-loopback-direct --workers 1\n"
+            "ExecStart=%1 node serve --allow-non-loopback-direct%2 --workers 1\n"
             "NoNewPrivileges=no\n")
-            .arg(binary());
+            .arg(binary(), apiOnTheNetwork() ? QStringLiteral(" --allow-non-loopback")
+                                             : QString());
     if (!writeSystemFile(dropIn, contents, QString(), 0644, error))
         return false;
 
@@ -381,12 +437,26 @@ bool Omakure::enableService(QString *error)
 bool Omakure::generateToken(const QString &id, QString *token, QString *fileEntry,
                             QString *error)
 {
+    // Two bearers, two sets of scopes, told apart by the id they are made
+    // under. The node's own answers for itself and needs the node scopes; the
+    // one handed to the operator's machine runs declared scripts and reads what
+    // they printed, and nothing else -- `node:write` is what would let a stolen
+    // bearer re-trust peers and make itself permanent.
+    const bool forTheConsole = id == QLatin1String("household-console");
+    QStringList scopes;
+    if (forTheConsole) {
+        scopes = {QStringLiteral("runs:read"), QStringLiteral("runs:write"),
+                  QStringLiteral("scripts:read")};
+    } else {
+        scopes = {QStringLiteral("node:read"), QStringLiteral("node:write")};
+    }
+    QStringList arguments {QStringLiteral("token"), QStringLiteral("generate"),
+                           QStringLiteral("--id"), id};
+    for (const QString &scope : scopes)
+        arguments << QStringLiteral("--scope") << scope;
+
     QJsonObject data;
-    if (!runJson({QStringLiteral("token"), QStringLiteral("generate"),
-                  QStringLiteral("--id"), id,
-                  QStringLiteral("--scope"), QStringLiteral("node:read"),
-                  QStringLiteral("--scope"), QStringLiteral("node:write")},
-                 &data, error))
+    if (!runJson(arguments, &data, error))
         return false;
     *token = data.value(QStringLiteral("token")).toString();
     *fileEntry = data.value(QStringLiteral("tokens_file_entry")).toString();
@@ -395,6 +465,46 @@ bool Omakure::generateToken(const QString &id, QString *token, QString *fileEntr
         return false;
     }
     return true;
+}
+
+QString Omakure::tokenFile()
+{
+    return paths::configDir() + QStringLiteral("/omakure-token");
+}
+
+bool Omakure::provisionReadingToken(QString *token, QString *error)
+{
+    QString entry;
+    if (!generateToken(QStringLiteral("household-console"), token, &entry, error))
+        return false;
+    // Appended, because this machine's own bearer is already in that file and
+    // rewriting it would leave the node unable to authenticate itself.
+    QFile existing(configDir() + QStringLiteral("/tokens.toml"));
+    QString both;
+    if (existing.open(QIODevice::ReadOnly)) {
+        both = QString::fromUtf8(existing.readAll());
+        existing.close();
+        if (!both.endsWith(QLatin1Char('\n')))
+            both.append(QLatin1Char('\n'));
+    }
+    both.append(entry);
+    return writeSystemFile(configDir() + QStringLiteral("/tokens.toml"), both,
+                           account(), 0640, error);
+}
+
+bool Omakure::provisionToken(QString *error)
+{
+    QString token;
+    QString entry;
+    if (!generateToken(QStringLiteral("household"), &token, &entry, error))
+        return false;
+    if (!writeSystemFile(configDir() + QStringLiteral("/tokens.toml"), entry,
+                         account(), 0640, error))
+        return false;
+    // 0600 and no group: the node's account has no business reading the bearer.
+    // It answers the API; it does not call it.
+    return writeSystemFile(tokenFile(), token + QStringLiteral("\n"), QString(), 0600,
+                           error);
 }
 
 } // namespace omahouse

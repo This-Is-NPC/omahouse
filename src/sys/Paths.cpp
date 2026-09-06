@@ -84,6 +84,11 @@ QString machinesFile()
     return configDir() + QStringLiteral("/machines.json");
 }
 
+QString machineTokensFile()
+{
+    return configDir() + QStringLiteral("/machine-tokens.json");
+}
+
 QString furnitureFile()
 {
     return configDir() + QStringLiteral("/furniture");

@@ -96,6 +96,9 @@ public:
     static bool writeSystemFile(const QString &path, const QString &contents,
                                 const QString &group, int mode, QString *error);
 
+    /// Whether this machine's config puts its console on the network.
+    static bool apiOnTheNetwork();
+
     /// The drop-in that makes the shipped unit answer on the wire, and the
     /// reload and enable that follow.
     ///
@@ -115,6 +118,30 @@ public:
     /// startup one.
     static bool generateToken(const QString &id, QString *token, QString *fileEntry,
                               QString *error);
+
+    /// Where the bearer is kept: `<omahouse config>/omakure-token`, 0600 root.
+    ///
+    /// On disk and never on screen. The hashed half goes in Omakure's tokens
+    /// file, and the half that opens the door has to live somewhere a script
+    /// can read it -- printing it instead would put a working credential in a
+    /// terminal's scrollback, an operator's clipboard and, sooner or later, a
+    /// screenshot of a pairing that went well.
+    static QString tokenFile();
+
+    /// Both halves in one act: the hashed entry into Omakure's tokens file and
+    /// the bearer into ours.
+    static bool provisionToken(QString *error);
+
+    /// A second bearer, for the operator's machine to read this one with, and
+    /// the hashed entry appended beside the first.
+    ///
+    /// Scoped to running declared scripts and reading what they printed, and
+    /// never to `node:write`. It is the same power the Cue path already grants
+    /// -- the declared scripts are the same scripts -- so this widens the way
+    /// in and not what can be done once in. Withholding `node:write` is what
+    /// keeps a stolen bearer from re-trusting peers or rewriting the config,
+    /// which are the two things that would make it permanent.
+    static bool provisionReadingToken(QString *token, QString *error);
 };
 
 } // namespace omahouse
