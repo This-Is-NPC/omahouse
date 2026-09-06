@@ -115,7 +115,19 @@ session_seconds = 20
 app_seconds = 8
 # The profile's `grace`: the window between the last warning and `cgroup.kill`,
 # and the window a SIGTERMed scope is given before the write.
-grace_seconds = 3
+#
+# Six and not three, because this is the one window a case has to *catch the
+# machine inside of* rather than wait out. `grace_warns_before_closing` asserts
+# the app is still open at the moment it is told the window opened, and it can
+# only see that by looking while it is true: `wait_for` polls every half second
+# plus one ssh round trip, which under the load of a whole suite run is a
+# cadence of one to two and a half seconds against a window three wide. It fit
+# sometimes, which is worse than never -- the case passed alone and failed in
+# the suite, and read as an app cut off inside its own grace.
+#
+# It is the regime's number and not the product's. `vm/provision-omarchy.sh`
+# gives the demonstration machine twenty.
+grace_seconds = 6
 # How long `session_slice_untouched` keeps an empty allowlist in force while
 # asserting the compositor never notices. This is the one window that cannot
 # shrink to nothing and still mean anything -- see docs/design.md, "The two

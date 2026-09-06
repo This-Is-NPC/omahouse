@@ -80,10 +80,31 @@ def run(vm):
 
     vm.wait_for(lambda: unit not in vm.scopes(), patience,
                 f"{unit} to close after the window")
-    waited = time.time() - announced
+
+    # Measured on the daemon's own clock and never on this one. `announced` is
+    # the moment the suite *saw* the notification, which is always later than
+    # the moment it was sent, so a window measured from here is always shorter
+    # than the window that was really given -- a bias that fails the assertion
+    # for the observer's latency and calls it an app cut off early.
+    #
+    # omahouse stamps its own lines, so the two moments it is being held to are
+    # both in the journal, taken by one clock.
+    journal = vm.journal()
+    said = {}
+    for line in journal.splitlines():
+        for what, mark in (("grace", "grace: Time is up"), ("term", "SIGTERM into")):
+            if mark in line and what not in said:
+                stamp = line.split(" julia:")[0].rsplit(" ", 1)[-1]
+                said[what] = stamp
+    if len(said) != 2:
+        raise Failed("the journal does not carry both moments of the window:\n"
+                     + journal)
+    began, ended = (time.strptime(said[k], "%Y-%m-%dT%H:%M:%S") for k in ("grace", "term"))
+    waited = time.mktime(ended) - time.mktime(began)
     if waited < grace:
-        raise Failed(f"the app closed {waited:.1f}s after `time is up`, and the window "
-                     f"is {grace}s -- it was cut off inside its own grace")
+        raise Failed(f"the app was signalled {waited:.0f}s after `time is up`, and the "
+                     f"window is {grace}s -- it was cut off inside its own grace:\n"
+                     + journal)
 
     # The warning, the window and the signal -- and not `cgroup.kill`. The app
     # here is the polite fixture, which leaves on its SIGTERM, so a kill is
@@ -98,7 +119,7 @@ def run(vm):
     if "cgroup.kill on" in journal:
         raise Failed(f"an app that leaves on its SIGTERM was killed as well:\n{journal}")
 
-    print(f"      warned, then told `Time is up`, then closed {waited:.1f}s later "
-          f"(window {grace}s)")
+    print(f"      warned, then told `Time is up`, then signalled {waited:.0f}s later "
+          f"by its own clock (window {grace}s)")
     print("      " + " | ".join(line.strip() for line in window.splitlines()
                                 if line.strip())[:160])
