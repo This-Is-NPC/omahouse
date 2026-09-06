@@ -463,8 +463,20 @@ class VM:
         return self.ssh("date +%F").strip()
 
     def journal(self, since=None, unit="omahouse"):
-        when = f"--since '{since}'" if since else "--no-pager -n 200"
-        return self.root(f"journalctl -u {unit} {when} --no-pager", check=False)[1]
+        """What the unit said, since this case started the daemon.
+
+        Since, and not the whole boot. A case that asserts a line is *absent* --
+        "the polite app was never cgroup.killed" -- was asserting it about
+        everything that had ever happened on the machine, so one earlier run of
+        the same case in the same boot made the next one fail on a line it did
+        not write. The `--keep` runs that made it look like load are what
+        surfaced it: a machine left up carries its journal with it.
+        """
+        when = since or getattr(self, "_daemon_started", None)
+        if when:
+            return self.root(f"journalctl -u {unit} --since '{when}' --no-pager",
+                             check=False)[1]
+        return self.root(f"journalctl -u {unit} -n 200 --no-pager", check=False)[1]
 
     # -- driving it ---------------------------------------------------------
 
@@ -489,6 +501,9 @@ class VM:
         raise Failed(f"{app} never took a scope of its own under app.slice")
 
     def start_daemon(self):
+        # The guest's own clock, taken before the restart, so `journal()` can
+        # answer about this run rather than about the boot.
+        self._daemon_started = self.ssh("date '+%Y-%m-%d %H:%M:%S'").strip()
         self.root("systemctl restart omahouse.service")
 
     def stop_daemon(self):

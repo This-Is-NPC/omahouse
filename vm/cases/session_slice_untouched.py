@@ -86,9 +86,18 @@ def run(vm):
     if left:
         raise Failed(f"the allowlist refused nothing: {left} is still open")
 
+    # The SIGTERM and not the `cgroup.kill`: both apps here are the polite
+    # fixture, which leaves on its signal, so a `cgroup.kill` is exactly what
+    # should *not* appear. This asked for one and passed anyway, on the kill an
+    # earlier case in the same boot had written -- which is what a journal read
+    # over the whole boot buys you, and why `journal()` now starts where the
+    # daemon did.
     journal = vm.journal()
-    if "cgroup.kill" not in journal:
+    if "SIGTERM into" not in journal:
         raise Failed("nothing was closed, so nothing was proved:\n" + journal)
+    if "cgroup.kill" in journal:
+        raise Failed("an app that leaves on its SIGTERM was killed as well:\n"
+                     + journal)
 
     print("      Hyprland %s throughout %ss, user@%s.service %s, sessions %s active"
           % (hyprland, held, vm.uid, manager, sessions_before))
