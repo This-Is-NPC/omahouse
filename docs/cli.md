@@ -231,13 +231,67 @@ No file is the ordinary state and never an error. Most households are one comput
 
 - **Usage:** `omahouse machine <SUBCOMMAND>`
 
-One computer of this household, added or forgotten.
+One computer of this household: paired, added or forgotten.
+
+Pairing is a walk. Two computers with no prior channel cannot come to trust each other in one move -- Omakure checks a peer against an identity it was given beforehand, so somebody has to carry that identity between them, and the only question is whether they carry it or type it. These verbs are in the order a person actually moves:
+
+1. `omahouse machine invite --at <this computer>` where the operator sits. It prints one line.
+2. `sudo omahouse machine prepare --invite <line> --at <that computer>` on the new machine, which is where the operator already is, because they just installed Omarchy on it.
+3. `sudo omahouse machine add <a name> --pair <line>` back on the operator's computer.
+
+The line carries no secret: a node id, a public key, a transport certificate and an address, every one of them public. What it buys is not typing a kilobyte of hex twice, which is the step that was measured going wrong most often. It is refused rather than half-read when it arrives in pieces, because a terminal that wrapped it is the ordinary way it breaks and trusting half a certificate is the expensive way to find out.
+
+What those three replace is seven manual steps, each of which fails in a way that reads like a networking problem and is not: node operations run as the wrong account leaving root-owned locks nothing can clear, a `node init` before its config file exists, a config missing `version` and `[node]`, a `node serve` with no tokens file, a wire that refuses a non-loopback bind, the trust exchange in both directions, and one sudoers line.
+
+The trust is asymmetric on purpose. The new machine trusts the operator's as a Conductor and accepts Cues only for one named Battery; the operator's trusts the new one as a Performer and accepts none at all. A Conductor that could be cued back is a Conductor somebody took.
 
 The list itself is `omahouse machines`.
 
+## `omahouse machine invite`
+
+- **Usage:** `omahouse machine invite [--at <host:port>] [--name <name>]`
+
+Print the line that lets another computer trust this one.
+
+Run where the operator sits. It gives this machine an Omakure identity if it has none yet -- the one-time act of becoming the household's Conductor -- writes the Omakure config, and prints one line to carry to the computer being added.
+
+`--at` is required and is never guessed. A machine cannot know which of its addresses the household will reach it on, and a wrong one is a pairing that completes and then does nothing.
+
+Running it again is safe and is how an operator whose address changed tells the house. The config is rendered whole, with every machine already paired still in its peer list: a rewrite that dropped them would be a household whose computers trust each other and cannot find each other.
+
+It writes `/etc/omakure/node.toml` in full, and says so. A config half of which is somebody's and half of which is ours has no owner, and the failure of that is a merge that silently drops the peers.
+
+### Flags
+- **`--at <host:port>`** — Where the other computers will reach this one
+- **`--name <name>`** — What this computer calls itself, like "the study"
+
+## `omahouse machine prepare`
+
+- **Usage:** `omahouse machine prepare [FLAGS]`
+
+Put this computer under a household, from the line it was given.
+
+Run as root on the computer being added, with the operator sitting at it. It does, in one go, the seven things that were found by getting each of them wrong first:
+
+- writes `/etc/omakure/node.toml` with the operator's machine as its one peer and one Battery it may be cued for -- **before** `node init`, because init runs as the node's account and `/etc/omakure` is root's, and left to create the file itself it answers `io_failed: Permission denied`
+- gives this machine an Omakure identity, if it has none. Never twice: the second `node init` is the one that cannot be undone without deleting an identity another machine already trusts
+- trusts the operator's machine as a Conductor
+- writes a tokens file, because `node serve` refuses to start at all without one -- `auth required` -- and then nothing is listening on the wire either, which reads like peering and is startup
+- writes one sudoers line, naming one binary. The account that answers a Cue has no shell and no sudo, and omahouse's writing verbs need root because `/etc/omahouse/profiles.json` is a root daemon's file. A rule naming `ALL` here would turn a Cue for one script into a route to everything
+- drops in `--allow-non-loopback-direct` and `NoNewPrivileges=no` over Omakure's own unit, as a drop-in and never an edit: the unit is rewritten by every reinstall, and a household that upgrades Omakure must not silently lose its wire
+- prints the line to carry back
+
+The service failing to start is said and is not the pairing failing. Everything above it is the part that is hard to get right; a machine with no systemd still has its identity, its trust and its config, and throwing all of that away because nothing started would be the wrong trade.
+
+### Flags
+- **`--invite <line>`** — The line `omahouse machine invite` printed
+- **`--at <host:port>`** — Where this computer will answer
+- **`--name <name>`** — What this computer calls itself
+- **`--battery <name>`** — The Battery it may be cued for; omahouse by default
+
 ## `omahouse machine add`
 
-- **Usage:** `omahouse machine add [--node <id>] [--at <host:port>]`
+- **Usage:** `omahouse machine add [FLAGS]`
 
 Write a computer down, or write down more about one.
 
@@ -247,9 +301,14 @@ Both `--node` and `--at` are optional, because there is a real state between own
 
 Writing one down again updates it, which is how a machine named before it was paired becomes reachable. A field left off keeps what the file had: this verb never silently forgets something already written.
 
+`--pair` is the other half of the walk and does more than write the file down. It trusts that machine as a Performer here, writes it into this machine's own peer list, and starts the service -- because trusting a computer and knowing where it is are two different files, and a name written down for a machine this one cannot speak to is exactly the state `reachable` exists to deny. The trust goes first and the list after: the list is a note to self and can be written again in a second.
+
+It takes the name from the line when none is given, and refuses `--node` or `--at` beside it. Those would be somebody correcting a value they cannot have checked, and what that buys is a peer trusted under one identity and looked for at another.
+
 ### Flags
 - **`--node <id>`** — The Omakure node identity, like omk1_1c6eeda142
 - **`--at <host:port>`** — Where its wire answers, like 192.168.1.20:7879
+- **`--pair <line>`** — The line `omahouse machine prepare` printed
 
 ## `omahouse machine remove`
 

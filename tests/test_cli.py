@@ -17,6 +17,7 @@ every run gets, whether or not the case is about `watch`.
 A verb that parses and does nothing is indistinguishable from one that works
 until somebody depends on it."""
 
+import base64
 import grp
 import json
 import os
@@ -2459,6 +2460,98 @@ def check_the_machine_verbs_refuse_what_they_cannot_do(box):
     assert "twice" in twice.stderr, twice.stderr
 
 
+def a_pairing_line(name="the study", node="omk1_abc123", key="mHf6yPqk",
+                   cert="30820122300d", at="192.168.1.10:7879"):
+    """The line one machine prints for another, built here rather than asked for.
+
+    Building it in the test is the point: `machine invite` needs a real Omakure
+    to print one, and what these cases are about is what happens to a line after
+    a person has carried it. Writing the format out twice is what makes a change
+    to it fail here instead of failing between two computers in somebody's house.
+    """
+    document = json.dumps({"name": name, "node": node, "key": key,
+                           "cert": cert, "at": at},
+                          separators=(",", ":")).encode()
+    return "omahouse-pair-1." + base64.urlsafe_b64encode(document).decode().rstrip("=")
+
+
+def check_pairing_refuses_a_line_that_did_not_arrive_whole(box):
+    """The walk between two computers, and everything that can go wrong on it.
+
+    None of this needs an Omakure, and that is deliberate: the failures worth
+    catching are the ones a person causes by copying, and they have to be caught
+    before anything is written. A line that arrived in pieces must be refused as
+    pieces, not trusted as half a certificate.
+    """
+    # An address is not optional, and it is not guessed. A machine cannot know
+    # which of its interfaces the household will reach it on.
+    for wrong, says in (
+        (("machine", "invite"), "--at <host:port>"),
+        (("machine", "invite", "--at", "192.168.1.10"), "--at <host:port>"),
+        (("machine", "invite", "--at", "192.168.1.10:0"), "--at <host:port>"),
+        (("machine", "prepare", "--at", "10.0.0.2:7879"), "--invite <line>"),
+    ):
+        said = box.run(*wrong)
+        assert said.returncode == 1, f"{' '.join(wrong)} came back {said.returncode}"
+        assert says in said.stderr, said.stderr
+
+    # A line that is not one says so by name, rather than failing later inside
+    # a trust registry.
+    whole = a_pairing_line()
+    for line, says in (
+        ("omk1_abc123", "omahouse-pair-1."),
+        (whole[:len(whole) // 2], "damaged"),
+        (a_pairing_line(cert=""), "certificate"),
+        (a_pairing_line(at="192.168.1.10"), "host:port"),
+        (a_pairing_line(node=""), "names no node"),
+    ):
+        said = box.run("machine", "prepare", "--invite", line, "--at", "10.0.0.2:7879")
+        assert said.returncode == 1, f"{line[:40]} came back {said.returncode}"
+        assert says in said.stderr, said.stderr
+
+    # And the same reading on the way back.
+    said = box.run("machine", "add", "laptop", "--pair", whole[:20])
+    assert said.returncode == 1, said.stdout
+    assert "damaged" in said.stderr, said.stderr
+
+    # A `--node` beside a `--pair` is somebody correcting a value they cannot
+    # have checked, and what it buys is a peer trusted under one identity and
+    # looked for at another.
+    said = box.run("machine", "add", "laptop", "--pair", whole,
+                   "--node", "omk1_something_else")
+    assert said.returncode == 1, said.stdout
+    assert "not both" in said.stderr, said.stderr
+
+
+def check_pairing_says_when_there_is_no_omakure_to_pair_with(box):
+    """The one thing that has to be installed first, named as itself.
+
+    Every verb below this would fail on the same missing thing with a different
+    sentence -- `node path is insecure`, `io_failed: Permission denied` -- and
+    none of those name the installer. So the question is asked once, up front,
+    and answered with the line to run.
+    """
+    nowhere = box.root / "no-omakure-here"
+    nowhere.mkdir()
+    against = {"OMAHOUSE_OMAKURE_BIN": str(nowhere / "omakure"),
+               "OMAHOUSE_OMAKURE_CONFIG_DIR": str(nowhere)}
+
+    said = box.run("machine", "invite", "--at", "192.168.1.10:7879", extra_env=against)
+    # Exit 2 and not 1: something it was asked about is not there, which is what
+    # tells a script "install it" from "you typed it wrong".
+    assert said.returncode == 2, said.stdout
+    assert "no omakure on this machine" in said.stderr, said.stderr
+    assert "--install-node-service" in said.stderr, said.stderr
+
+    # And nothing was written on the way to finding out.
+    assert not (nowhere / "node.toml").exists(), "a config was written anyway"
+
+    said = box.run("machine", "prepare", "--invite", a_pairing_line(),
+                   "--at", "10.0.0.2:7879", extra_env=against)
+    assert said.returncode == 2, said.stdout
+    assert "no omakure on this machine" in said.stderr, said.stderr
+
+
 def check_the_house_adds_up_what_every_machine_spent(box):
     """What the house spent, as opposed to what this computer spent.
 
@@ -2820,6 +2913,8 @@ def main():
         check_the_house_adds_up_what_every_machine_spent,
         check_the_house_refuses_what_it_cannot_add_up,
         check_the_machine_verbs_refuse_what_they_cannot_do,
+        check_pairing_refuses_a_line_that_did_not_arrive_whole,
+        check_pairing_says_when_there_is_no_omakure_to_pair_with,
         check_the_removal_covers_what_the_install_makes,
         check_the_reading_verbs_write_nothing,
     ]

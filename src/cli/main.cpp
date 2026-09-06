@@ -3,10 +3,13 @@
 #include "Focus.h"
 #include "FocusFile.h"
 #include "Ledger.h"
+#include "NodeConfig.h"
 #include "Notify.h"
+#include "Omakure.h"
 #include "Fleet.h"
 #include "Furniture.h"
 #include "FurnitureFile.h"
+#include "Pairing.h"
 #include "Paths.h"
 #include "Presence.h"
 #include "Proc.h"
@@ -19,6 +22,8 @@
 #include <QCoreApplication>
 #include <QDate>
 #include <QDateTime>
+#include <QFile>
+#include <QSysInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -97,6 +102,16 @@ struct Options {
     /// paired, which is the state between owning it and reaching it.
     QString node;
     QString at;
+    /// The one line the other machine printed. `--invite` is what a machine
+    /// being prepared is handed, `--pair` is what comes back; two names rather
+    /// than one because the direction is the whole meaning, and a line pasted
+    /// the wrong way round has to be refused by the flag rather than by a trust
+    /// registry an hour later.
+    QString invite;
+    QString pair;
+    /// The Battery whose scripts a prepared machine will run when cued. Named
+    /// rather than assumed, because it is the widest thing pairing turns on.
+    QString battery;
     /// How long `watch` should keep going before it stops of its own accord.
     ///
     /// The middle ground between `--once`, which measures a single instant, and
@@ -188,6 +203,9 @@ bool parseOptions(const QStringList &args, Options *options, QStringList *positi
         {"--node", &Options::node, "an Omakure node id, like omk1_1c6eeda142"},
         {"--at", &Options::at, "where its wire answers, like 192.168.1.20:7879"},
         {"--for", &Options::forSeconds, "a number of seconds, like 60"},
+        {"--invite", &Options::invite, "the line the operator's machine printed"},
+        {"--pair", &Options::pair, "the line the prepared machine printed"},
+        {"--battery", &Options::battery, "a Battery name, like omahouse"},
     };
     struct Flag {
         const char *name;
@@ -1506,14 +1524,344 @@ int cmdMachines(const Globals &g)
     return kOk;
 }
 
+// -- pairing -----------------------------------------------------------------
+//
+// Two machines with no prior channel, brought to trust each other by a person
+// who walks between them. That walk is the design and not a limitation: Omakure
+// checks a peer against an identity it was given beforehand, so somebody has to
+// carry the identity, and the only question is whether they carry it or type it.
+//
+// Three commands, in the order a person actually moves:
+//
+//   1. `machine invite` on the operator's computer, which prints a line.
+//   2. `machine prepare --invite <line>` on the new computer, with the operator
+//      sitting at it -- which is exactly where they already are, because they
+//      just installed Omarchy on it.
+//   3. `machine add <name> --pair <line>` back on the operator's computer.
+//
+// What that replaces is the seven steps `vm/cases/the_two_machines_trust_each_other.py`
+// found by getting each of them wrong first: node operations run as the wrong
+// account leaving root-owned locks, a `node init` before its config file exists,
+// a config missing `version` and `[node]`, a `node serve` with no tokens file,
+// the wire refusing a non-loopback bind, the trust exchange in both directions,
+// and one sudoers line. Every one of them is a failure that reads like a
+// networking problem and is not.
+
+/// Declared here and defined with the rest of the writing verbs, which come
+/// later in this file. The machine verbs write two of the machine's own roots
+/// and want the same refusal every other writing verb gives.
+bool mayWrite(const QString &verb, const QString &path, bool theSystems, const Globals &g);
+
+/// Where the wire listens, worked out from the address a machine says it
+/// answers at. Every interface, on the port it named: a machine cannot know
+/// which of its addresses the household will reach it on, and asking for two
+/// numbers that have to agree is asking for two numbers that will not.
+QString wireBindFor(const QString &endpoint)
+{
+    return QStringLiteral("0.0.0.0%1")
+            .arg(endpoint.mid(endpoint.lastIndexOf(QLatin1Char(':'))));
+}
+
+/// Whether the Omakure this run would touch is the machine's own.
+bool omakureConfigIsTheSystems()
+{
+    return Omakure::configDir() == QLatin1String("/etc/omakure");
+}
+
+/// `/etc/sudoers.d`, or `$OMAHOUSE_SUDOERS_DIR`. The same door every other root
+/// in `src/sys` has, and for the same reason: this file is the one that gives
+/// an account a route to root, and no test of it may write the real one.
+QString sudoersFile()
+{
+    const QByteArray set = qgetenv("OMAHOUSE_SUDOERS_DIR");
+    const QString dir = set.isEmpty() ? QStringLiteral("/etc/sudoers.d")
+                                      : QString::fromLocal8Bit(set);
+    return dir + QStringLiteral("/omahouse-node");
+}
+
+/// This machine's Omakure config as omahouse last wrote it, or defaults.
+NodeConfig currentNodeConfig()
+{
+    NodeConfig config;
+    QFile file(Omakure::nodeConfigFile());
+    if (file.open(QIODevice::ReadOnly)) {
+        readRenderedNodeConfig(QString::fromUtf8(file.readAll()), &config);
+        file.close();
+    }
+    return config;
+}
+
+/// The Omakure that has to be there before any of this means anything, and the
+/// line to run when it is not.
+bool omakureIsReady(const QString &verb)
+{
+    QString why;
+    if (Omakure::installed(&why))
+        return true;
+    fail(QStringLiteral("%1: %2.").arg(verb, why));
+    fail(QStringLiteral("%1  Omakure is what carries this between machines. "
+                        "Install it with its own installer first:")
+                 .arg(QString(verb.size(), QLatin1Char(' '))));
+    fail(QStringLiteral("%1    sudo omakure-install --install-node-service")
+                 .arg(QString(verb.size(), QLatin1Char(' '))));
+    return false;
+}
+
+int cmdMachineInvite(const Globals &g, const Options &options)
+{
+    const QString verb = QStringLiteral("machine invite");
+    if (options.at.isEmpty() || !looksLikeEndpoint(options.at)) {
+        fail(QStringLiteral("%1: --at <host:port>, where the other machines will "
+                            "reach this one — like 192.168.1.10:7879")
+                     .arg(verb));
+        return kUsage;
+    }
+    if (!mayWrite(verb, Omakure::nodeConfigFile(), omakureConfigIsTheSystems(), g))
+        return kUsage;
+    if (!omakureIsReady(verb))
+        return kMissing;
+
+    int status = kOk;
+    Fleet fleet;
+    if (!loadMachines(&fleet, &status))
+        return status;
+
+    // Rendered whole, with every machine already paired still in it. This verb
+    // is run again whenever the operator's address changes, and a rewrite that
+    // dropped the peers would be a household whose computers trust each other
+    // and cannot find each other.
+    NodeConfig config = currentNodeConfig();
+    if (!options.name.isEmpty())
+        config.displayName = options.name;
+    if (config.displayName.isEmpty())
+        config.displayName = QSysInfo::machineHostName();
+    config.directBind = wireBindFor(options.at);
+    config.staticPeers.clear();
+    // No Batteries, and that is the point of this side. A Conductor that can be
+    // cued back is a Conductor somebody took.
+    config.cueBatteries.clear();
+    for (const Machine &machine : fleet.all) {
+        if (machine.reachable())
+            config.staticPeers.append(staticPeer(machine.nodeId, machine.endpoint));
+    }
+
+    QString error;
+    if (!Omakure::writeSystemFile(Omakure::nodeConfigFile(), renderNodeConfig(config),
+                                  Omakure::account(), 0640, &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+
+    QString nodeId;
+    QString key;
+    QString whyNot;
+    const bool had = Omakure::identity(&nodeId, &key, &whyNot) && !nodeId.isEmpty();
+    if (!had && !Omakure::initialise(&error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+
+    Pairing mine;
+    if (!Omakure::describe(options.at, &mine, &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+    mine.name = config.displayName;
+    const QString line = encodePairing(mine);
+
+    if (g.json) {
+        printJson(QJsonObject {{QStringLiteral("name"), mine.name},
+                               {QStringLiteral("nodeId"), mine.nodeId},
+                               {QStringLiteral("endpoint"), mine.endpoint},
+                               {QStringLiteral("madeIdentity"), !had},
+                               {QStringLiteral("invite"), line}});
+        return kOk;
+    }
+
+    if (!had) {
+        out() << QStringLiteral("This machine now has an Omakure identity of its own: "
+                                "%1.\n").arg(mine.nodeId);
+    }
+    out() << QStringLiteral("%1 is %2, answering at %3.\n\n")
+                 .arg(mine.name, mine.nodeId, mine.endpoint);
+    out() << QStringLiteral("Take this line to the computer you are adding, and run "
+                            "there:\n\n");
+    out() << QStringLiteral("  sudo omahouse machine prepare --at <that computer>:%1 "
+                            "\\\n    --invite %2\n\n")
+                 .arg(options.at.mid(options.at.lastIndexOf(QLatin1Char(':')) + 1), line);
+    // Said plainly, because the line looks like a secret and being careful with
+    // it costs a household nothing until they are careful with the wrong thing.
+    out() << QStringLiteral("There is no secret in that line: a node id, a public key, "
+                            "a certificate\nand an address, all of them public. What it "
+                            "buys is not having to type them.\n");
+    return kOk;
+}
+
+int cmdMachinePrepare(const Globals &g, const Options &options)
+{
+    const QString verb = QStringLiteral("machine prepare");
+    Pairing conductor;
+    QString error;
+    if (options.invite.isEmpty()) {
+        fail(QStringLiteral("%1: --invite <line>, the line `omahouse machine invite` "
+                            "printed on the computer that will administer this one")
+                     .arg(verb));
+        return kUsage;
+    }
+    if (!decodePairing(options.invite, &conductor, &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+    if (options.at.isEmpty() || !looksLikeEndpoint(options.at)) {
+        fail(QStringLiteral("%1: --at <host:port>, where this computer will answer — "
+                            "like 192.168.1.20:7879")
+                     .arg(verb));
+        return kUsage;
+    }
+    if (!mayWrite(verb, Omakure::nodeConfigFile(), omakureConfigIsTheSystems(), g))
+        return kUsage;
+    if (!omakureIsReady(verb))
+        return kMissing;
+
+    NodeConfig config = currentNodeConfig();
+    if (!options.name.isEmpty())
+        config.displayName = options.name;
+    if (config.displayName.isEmpty())
+        config.displayName = QSysInfo::machineHostName();
+    config.directBind = wireBindFor(options.at);
+    config.staticPeers = {staticPeer(conductor.nodeId, conductor.endpoint)};
+    config.cueBatteries = {options.battery.isEmpty() ? QStringLiteral("omahouse")
+                                                     : options.battery};
+
+    // The config first, and always before `node init`: init runs as the node's
+    // account and `/etc/omakure` is root's, so left to create the file itself it
+    // answers `io_failed: Permission denied`.
+    if (!Omakure::writeSystemFile(Omakure::nodeConfigFile(), renderNodeConfig(config),
+                                  Omakure::account(), 0640, &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+
+    QString nodeId;
+    QString key;
+    QString whyNot;
+    const bool had = Omakure::identity(&nodeId, &key, &whyNot) && !nodeId.isEmpty();
+    if (!had && !Omakure::initialise(&error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+
+    // This side trusts the other as a Conductor: it may give orders here. The
+    // other side will trust this one as a Performer, and the asymmetry is the
+    // whole of what keeps a child's computer from cueing its parent's.
+    if (!Omakure::trust(conductor, QStringLiteral("conductor"), &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+
+    QString token;
+    QString entry;
+    if (!Omakure::generateToken(QStringLiteral("household"), &token, &entry, &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+    if (!Omakure::writeSystemFile(Omakure::configDir() + QStringLiteral("/tokens.toml"),
+                                  entry, Omakure::account(), 0640, &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+
+    // One binary, and no arguments constrained. The account that answers a Cue
+    // is the node's, it has no shell and no sudo, and omahouse's writing verbs
+    // need root because `/etc/omahouse/profiles.json` is a root daemon's file.
+    // The checks are omahouse's own; a rule naming `ALL` here would turn a Cue
+    // for one script into a route to everything.
+    const QString rule = QStringLiteral("%1 ALL=(root) NOPASSWD: %2\n")
+                                 .arg(Omakure::account(),
+                                      QCoreApplication::applicationFilePath());
+    if (!Omakure::writeSystemFile(sudoersFile(), rule, QString(), 0440, &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+
+    // Last, and allowed to fail. Everything above is the part that is hard to
+    // get right and impossible to guess at; a machine with no systemd still has
+    // its identity, its trust and its config, and calling the pairing failed
+    // because nothing started would be throwing all of that away.
+    QString notStarted;
+    const bool serving = Omakure::enableService(&notStarted);
+
+    Pairing mine;
+    if (!Omakure::describe(options.at, &mine, &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+    mine.name = config.displayName;
+    const QString line = encodePairing(mine);
+
+    if (g.json) {
+        printJson(QJsonObject {{QStringLiteral("name"), mine.name},
+                               {QStringLiteral("nodeId"), mine.nodeId},
+                               {QStringLiteral("endpoint"), mine.endpoint},
+                               {QStringLiteral("conductor"), conductor.nodeId},
+                               {QStringLiteral("battery"), config.cueBatteries.value(0)},
+                               {QStringLiteral("serving"), serving},
+                               {QStringLiteral("pair"), line}});
+        return kOk;
+    }
+
+    out() << QStringLiteral("%1 is %2, answering at %3.\n")
+                 .arg(mine.name, mine.nodeId, mine.endpoint);
+    out() << QStringLiteral("It trusts %1 to give it orders, and will run scripts from "
+                            "the %2 Battery.\n")
+                 .arg(conductor.nodeId, config.cueBatteries.value(0));
+    if (!serving) {
+        // Named rather than swallowed: everything else worked, and this is the
+        // one part somebody has to finish by hand.
+        fail(QStringLiteral("%1: %2 — the pairing is written, but nothing is "
+                            "listening yet.")
+                     .arg(verb, notStarted));
+    }
+    out() << QStringLiteral("\nTake this line back to the computer that will administer "
+                            "it, and run there:\n\n");
+    out() << QStringLiteral("  sudo omahouse machine add <a name for this one> \\\n"
+                            "    --pair %1\n")
+                 .arg(line);
+    return kOk;
+}
+
 int cmdMachineAdd(const Globals &g, const QStringList &positionals, const Options &options)
 {
-    if (positionals.isEmpty()) {
+    // A pairing line answers three of these at once -- the identity, the
+    // address, and that both are real -- so it is read before anything is
+    // demanded of the operator.
+    Pairing paired;
+    bool wasPaired = false;
+    if (!options.pair.isEmpty()) {
+        QString why;
+        if (!decodePairing(options.pair, &paired, &why)) {
+            fail(QStringLiteral("machine add: %1").arg(why));
+            return kUsage;
+        }
+        wasPaired = true;
+    }
+
+    const QString name = positionals.value(0, paired.name);
+    if (name.isEmpty()) {
         fail(QStringLiteral("machine add: which machine? A name this household would "
                             "use, like \"the kitchen laptop\""));
         return kUsage;
     }
-    const QString name = positionals.first();
+    if (wasPaired && (!options.node.isEmpty() || !options.at.isEmpty())) {
+        // Refused rather than merged. The line carries an identity and an
+        // address that were measured on the machine itself; a `--node` beside
+        // it is somebody correcting a value they cannot have checked, and the
+        // failure it buys is a peer that is trusted under one identity and
+        // looked for at another.
+        fail(QStringLiteral("machine add: --pair already says which machine and where. "
+                            "Give it, or give --node and --at, not both"));
+        return kUsage;
+    }
 
     int status = kOk;
     Fleet fleet;
@@ -1533,6 +1881,10 @@ int cmdMachineAdd(const Globals &g, const QStringList &positionals, const Option
         machine.nodeId = options.node;
     if (!options.at.isEmpty())
         machine.endpoint = options.at;
+    if (wasPaired) {
+        machine.nodeId = paired.nodeId;
+        machine.endpoint = paired.endpoint;
+    }
     if (!machine.addedAt.isValid())
         machine.addedAt = QDateTime::currentDateTime();
 
@@ -1541,13 +1893,69 @@ int cmdMachineAdd(const Globals &g, const QStringList &positionals, const Option
     else
         fleet.all.append(machine);
 
+    // Trust first, and the list after. The list is the household's note to
+    // itself and can be written again in a second; the trust registry and the
+    // node config are the machine's, and a name written down for a machine this
+    // one cannot actually speak to is the exact state `reachable` exists to
+    // deny.
     QString error;
+    bool serving = false;
+    QString notStarted;
+    if (wasPaired) {
+        if (!mayWrite(QStringLiteral("machine add"), Omakure::nodeConfigFile(),
+                      omakureConfigIsTheSystems(), g))
+            return kUsage;
+        if (!omakureIsReady(QStringLiteral("machine add")))
+            return kMissing;
+        if (!Omakure::trust(paired, QStringLiteral("performer"), &error)) {
+            fail(QStringLiteral("machine add: %1").arg(error));
+            return kUsage;
+        }
+        // And the peer written into this machine's own config, because trusting
+        // a machine and knowing where it is are two different files. `invite`
+        // wrote the rest of this one; here only the peer list moves.
+        NodeConfig config = currentNodeConfig();
+        if (config.displayName.isEmpty()) {
+            fail(QStringLiteral("machine add: this machine has no Omakure config of "
+                                "omahouse's own yet — run `omahouse machine invite "
+                                "--at <host:port>` here first"));
+            return kUsage;
+        }
+        config.staticPeers.clear();
+        config.cueBatteries.clear();
+        for (const Machine &known : fleet.all) {
+            if (known.reachable())
+                config.staticPeers.append(staticPeer(known.nodeId, known.endpoint));
+        }
+        if (!Omakure::writeSystemFile(Omakure::nodeConfigFile(), renderNodeConfig(config),
+                                      Omakure::account(), 0640, &error)) {
+            fail(QStringLiteral("machine add: %1").arg(error));
+            return kUsage;
+        }
+        serving = Omakure::enableService(&notStarted);
+    }
+
     if (!writeMachines(paths::machinesFile(), fleet.all, &error)) {
         fail(QStringLiteral("machine add: %1").arg(error));
         return kUsage;
     }
     if (g.json) {
-        printJson(machine.toJson());
+        QJsonObject answer = machine.toJson();
+        if (wasPaired) {
+            answer.insert(QStringLiteral("trusted"), true);
+            answer.insert(QStringLiteral("serving"), serving);
+        }
+        printJson(answer);
+        return kOk;
+    }
+    if (wasPaired) {
+        out() << QStringLiteral("%1: paired. This machine trusts it as a performer, "
+                                "and knows to find it at %2.\n")
+                     .arg(name, machine.endpoint);
+        if (!serving) {
+            fail(QStringLiteral("machine add: %1 — the pairing is written, but nothing "
+                                "is listening here yet.").arg(notStarted));
+        }
         return kOk;
     }
     out() << QStringLiteral("%1: %2 in the house%3.\n")
@@ -1604,8 +2012,24 @@ int cmdMachine(const Globals &g, const QStringList &positionals, const Options &
 {
     const QString what = positionals.value(0);
     const QStringList rest = positionals.mid(1);
+    if (what == QLatin1String("invite")) {
+        if (!onlyTheseOptions(options, {QStringLiteral("--at"), QStringLiteral("--name")},
+                              QStringLiteral("machine invite")))
+            return kUsage;
+        return cmdMachineInvite(g, options);
+    }
+    if (what == QLatin1String("prepare")) {
+        if (!onlyTheseOptions(options,
+                              {QStringLiteral("--invite"), QStringLiteral("--at"),
+                               QStringLiteral("--name"), QStringLiteral("--battery")},
+                              QStringLiteral("machine prepare")))
+            return kUsage;
+        return cmdMachinePrepare(g, options);
+    }
     if (what == QLatin1String("add")) {
-        if (!onlyTheseOptions(options, {QStringLiteral("--node"), QStringLiteral("--at")},
+        if (!onlyTheseOptions(options,
+                              {QStringLiteral("--node"), QStringLiteral("--at"),
+                               QStringLiteral("--pair")},
                               QStringLiteral("machine add")))
             return kUsage;
         return cmdMachineAdd(g, rest, options);
@@ -1615,7 +2039,8 @@ int cmdMachine(const Globals &g, const QStringList &positionals, const Options &
             return kUsage;
         return cmdMachineRemove(g, rest);
     }
-    fail(QStringLiteral("machine: add or remove, not '%1'").arg(what));
+    fail(QStringLiteral("machine: invite, prepare, add or remove, not '%1'")
+             .arg(what));
     return kUsage;
 }
 
@@ -3867,9 +4292,18 @@ Reading, and no privilege needed:
 Writing, and root needed — the studio gets there by pkexec:
   profile add <user>       a new profile: observing, and allowing everything
               [--name "Júlia"] [--create-user]
+  machine invite --at host:port
+                           print the line that lets another computer trust this
+                           one. Run it where the operator sits
+  machine prepare --invite <line> --at host:port
+                           put this computer under a household. Run it as root
+                           on the computer being added
+  machine add <name> --pair <line>
+                           the other end of prepare: trust that computer, and
+                           write it down
   machine add <name> [--node omk1_…] [--at host:port]
-                           write a computer down; without both it is a note to
-                           self and nothing can be asked of it yet
+                           write a computer down without pairing it; a note to
+                           self, and nothing can be asked of it yet
   machine remove <name>    out of the list. The machine itself is untouched
   profile remove <user> [--keep-account]
   profile enforce <user> --on | --off
