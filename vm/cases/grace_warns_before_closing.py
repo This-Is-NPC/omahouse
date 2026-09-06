@@ -26,14 +26,22 @@ def run(vm):
     unit = vm.launch(app)
     grace = vm.pace["grace_seconds"]
     patience = vm.pace["patience_seconds"]
-    vm.make_profile(budgets={"session": 600, app: vm.whole_minutes(vm.pace["app_seconds"])},
+    # A minute wider than the mark, and that extra minute is the whole reason
+    # this reads the way it does. A mark as big as the budget it is about is not
+    # a mark -- "one minute left" said at the very start of a one minute budget
+    # announces nothing -- so the daemon skips it, and a budget of exactly one
+    # minute with `warnAt: [1]` would go straight to grace with no warning at
+    # all. That is the right behaviour and it is what this case wants to happen
+    # *after* the warning, not instead of it.
+    minutes = vm.whole_minutes(vm.pace["app_seconds"]) + 1
+    vm.make_profile(budgets={"session": 600, app: minutes},
                     default="allow", rules=[app], grace=grace, warn_at=(1,))
-    vm.seed_ledger({app: vm.already_spent(vm.pace["app_seconds"])})
+    vm.seed_ledger({app: minutes * 60 - vm.pace["app_seconds"]})
 
     vm.start_daemon()
 
-    # The mark of `warnAt: [1]` is crossed on the first tick, because there is
-    # less than a minute left of a one minute budget.
+    # The mark of `warnAt: [1]` is crossed on the first tick, because there are
+    # seconds left of a budget two minutes wide.
     def warned():
         return "left" in vm.julia("makoctl list", check=False)[1]
 
