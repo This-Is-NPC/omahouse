@@ -89,6 +89,18 @@ QString furnitureFile()
     return configDir() + QStringLiteral("/furniture");
 }
 
+QString elsewhereDir()
+{
+    return stateDir() + QStringLiteral("/elsewhere");
+}
+
+QString elsewhereLedgerFile(const QString &machine, const QString &user, const QDate &date)
+{
+    return elsewhereDir() + QLatin1Char('/') + machine + QLatin1Char('/') + user
+        + QLatin1Char('/') + date.toString(QStringLiteral("yyyy-MM-dd"))
+        + QStringLiteral(".json");
+}
+
 QString userStateDir(const QString &user)
 {
     return stateDir() + QLatin1Char('/') + user;

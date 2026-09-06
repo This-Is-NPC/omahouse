@@ -131,4 +131,32 @@ int indexOfMachine(const QVector<Machine> &machines, const QString &name)
     return -1;
 }
 
+
+QVector<HouseBudget> consolidate(const Profile &profile,
+                                 const QVector<QPair<QString, Ledger>> &days)
+{
+    QVector<HouseBudget> house;
+    for (const Budget &budget : profile.budgets) {
+        if (budget.id.isEmpty())
+            continue;
+        HouseBudget total;
+        total.id = budget.id;
+        // The grants are each machine's own and are added with the seconds they
+        // were given on: a grant of ten minutes on the laptop raised the
+        // laptop's limit, and what the house has to know is that the day's
+        // number moved. Not summing them would make `leave` fight every grant.
+        int granted = 0;
+        for (const auto &day : days) {
+            const int seconds = day.second.secondsFor(budget.id);
+            granted += day.second.grantedSeconds(budget.id);
+            total.spent.append(Contribution {day.first, seconds});
+            total.totalSeconds += seconds;
+        }
+        if (budget.hasLimit())
+            total.limitSeconds = qMax(0, budget.dailyMinutes * 60 + granted);
+        house.append(total);
+    }
+    return house;
+}
+
 } // namespace omahouse

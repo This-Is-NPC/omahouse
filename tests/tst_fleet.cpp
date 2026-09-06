@@ -114,6 +114,109 @@ private slots:
         QVERIFY(out.isEmpty());
     }
 
+    // -- what the house spent ------------------------------------------------
+
+    void addsOneBudgetAcrossTheMachines()
+    {
+        // The profile's number is the household's: two hours in the house, not
+        // two hours per computer.
+        Profile profile;
+        profile.user = QStringLiteral("kid");
+        Budget session;
+        session.id = QStringLiteral("session");
+        session.match = QStringLiteral("*");
+        session.dailyMinutes = 120;
+        profile.budgets << session;
+
+        Ledger here;
+        here.addSeconds(QStringLiteral("session"), 1800);
+        Ledger laptop;
+        laptop.addSeconds(QStringLiteral("session"), 2400);
+
+        const QVector<HouseBudget> house = consolidate(
+            profile, {{QStringLiteral("here"), here}, {QStringLiteral("laptop"), laptop}});
+        QCOMPARE(house.size(), 1);
+        QCOMPARE(house.at(0).totalSeconds, 4200);
+        QCOMPARE(house.at(0).limitSeconds, 7200);
+        QCOMPARE(house.at(0).leftSeconds(), 3000);
+        QCOMPARE(house.at(0).spent.size(), 2);
+        QCOMPARE(house.at(0).spent.at(1).machine, QStringLiteral("laptop"));
+        QCOMPARE(house.at(0).spent.at(1).seconds, 2400);
+    }
+
+    void aGrantOnOneMachineRaisesTheHouseholdNumber()
+    {
+        // A grant of ten minutes on the laptop raised the laptop's limit, and
+        // what the house has to know is that the day's number moved. Not adding
+        // them would make `leave` fight every grant an operator gives.
+        Profile profile;
+        Budget session;
+        session.id = QStringLiteral("session");
+        session.dailyMinutes = 60;
+        profile.budgets << session;
+
+        Ledger laptop;
+        laptop.grants.append(Grant {QDateTime::currentDateTime(), QStringLiteral("root"),
+                                    QStringLiteral("session"), 10});
+
+        const QVector<HouseBudget> house =
+            consolidate(profile, {{QStringLiteral("laptop"), laptop}});
+        QCOMPARE(house.at(0).limitSeconds, 60 * 60 + 600);
+    }
+
+    void aBudgetWithNoLimitIsAddedAndNeverRunsOut()
+    {
+        Profile profile;
+        Budget counted;
+        counted.id = QStringLiteral("code");
+        profile.budgets << counted;
+
+        Ledger here;
+        here.addSeconds(QStringLiteral("code"), 900);
+        const QVector<HouseBudget> house =
+            consolidate(profile, {{QStringLiteral("here"), here}});
+        QCOMPARE(house.at(0).totalSeconds, 900);
+        QVERIFY(!house.at(0).hasLimit());
+        QCOMPARE(house.at(0).leftSeconds(), 0);
+    }
+
+    void aHouseThatWentOverHasNothingLeftAndNotLessThanNothing()
+    {
+        // A negative would only invite somebody to subtract it twice.
+        Profile profile;
+        Budget session;
+        session.id = QStringLiteral("session");
+        session.dailyMinutes = 30;
+        profile.budgets << session;
+
+        Ledger here;
+        here.addSeconds(QStringLiteral("session"), 3600);
+        const QVector<HouseBudget> house =
+            consolidate(profile, {{QStringLiteral("here"), here}});
+        QCOMPARE(house.at(0).totalSeconds, 3600);
+        QCOMPARE(house.at(0).leftSeconds(), 0);
+    }
+
+    void aMachineThatSpentNothingIsStillInTheRow()
+    {
+        // Zero from a machine is a fact -- nobody used it today -- and leaving
+        // the column out would make the row read as though it had not been
+        // asked.
+        Profile profile;
+        Budget session;
+        session.id = QStringLiteral("session");
+        session.dailyMinutes = 60;
+        profile.budgets << session;
+
+        Ledger here;
+        here.addSeconds(QStringLiteral("session"), 600);
+        const QVector<HouseBudget> house = consolidate(
+            profile, {{QStringLiteral("here"), here}, {QStringLiteral("spare"), Ledger {}}});
+        QCOMPARE(house.at(0).spent.size(), 2);
+        QCOMPARE(house.at(0).spent.at(1).seconds, 0);
+        QCOMPARE(house.at(0).totalSeconds, 600);
+    }
+
     void theWholeListSurvivesTheDisk()
     {
         QTemporaryDir dir;

@@ -1,6 +1,10 @@
 #pragma once
 
+#include "Ledger.h"
+#include "Profile.h"
+
 #include <QDateTime>
+#include <QPair>
 #include <QJsonObject>
 #include <QString>
 #include <QVector>
@@ -59,5 +63,50 @@ int indexOfMachine(const QVector<Machine> &machines, const QString &name);
 bool readMachines(const QString &path, QVector<Machine> *out, QString *error,
                   bool *missing = nullptr);
 bool writeMachines(const QString &path, const QVector<Machine> &machines, QString *error);
+
+// -- what the house spent, as opposed to what this machine spent --------------
+//
+// The profile's number is the household's number. `session: 120` means two
+// hours in the house and not two hours per computer -- so a machine on its own
+// enforces the whole thing, which is right, and a house with three of them has
+// to add the three up and push the truth back down with `leave`.
+//
+// The adding is here because it is arithmetic and belongs where the rest of the
+// arithmetic is. Getting the other machines' days to this one is transport, and
+// transport is somebody else's job.
+
+/// One machine's contribution to one budget.
+struct Contribution {
+    QString machine;
+    int seconds = 0;
+};
+
+/// One budget, added up across the house.
+struct HouseBudget {
+    QString id;
+    /// Below zero when the budget has no limit: it counts and never runs out.
+    int limitSeconds = -1;
+    /// Every machine's seconds, in the order the machines were given.
+    QVector<Contribution> spent;
+    int totalSeconds = 0;
+
+    bool hasLimit() const { return limitSeconds >= 0; }
+    /// What is left of the household's number. Zero once it is spent, never
+    /// below: a house that went over is a house with nothing left, and a
+    /// negative would only invite somebody to subtract it twice.
+    int leftSeconds() const
+    {
+        return hasLimit() ? qMax(0, limitSeconds - totalSeconds) : 0;
+    }
+};
+
+/// The day of one person across the house.
+///
+/// `days` pairs a machine's name with that machine's ledger for the day. The
+/// profile decides which budgets exist and what each is worth; a machine that
+/// spent time against a budget the profile no longer names is added all the
+/// same, because the seconds happened.
+QVector<HouseBudget> consolidate(const Profile &profile,
+                                 const QVector<QPair<QString, Ledger>> &days);
 
 } // namespace omahouse

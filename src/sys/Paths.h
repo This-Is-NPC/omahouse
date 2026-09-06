@@ -43,6 +43,17 @@ QString blockedFile();
 /// reads it. Its absence is the ordinary state of a machine that is the only
 /// one there is, which is most of them, and it is never an error.
 QString machinesFile();
+/// `<stateDir>/elsewhere/<machine>/<user>/<YYYY-MM-DD>.json` -- a day that was
+/// spent on another computer.
+///
+/// The same shape as this machine's own ledgers, one directory deeper, and read
+/// with the same reader. Whatever brings them here writes files and nothing
+/// else: a central that held a database of everybody's days would be a second
+/// answer to what a day is, and the first one is already on disk.
+QString elsewhereLedgerFile(const QString &machine, const QString &user,
+                            const QDate &date);
+/// `<stateDir>/elsewhere` -- where every other machine's days are collected.
+QString elsewhereDir();
 /// `<configDir>/furniture` -- what this machine starts for itself, one name per
 /// line, beyond the two `src/core/Furniture.h` was measured with.
 ///
