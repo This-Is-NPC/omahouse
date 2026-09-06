@@ -1869,6 +1869,62 @@ def check_watch_counts_a_faster_tick(box):
     assert box.day(TODAY)["budgets"]["session"] == 5
 
 
+def check_watch_runs_for_a_while_and_then_stops(box):
+    """`--for` is the middle ground between one cycle and forever.
+
+    It is what lets the loop be a scheduled job: something starts it every
+    minute, it works for that minute, and it ends. A tick that jams dies with
+    the minute it was in rather than jamming for a day, and what restarts it is
+    the schedule rather than `Restart=always`.
+
+    The window is asserted loosely -- it is a real clock and this is a real
+    process -- but the two ends matter: it must not return at once, which would
+    make it `--once` wearing another name, and it must not outlive its window,
+    which is the whole promise.
+    """
+    box.write_profiles(watching_profile())
+
+    began = time.monotonic()
+    ran = box.run("watch", "--for", "6", "--interval", "2")
+    took = time.monotonic() - began
+    assert ran.returncode == 0, ran.stderr
+    assert 5 <= took <= 11, f"--for 6 took {took:.1f}s"
+
+    # And it really counted while it was alive: three cycles of two seconds,
+    # give or take the one it starts with.
+    spent = box.day(TODAY)["budgets"]["session"]
+    assert 4 <= spent <= 10, f"six seconds of watching debited {spent}s"
+
+    # The window is announced, because a run somebody started by hand has to say
+    # when it intends to give the terminal back.
+    assert "for 6s" in ran.stderr, ran.stderr
+
+
+def check_watch_refuses_a_window_it_cannot_honour(box):
+    """Every way `--for` can be asked for something it would not do.
+
+    All of them are refusals with a sentence rather than a run that quietly does
+    something else, because this flag exists to be put in a schedule and nobody
+    reads the output of a scheduled job until it has already been wrong for a
+    week.
+    """
+    both = box.run("watch", "--for", "10", "--once")
+    assert both.returncode == 1
+    assert "different things" in both.stderr, both.stderr
+
+    # Shorter than one cycle is a run that would count nothing at all.
+    short = box.run("watch", "--for", "1", "--interval", "5")
+    assert short.returncode == 1
+    assert "shorter than one cycle" in short.stderr, short.stderr
+
+    # Seconds, like `--interval` and unlike `--limit`. A bare number elsewhere in
+    # this program means minutes, so `1m` here is refused rather than guessed at.
+    for wrong in ("1m", "0", "90000", "later"):
+        said = box.run("watch", "--for", wrong)
+        assert said.returncode == 1, f"--for {wrong} was accepted"
+        assert "whole seconds" in said.stderr, said.stderr
+
+
 # -- time per site ------------------------------------------------------------
 #
 # docs/design.md §5.2, end to end, with no browser on the machine and no root.
@@ -2548,6 +2604,8 @@ def main():
         check_watch_dry_run_never_writes_the_block,
         check_watch_refuses_what_it_does_not_do,
         check_watch_counts_a_faster_tick,
+        check_watch_runs_for_a_while_and_then_stops,
+        check_watch_refuses_a_window_it_cannot_honour,
         check_the_meter_writes_what_the_browser_told_it,
         check_watch_counts_a_site_only_while_somebody_is_there,
         check_watch_bills_nothing_for_a_focus_file_that_is_wrong,

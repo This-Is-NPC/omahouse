@@ -91,6 +91,15 @@ struct Options {
     /// Budget with the other kind of selector.
     QString site;
     QString interval;
+    /// How long `watch` should keep going before it stops of its own accord.
+    ///
+    /// The middle ground between `--once`, which measures a single instant, and
+    /// running forever, which needs somebody to own the process. A bounded run
+    /// is what lets the loop be a scheduled job: something starts it every
+    /// minute, it works for that minute, and it ends. A tick that jams dies with
+    /// the minute it was in instead of jamming for a day, and what restarts it
+    /// is the schedule rather than `Restart=always`.
+    QString forSeconds;
     bool createUser = false;
     bool keepAccount = false;
     bool on = false;
@@ -170,6 +179,7 @@ bool parseOptions(const QStringList &args, Options *options, QStringList *positi
         {"--budget", &Options::budget, "an id and a length of time, like minecraft=45m"},
         {"--site", &Options::site, "a domain and a length of time, like youtube.com=30m"},
         {"--interval", &Options::interval, "a number of seconds, like 2"},
+        {"--for", &Options::forSeconds, "a number of seconds, like 60"},
     };
     struct Flag {
         const char *name;
@@ -2671,6 +2681,14 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
 /// is here to catch `--interval 3600` typed for something else, not to be used.
 constexpr int kSlowestTick = 3600;
 
+/// The longest a bounded run is allowed to last: a day.
+///
+/// `--for` exists so that something else owns the restarting -- a schedule, a
+/// unit -- and a run asked to live for a week is a run whose owner has stopped
+/// owning it. A day is well past any useful window and still catches the zero
+/// somebody meant to type after `86400`.
+constexpr int kLongestRun = 86400;
+
 /// One line for the journal: when, who, and what happened.
 ///
 /// stderr, because stdout carries the `--json` stream and a person reading the
@@ -3167,6 +3185,43 @@ int cmdWatch(const Globals &g, const QStringList &positionals, const Options &op
         }
     }
 
+    // How long this run lives. Zero is forever, which is what a daemon wants and
+    // what the unit still does.
+    //
+    // A length rather than a number of cycles, because what a caller knows is
+    // when it wants the process back -- `*/1 * * * *` firing a run that lasts a
+    // minute -- and not how many times two seconds fits into that.
+    int liveFor = 0;
+    if (!options.forSeconds.isEmpty()) {
+        // Whole seconds, like `--interval` and unlike every other length in this
+        // program. The two are siblings -- both are about this loop's clock --
+        // and the duration vocabulary elsewhere reads a bare number as minutes,
+        // so `--for 60` would quietly mean an hour. A flag whose plain number
+        // means one thing here and another thing next to it is a flag somebody
+        // gets wrong once and never trusts again.
+        bool ok = false;
+        liveFor = options.forSeconds.toInt(&ok);
+        if (!ok || liveFor < 1 || liveFor > kLongestRun) {
+            fail(QStringLiteral("watch: --for wants whole seconds between 1 and %1, "
+                                "not '%2'")
+                     .arg(kLongestRun)
+                     .arg(options.forSeconds));
+            return kUsage;
+        }
+        if (liveFor < interval) {
+            fail(QStringLiteral("watch: --for %1s is shorter than one cycle of %2s, so "
+                                "nothing would be counted")
+                     .arg(liveFor)
+                     .arg(interval));
+            return kUsage;
+        }
+        if (options.once) {
+            fail(QStringLiteral("watch: --once and --for ask for different things: one "
+                                "cycle, or cycles for a while"));
+            return kUsage;
+        }
+    }
+
     // Two files now, and both are asked for before anything is read. The day's
     // ledger under /var/lib, and -- since the teeth went in -- the
     // /etc/omahouse/blocked of docs/design.md §2, which is the half of `logout` that
@@ -3280,10 +3335,25 @@ int cmdWatch(const Globals &g, const QStringList &positionals, const Options &op
         cycle(current);
     });
 
-    note(QStringLiteral("omahouse: watching %1 profile%2, a cycle every %3s%4")
+    // The clock that ends a bounded run. A single shot rather than a countdown
+    // checked in the cycle, so the last cycle a run does is a whole one: a loop
+    // that stopped halfway through deciding would leave a scope SIGTERMed and
+    // nobody to finish the sequence.
+    QTimer until(&guard);
+    if (liveFor > 0) {
+        until.setSingleShot(true);
+        until.setInterval(liveFor * 1000);
+        QObject::connect(&until, &QTimer::timeout, &guard, [] {
+            QCoreApplication::quit();
+        });
+        until.start();
+    }
+
+    note(QStringLiteral("omahouse: watching %1 profile%2, a cycle every %3s%4%5")
              .arg(profiles.all.size())
              .arg(profiles.all.size() == 1 ? QString() : QStringLiteral("s"))
              .arg(interval)
+             .arg(liveFor > 0 ? QStringLiteral(", for %1s").arg(liveFor) : QString())
              .arg(options.dryRun ? QStringLiteral(" — dry run, nothing is written or said")
                                  : QString()));
     // The first cycle now rather than one interval from now: a daemon that says
@@ -3326,10 +3396,12 @@ Writing, and root needed — the studio gets there by pkexec:
   web incognito <user> --allow | --deny
 
 The loop, which is the only verb that keeps running:
-  watch [--interval 2] [--once] [--dry-run]
+  watch [--interval 2] [--once] [--for 60] [--dry-run]
                            count what every profile has open, warn before the
                            time is out, and then close it. --dry-run decides
-                           and touches nothing, and --once is a single cycle
+                           and touches nothing, --once is a single cycle, and
+                           --for is cycles for that many seconds and then out,
+                           which is what lets a schedule own the restarting
 
 Started by the browser, and never by a person:
   meter                    Chromium's native messaging host. It appends the site
@@ -3448,7 +3520,8 @@ int dispatch(const Globals &g, const QStringList &args)
 
     if (verb == QLatin1String("watch")) {
         if (!onlyTheseOptions(options,
-                              {QStringLiteral("--interval"), QStringLiteral("--once"),
+                              {QStringLiteral("--interval"), QStringLiteral("--for"),
+                               QStringLiteral("--once"),
                                QStringLiteral("--dry-run")},
                               verb))
             return kUsage;

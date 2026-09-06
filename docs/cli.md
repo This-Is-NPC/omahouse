@@ -431,6 +431,15 @@ It stops on SIGINT and SIGTERM after the cycle it is in, which is a `rename` awa
 - **`--once`** — One cycle, and out.
 
   No loop behind it, so it is a question rather than a daemon: what does omahouse count right now, and what would it say. It prints the accounting -- the apps it found, the budgets it debited, and what is left of each -- because somebody typed it and is waiting for an answer, where the loop only writes its journal.
+- **`--for <seconds>`** — Cycles for that many seconds, and then out.
+
+  The middle ground between `--once`, which measures a single instant, and running forever, which needs somebody to own the process. A bounded run is what lets the loop be a scheduled job: something starts it every minute, it works for that minute, and it ends. A tick that jams dies with the minute it was in rather than jamming for a day, and what restarts it is the schedule rather than the unit's `Restart=always`.
+
+  It is measured in whole seconds, like `--interval` and unlike every other length in this program. The two are siblings -- both are about this loop's clock -- and the duration vocabulary elsewhere reads a bare number as minutes, so `--for 60` would quietly mean an hour. A flag whose plain number means one thing here and another next to it is a flag somebody gets wrong once and never trusts again.
+
+  The window ends between cycles and never inside one. A run cut off halfway through deciding would leave a scope SIGTERMed with nobody to finish the sequence, so the last cycle a bounded run does is a whole one and the process may outlive its window by up to a tick.
+
+  Shorter than one cycle is refused: it would count nothing at all. So is asking for it together with `--once`, because they want different things -- one cycle, or cycles for a while -- and guessing which would be guessing about somebody's evening.
 - **`--dry-run`** — Decide, and touch nothing.
 
   It reads the tree, debits the tick and prints the whole of the accounting -- including what it would have closed and who it would have refused at the next login -- and then writes no ledger, writes no `blocked`, sends no notification, signals nothing and ends nobody's session. What makes the loop safe to point at a machine nobody meant to fiscalise, and it needs no privilege of any kind.
