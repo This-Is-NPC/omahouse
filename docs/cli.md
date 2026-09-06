@@ -199,6 +199,52 @@ The settings, the rules in the order they are read -- the first that names an ap
 ### Arguments
 - **`<user>`**
 
+## `omahouse machines`
+
+- **Usage:** `omahouse machines`
+
+The computers this household owns.
+
+omahouse has always known accounts and never known machines. Everything about more than one -- reaching another computer, reading its day, telling it something -- needs a place that says which computers are ours, and `/etc/omahouse/machines.json` is it. Beside `profiles.json`, read the same way: root writes it and everybody reads it.
+
+It holds no rules, and that is the whole of its design. What a machine does is its own `profiles.json`, on the machine, because a central that held the rules would be a central whose absence is a machine with no rules at all. A list that goes missing costs a household the ability to ask about its computers; a policy that goes missing costs it the rules.
+
+No file is the ordinary state and never an error. Most households are one computer, and one that has never been told about another is not misconfigured -- it says so and comes back.
+
+## `omahouse machine`
+
+- **Usage:** `omahouse machine <SUBCOMMAND>`
+
+One computer of this household, added or forgotten.
+
+The list itself is `omahouse machines`.
+
+## `omahouse machine add`
+
+- **Usage:** `omahouse machine add [--node <id>] [--at <host:port>]`
+
+Write a computer down, or write down more about one.
+
+The name is the household's word for it -- `the kitchen laptop` -- and it is the handle every other verb takes. The node id is Omakure's, and both are kept because they answer different questions: one is what a person says out loud and the other is what a peer is checked against, so conflating them would mean renaming a computer breaks its trust.
+
+Both `--node` and `--at` are optional, because there is a real state between owning a computer and reaching it. A name on its own is a note to self, and the answer says which of the two it is rather than leaving somebody to find out when nothing responds.
+
+Writing one down again updates it, which is how a machine named before it was paired becomes reachable. A field left off keeps what the file had: this verb never silently forgets something already written.
+
+### Flags
+- **`--node <id>`** — The Omakure node identity, like omk1_1c6eeda142
+- **`--at <host:port>`** — Where its wire answers, like 192.168.1.20:7879
+
+## `omahouse machine remove`
+
+- **Usage:** `omahouse machine remove`
+
+Take a computer out of the household's list.
+
+It does nothing to the machine. Its rules, its daemon, its accounts and its day are all exactly where they were, and the answer says so -- a verb that read as `remove` and left a fiscalised computer running would be a verb somebody trusts once.
+
+Unpairing it in Omakure, and taking the rules off whoever lives there, are separate acts with separate verbs. This one only forgets.
+
 ## `omahouse allow`
 
 - **Usage:** `omahouse allow [--limit <duration>] <user> <app>`

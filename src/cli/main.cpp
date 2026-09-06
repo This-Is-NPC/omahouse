@@ -4,6 +4,7 @@
 #include "FocusFile.h"
 #include "Ledger.h"
 #include "Notify.h"
+#include "Fleet.h"
 #include "Furniture.h"
 #include "FurnitureFile.h"
 #include "Paths.h"
@@ -91,6 +92,11 @@ struct Options {
     /// Budget with the other kind of selector.
     QString site;
     QString interval;
+    /// The Omakure node identity of a machine, and where its wire answers.
+    /// Both are optional: a household can write a computer down before it is
+    /// paired, which is the state between owning it and reaching it.
+    QString node;
+    QString at;
     /// How long `watch` should keep going before it stops of its own accord.
     ///
     /// The middle ground between `--once`, which measures a single instant, and
@@ -179,6 +185,8 @@ bool parseOptions(const QStringList &args, Options *options, QStringList *positi
         {"--budget", &Options::budget, "an id and a length of time, like minecraft=45m"},
         {"--site", &Options::site, "a domain and a length of time, like youtube.com=30m"},
         {"--interval", &Options::interval, "a number of seconds, like 2"},
+        {"--node", &Options::node, "an Omakure node id, like omk1_1c6eeda142"},
+        {"--at", &Options::at, "where its wire answers, like 192.168.1.20:7879"},
         {"--for", &Options::forSeconds, "a number of seconds, like 60"},
     };
     struct Flag {
@@ -1428,6 +1436,187 @@ int cmdReport(const Globals &g, const QStringList &positionals, const QString &s
 QString yesNo(bool value)
 {
     return value ? QStringLiteral("yes") : QStringLiteral("no");
+}
+
+// -- the machines of this household -------------------------------------------
+//
+// omahouse has always known accounts and never known machines. Everything about
+// a fleet -- reaching another computer, reading its day, telling it something --
+// needs a place that says which computers are ours, and this is it.
+//
+// It holds no rules. What a machine does is its own `profiles.json`, on the
+// machine, because a central that held the rules would be a central whose
+// absence is a machine with no rules at all.
+
+struct Fleet {
+    QVector<Machine> all;
+    bool missing = false;
+};
+
+bool loadMachines(Fleet *fleet, int *status)
+{
+    QString error;
+    if (readMachines(paths::machinesFile(), &fleet->all, &error, &fleet->missing))
+        return true;
+    fail(QStringLiteral("omahouse: %1").arg(error));
+    *status = kUsage;
+    return false;
+}
+
+int cmdMachines(const Globals &g)
+{
+    int status = kOk;
+    Fleet fleet;
+    if (!loadMachines(&fleet, &status))
+        return status;
+
+    if (g.json) {
+        QJsonArray array;
+        for (const Machine &machine : fleet.all) {
+            array.append(QJsonObject {
+                {QStringLiteral("name"), machine.name},
+                {QStringLiteral("nodeId"), machine.nodeId},
+                {QStringLiteral("endpoint"), machine.endpoint},
+                {QStringLiteral("reachable"), machine.reachable()},
+            });
+        }
+        printJson(array);
+        return kOk;
+    }
+
+    if (fleet.all.isEmpty()) {
+        // The ordinary state, and said as such. Most households are one
+        // computer, and a machine that has never been told about another is not
+        // misconfigured.
+        out() << QStringLiteral("No other machines: this one is the whole house.\n");
+        return kOk;
+    }
+
+    QVector<QStringList> rows;
+    for (const Machine &machine : fleet.all) {
+        rows.append({machine.name,
+                     machine.nodeId.isEmpty() ? kNothing : machine.nodeId,
+                     machine.endpoint.isEmpty() ? kNothing : machine.endpoint,
+                     machine.reachable() ? QStringLiteral("yes")
+                                         : QStringLiteral("not paired yet")});
+    }
+    printTable({QStringLiteral("MACHINE"), QStringLiteral("NODE"),
+                QStringLiteral("AT"), QStringLiteral("REACHABLE")},
+               rows, {false, false, false, false});
+    return kOk;
+}
+
+int cmdMachineAdd(const Globals &g, const QStringList &positionals, const Options &options)
+{
+    if (positionals.isEmpty()) {
+        fail(QStringLiteral("machine add: which machine? A name this household would "
+                            "use, like \"the kitchen laptop\""));
+        return kUsage;
+    }
+    const QString name = positionals.first();
+
+    int status = kOk;
+    Fleet fleet;
+    if (!loadMachines(&fleet, &status))
+        return status;
+
+    // Writing it down again with new details is how a machine that was named
+    // before it was paired becomes reachable, so this updates rather than
+    // refusing. What it will not do is silently forget something already there:
+    // a field left off keeps what the file had.
+    const int existing = indexOfMachine(fleet.all, name);
+    Machine machine;
+    if (existing >= 0)
+        machine = fleet.all.at(existing);
+    machine.name = name;
+    if (!options.node.isEmpty())
+        machine.nodeId = options.node;
+    if (!options.at.isEmpty())
+        machine.endpoint = options.at;
+    if (!machine.addedAt.isValid())
+        machine.addedAt = QDateTime::currentDateTime();
+
+    if (existing >= 0)
+        fleet.all[existing] = machine;
+    else
+        fleet.all.append(machine);
+
+    QString error;
+    if (!writeMachines(paths::machinesFile(), fleet.all, &error)) {
+        fail(QStringLiteral("machine add: %1").arg(error));
+        return kUsage;
+    }
+    if (g.json) {
+        printJson(machine.toJson());
+        return kOk;
+    }
+    out() << QStringLiteral("%1: %2 in the house%3.\n")
+                 .arg(name,
+                      existing >= 0 ? QStringLiteral("written down again")
+                                    : QStringLiteral("written down"),
+                      machine.reachable()
+                          ? QStringLiteral(", reachable at %1").arg(machine.endpoint)
+                          : QStringLiteral(" — not paired yet, so nothing can be asked "
+                                           "of it"));
+    return kOk;
+}
+
+int cmdMachineRemove(const Globals &g, const QStringList &positionals)
+{
+    if (positionals.isEmpty()) {
+        fail(QStringLiteral("machine remove: which machine?"));
+        return kUsage;
+    }
+    const QString name = positionals.first();
+
+    int status = kOk;
+    Fleet fleet;
+    if (!loadMachines(&fleet, &status))
+        return status;
+
+    const int existing = indexOfMachine(fleet.all, name);
+    if (existing < 0) {
+        fail(QStringLiteral("machine remove: no machine called %1 in %2")
+                 .arg(name, paths::machinesFile()));
+        return kMissing;
+    }
+    fleet.all.removeAt(existing);
+
+    QString error;
+    if (!writeMachines(paths::machinesFile(), fleet.all, &error)) {
+        fail(QStringLiteral("machine remove: %1").arg(error));
+        return kUsage;
+    }
+    if (g.json) {
+        printJson(QJsonObject {{QStringLiteral("name"), name},
+                               {QStringLiteral("removed"), true}});
+        return kOk;
+    }
+    // Said plainly, because taking a machine out of the list does nothing to
+    // the machine. Its rules, its daemon and its account are all still there.
+    out() << QStringLiteral("%1: out of the house's list. Nothing on that machine "
+                            "changed — its rules and its daemon are still running.\n")
+                 .arg(name);
+    return kOk;
+}
+
+int cmdMachine(const Globals &g, const QStringList &positionals, const Options &options)
+{
+    const QString what = positionals.value(0);
+    const QStringList rest = positionals.mid(1);
+    if (what == QLatin1String("add")) {
+        if (!onlyTheseOptions(options, {QStringLiteral("--node"), QStringLiteral("--at")},
+                              QStringLiteral("machine add")))
+            return kUsage;
+        return cmdMachineAdd(g, rest, options);
+    }
+    if (what == QLatin1String("remove")) {
+        if (!onlyTheseOptions(options, {}, QStringLiteral("machine remove")))
+            return kUsage;
+        return cmdMachineRemove(g, rest);
+    }
+    fail(QStringLiteral("machine: add or remove, not '%1'").arg(what));
+    return kUsage;
 }
 
 int cmdProfileList(const Globals &g)
@@ -3379,10 +3568,15 @@ Reading, and no privilege needed:
          [--since <date>]  every day from that one, and a total
   profile list             who is under rules
   profile show <user>      the rules, the budgets and what happens when they end
+  machines                 the computers this household owns
 
 Writing, and root needed — the studio gets there by pkexec:
   profile add <user>       a new profile: observing, and allowing everything
               [--name "Júlia"] [--create-user]
+  machine add <name> [--node omk1_…] [--at host:port]
+                           write a computer down; without both it is a note to
+                           self and nothing can be asked of it yet
+  machine remove <name>    out of the list. The machine itself is untouched
   profile remove <user> [--keep-account]
   profile enforce <user> --on | --off
   profile default <user> --allow | --deny
@@ -3486,6 +3680,13 @@ int dispatch(const Globals &g, const QStringList &args)
     }
     if (verb == QLatin1String("profile"))
         return cmdProfile(g, positionals, options);
+    if (verb == QLatin1String("machines")) {
+        if (!onlyTheseOptions(options, {}, verb))
+            return kUsage;
+        return cmdMachines(g);
+    }
+    if (verb == QLatin1String("machine"))
+        return cmdMachine(g, positionals, options);
     if (verb == QLatin1String("allow")) {
         if (!onlyTheseOptions(options, {QStringLiteral("--limit")}, verb))
             return kUsage;

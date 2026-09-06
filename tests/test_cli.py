@@ -2317,6 +2317,83 @@ def check_the_time_per_site_stops_denying_the_budget_above_it(box):
     assert "never billed to a" in none, none
 
 
+def check_the_house_writes_down_its_machines(box):
+    """The list of computers a household owns, which omahouse never had.
+
+    It holds no rules. What a machine does is its own profiles.json, on the
+    machine, because a central that held the rules would be a central whose
+    absence is a machine with no rules at all.
+    """
+    # Most households are one computer, and one that has never been told about
+    # another is not misconfigured.
+    alone = box.run("machines")
+    assert alone.returncode == 0, alone.stderr
+    assert "whole house" in alone.stdout, alone.stdout
+    assert json.loads(box.run("machines", "--json").stdout) == []
+
+    # A name on its own is a note to self: the household owns that computer and
+    # cannot reach it yet, and the answer says which of the two it is.
+    noted = box.run("machine", "add", "the kitchen laptop")
+    assert noted.returncode == 0, noted.stderr
+    assert "not paired yet" in noted.stdout, noted.stdout
+
+    paired = box.run("machine", "add", "workstation",
+                     "--node", "omk1_abc123", "--at", "192.168.1.20:7879")
+    assert paired.returncode == 0, paired.stderr
+    assert "192.168.1.20:7879" in paired.stdout, paired.stdout
+
+    listed = json.loads(box.run("machines", "--json").stdout)
+    assert {m["name"] for m in listed} == {"the kitchen laptop", "workstation"}
+    assert [m["reachable"] for m in sorted(listed, key=lambda m: m["name"])] == [False, True]
+
+    # Writing one down again is how a machine that was named before it was
+    # paired becomes reachable. It updates rather than refusing, and a field
+    # left off keeps what the file had.
+    again = box.run("machine", "add", "the kitchen laptop", "--node", "omk1_def456")
+    assert again.returncode == 0, again.stderr
+    assert "written down again" in again.stdout, again.stdout
+    kitchen = [m for m in json.loads(box.run("machines", "--json").stdout)
+               if m["name"] == "the kitchen laptop"][0]
+    assert kitchen["nodeId"] == "omk1_def456", kitchen
+    assert kitchen["reachable"] is False, "an endpoint was invented for it"
+
+    # And taking one out of the list does nothing to the machine, which is said
+    # rather than left to be assumed.
+    gone = box.run("machine", "remove", "workstation")
+    assert gone.returncode == 0, gone.stderr
+    assert "Nothing on that machine changed" in gone.stdout, gone.stdout
+    assert [m["name"] for m in json.loads(box.run("machines", "--json").stdout)] \
+        == ["the kitchen laptop"]
+
+
+def check_the_machine_verbs_refuse_what_they_cannot_do(box):
+    """Every refusal, because this file is edited by hand.
+
+    What it refuses matters more than what it accepts: a household that cannot
+    say which computer it means is a household whose next verb is a guess.
+    """
+    for wrong, code, says in (
+        (("machine", "add"), 1, "which machine"),
+        (("machine", "remove"), 1, "which machine"),
+        (("machine", "remove", "nobody"), 2, "no machine called"),
+        (("machine",), 1, "add or remove"),
+        (("machine", "polish"), 1, "add or remove"),
+    ):
+        said = box.run(*wrong)
+        assert said.returncode == code, f"{' '.join(wrong)} came back {said.returncode}"
+        assert says in said.stderr, said.stderr
+
+    # Two of one name is refused where the file is read, not left for a verb to
+    # trip over later.
+    (box.config / "machines.json").write_text(json.dumps({
+        "schemaVersion": 1,
+        "machines": [{"name": "twin"}, {"name": "twin"}],
+    }))
+    twice = box.run("machines")
+    assert twice.returncode == 1
+    assert "twice" in twice.stderr, twice.stderr
+
+
 # -- the promise of the stage -------------------------------------------------
 
 # -- the package, put on a machine and taken off it --------------------------
@@ -2616,6 +2693,8 @@ def main():
         check_status_and_report_show_the_time_per_site,
         check_the_time_per_site_stops_denying_the_budget_above_it,
         check_watch_writes_presence_beside_the_budgets_and_never_into_them,
+        check_the_house_writes_down_its_machines,
+        check_the_machine_verbs_refuse_what_they_cannot_do,
         check_the_removal_covers_what_the_install_makes,
         check_the_reading_verbs_write_nothing,
     ]
