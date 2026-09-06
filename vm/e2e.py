@@ -143,6 +143,20 @@ class VM:
         self._peers = []
 
     @property
+    def build_binary(self):
+        """The omahouse this run is about, from `build/bin`.
+
+        The suite installs it on the machine under test before any case runs. A
+        case that needs it on a *second* machine -- the operator's, in the
+        pairing cases -- asks for the path here rather than knowing it, so that
+        both copies are always the same build.
+        """
+        built = ROOT / "build" / "bin" / "omahouse"
+        if not built.exists():
+            raise Blocked(f"{built} is not built. Run mise run build")
+        return built
+
+    @property
     def omakure_binary(self):
         """The statically linked omakure built from the checkout beside this one.
 
@@ -416,7 +430,7 @@ class VM:
         self.root("systemctl stop omahouse.service", check=False)
 
     def reset(self):
-        """A machine with no rules on it and nobody shut out.
+        """A machine with no rules on it, nobody shut out, and no fleet identity.
 
         Between cases and never inside one. The `blocked` goes first, because a
         case that left a name in it would be a case that stopped the next one
@@ -430,8 +444,30 @@ class VM:
             raise Blocked(f"{self.domain} is not disposable, and reset() empties "
                           "/etc/omahouse and /var/lib/omahouse")
         self.stop_daemon()
-        self.root("rm -f /etc/omahouse/blocked /etc/omahouse/profiles.json")
+        self.root("rm -f /etc/omahouse/blocked /etc/omahouse/profiles.json "
+                  "/etc/omahouse/machines.json /etc/omahouse/omakure-token")
         self.root("rm -rf /var/lib/omahouse/*")
+        # And no fleet identity either. Pairing is an omahouse verb now, and it
+        # leaves a service running, a unit, a trust registry and a 0700 secrets
+        # directory. A case that wipes that state while the service still holds
+        # it open gets `registry_invalid` from then on -- so the service goes
+        # first, and the state after.
+        self.root("systemctl disable --now omakure-node.service", check=False)
+        # Every omakure, by name and not by command line. Two cases bind an
+        # API on the same port, and one that outlived its case is the next
+        # case's `--bind` failing with the port already taken -- which surfaces
+        # as an empty answer from a machine that looks perfectly healthy.
+        #
+        # By name, because `pkill -f` matches every command line including the
+        # shell sudo started to run this one: the pattern form kills its own ssh
+        # session, the rest of the reset never runs, and the case after meets a
+        # machine nobody cleaned and a connection that timed out.
+        self.root("pkill -x omakure || true", check=False)
+        self.root("rm -rf /etc/systemd/system/omakure-node.service "
+                  "/etc/systemd/system/omakure-node.service.d /etc/omakure "
+                  "/var/lib/omakure /var/lib/omakure-workspace "
+                  "/etc/sudoers.d/omahouse-node", check=False)
+        self.root("systemctl daemon-reload", check=False)
         self.root(f"pkill -9 -u {self.subject} -f 'uwsm app|/usr/local/bin/omahouse-' "
                   "|| true", check=False)
         self.root(f"pkill -9 -u {self.subject} -x sleep || true", check=False)

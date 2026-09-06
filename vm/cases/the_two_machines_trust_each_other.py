@@ -320,7 +320,9 @@ def run(vm):
     as_node(vm, "--json battery install omahouse omahouse.enforce")
     vm.root("sed -i 's/^remote_cue_batteries = .*/remote_cue_batteries = []/' "
             "/etc/omakure/node.toml")
-    vm.root("pkill -f 'omakure node serve' || true", check=False)
+    # Bracketed, or `pkill -f` matches the shell running it and takes the ssh
+    # session with the node.
+    vm.root("pkill -f 'omakure node[ ]serve' || true", check=False)
     serve(vm, "/etc/omakure/tokens.toml")
     time.sleep(10)
     refused = cue("omahouse-grant.sh", seconds=15)
