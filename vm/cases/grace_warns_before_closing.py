@@ -69,10 +69,18 @@ def run(vm):
         raise Failed(f"the app closed {waited:.1f}s after `time is up`, and the window "
                      f"is {grace}s -- it was cut off inside its own grace")
 
+    # The warning, the window and the signal -- and not `cgroup.kill`. The app
+    # here is the polite fixture, which leaves on its SIGTERM, so a kill is
+    # exactly what must not happen; asking for one passed only on the kill an
+    # earlier case in the same boot had written. `close_takes_the_scope_not_the_session`
+    # is where the second half of the sequence belongs, because that one has an
+    # app that ignores its signal.
     journal = vm.journal()
-    for wanted in ("grace:", "SIGTERM into", "cgroup.kill on"):
+    for wanted in ("grace:", "SIGTERM into"):
         if wanted not in journal:
             raise Failed(f"the journal never says {wanted!r}:\n{journal}")
+    if "cgroup.kill on" in journal:
+        raise Failed(f"an app that leaves on its SIGTERM was killed as well:\n{journal}")
 
     print(f"      warned, then told `Time is up`, then closed {waited:.1f}s later "
           f"(window {grace}s)")
