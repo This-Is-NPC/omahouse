@@ -53,14 +53,30 @@ def run(vm):
     # And the last word before the window, which is the one that says how long
     # is left. `Time is up` with `closes in N seconds` is the GraceStarted of
     # docs/design.md §6; it has to come out while the app is still open.
+    #
+    # The notification and the scope are read in **one** call, and that is the
+    # whole of what makes this assertion mean anything. The window is three
+    # seconds wide in the quick regime and an ssh round trip is not free: asking
+    # twice measured the suite's own latency and reported it as an app cut off
+    # inside its grace.
+    seen = {}
+
     def told_the_window():
-        return "Time is up" in vm.julia("makoctl list", check=False)[1]
+        rc, out = vm.julia(
+            "makoctl list; echo '--- scopes ---'; "
+            f"find {vm.app_slice} -maxdepth 2 -name '*.scope' -printf '%p\n' "
+            "2>/dev/null || true", check=False)
+        if "Time is up" not in out:
+            return False
+        seen["window"], _, seen["scopes"] = out.partition("--- scopes ---")
+        return True
 
     vm.wait_for(told_the_window, patience, "the grace window to be announced")
     announced = time.time()
-    window = vm.julia("makoctl list", check=False)[1]
-    if unit not in vm.scopes():
-        raise Failed("the app was closed before it was told the window had opened")
+    window = seen["window"]
+    if unit not in seen["scopes"]:
+        raise Failed("the app was closed before it was told the window had opened:\n"
+                     + seen["scopes"])
 
     vm.wait_for(lambda: unit not in vm.scopes(), patience,
                 f"{unit} to close after the window")

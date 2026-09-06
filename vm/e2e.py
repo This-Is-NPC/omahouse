@@ -859,18 +859,27 @@ def wait_for_the_session(vm, timeout=None):
     # session that is still coming up, and it lost twice: once as a run blocked
     # on "mako would not start" with mako running a moment later, and once as a
     # warning that was really sent to a bus nobody was on yet.
-    if not vm.pid_of("mako"):
-        vm.julia("setsid --fork sh -c 'cd /tmp && exec mako' </dev/null >/dev/null 2>&1",
-                 check=False)
+    # Tried again on every turn, not started once and then waited for. A single
+    # attempt is a bet that the compositor already has its socket up: Hyprland's
+    # pid exists before `wayland-1` does, so the one attempt loses that race,
+    # mako exits with nothing to connect to, and polling afterwards waits out
+    # the whole boot budget for a process that will never appear.
     deadline = time.time() + (timeout or vm.pace["boot_seconds"])
     while time.time() < deadline and not vm.pid_of("mako"):
-        time.sleep(1)
+        vm.julia("setsid --fork sh -c 'cd /tmp && exec mako' </dev/null >/dev/null 2>&1",
+                 check=False)
+        time.sleep(2)
     if not vm.pid_of("mako"):
         # What is actually there, because "would not start" on its own sends
         # somebody looking at mako when the answer is usually that the session
         # it belongs to is not up yet.
+        # One attempt in the foreground, only to be able to quote why. Without
+        # it the refusal names mako when the answer is almost always something
+        # about the session it belongs to.
+        why = vm.julia("timeout 3 mako", check=False)[1].strip()[:200]
         raise Blocked(
             "mako would not start in the subject's session.\n"
+            f"    it said:   {why or '(nothing)'}\n"
             f"    any mako:  {vm.ssh('pgrep -a mako || echo none', check=False)[1].strip()}\n"
             f"    sessions:  {vm.ssh('loginctl list-sessions --no-legend', check=False)[1].strip()[:200]}\n"
             f"    hyprland:  {vm.ssh('pgrep -a Hyprland || echo none', check=False)[1].strip()}")
