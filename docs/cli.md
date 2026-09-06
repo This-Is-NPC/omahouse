@@ -329,6 +329,26 @@ A budget the profile does not have is refused: time added to a counter the daemo
 - **`--session <duration>`** — More of the session: 10m
 - **`--budget <id>=<duration>`** — More of one budget: minecraft=15m
 
+## `omahouse leave`
+
+- **Usage:** `omahouse leave [--session <time>] [--budget <id=time>]`
+
+What should be left of today, rather than what to take away.
+
+The other end of `grant`, and it is a statement about the day rather than a direction of travel: `--session 30m` means thirty minutes should remain, whether that is an hour taken back or a quarter of an hour handed over.
+
+That is not a matter of taste. A household with more than one computer consolidates on a loop -- read every machine's day, add it up, push the truth back -- and "take ten minutes off" said every minute drains the day by teatime. "Leave thirty minutes" said twice is the same as said once, and a verb a loop can repeat is the only kind a loop can use. When there is nothing to do it writes nothing and says so, because a loop has to tell that apart from a failure.
+
+It lands on whole minutes, which is what a grant carries and what the report says back, and it rounds **down**: `leave 30m` leaves at most thirty minutes and never a little more. Of the two ways to be wrong, handing time back is the one nobody asked for.
+
+A budget with no limit is refused. It counts and never runs out, so there is nothing for a number to be left of, and a `-20m` against it would be a row in the report nobody can read.
+
+It writes the day's own file, so it expires with the day: tomorrow is the profile's number again, with nothing to undo.
+
+### Flags
+- **`--session <time>`** — What should be left of the session today
+- **`--budget <id=time>`** — What should be left of one budget today
+
 ## `omahouse web`
 
 - **Usage:** `omahouse web [--all-but-listed] [--only-listed] [user] <SUBCOMMAND>`

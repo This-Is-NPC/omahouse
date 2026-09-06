@@ -2845,6 +2845,155 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
     return kOk;
 }
 
+int cmdLeave(const Globals &g, const QStringList &positionals, const Options &options)
+{
+    // The other end of `grant`, and it says what should remain rather than what
+    // to take away.
+    //
+    // That is not a matter of taste. A household with more than one computer
+    // consolidates on a loop -- read every machine's day, add it up, push the
+    // truth back -- and "take ten minutes off" said every minute drains the day
+    // by teatime. "Leave thirty minutes of today" said twice is the same as
+    // said once, and a verb a loop can repeat is the only kind a loop can use.
+    if (positionals.size() != 1) {
+        fail(QStringLiteral("leave: which user? (try omahouse --help)"));
+        return kUsage;
+    }
+    const QString user = positionals.first();
+
+    const bool session = !options.session.isEmpty();
+    const bool named = !options.budget.isEmpty();
+    if (session == named) {
+        fail(QStringLiteral("leave: --session 30m, or --budget minecraft=15m. One of them."));
+        return kUsage;
+    }
+
+    QString id = QStringLiteral("session");
+    QString written = options.session;
+    if (named) {
+        const int equals = options.budget.indexOf(QLatin1Char('='));
+        if (equals <= 0 || equals == options.budget.size() - 1) {
+            fail(QStringLiteral("leave: --budget wants an id and a length of time, like "
+                                "minecraft=15m, not '%1'")
+                     .arg(options.budget));
+            return kUsage;
+        }
+        id = options.budget.left(equals);
+        written = options.budget.mid(equals + 1);
+    }
+
+    int wantMinutes = 0;
+    QString error;
+    if (!minutesFromDuration(written, &wantMinutes, &error)) {
+        fail(QStringLiteral("leave: %1").arg(error));
+        return kUsage;
+    }
+
+    const QDate today = QDate::currentDate();
+    if (!mayWrite(QStringLiteral("leave"), paths::ledgerFile(user, today),
+                  paths::stateDirIsTheSystems(), g))
+        return kUsage;
+
+    int status = kOk;
+    Profiles profiles;
+    if (!loadProfiles(&profiles, &status))
+        return status;
+    Profile *profile = profileToChange(QStringLiteral("leave"), &profiles, user, &status);
+    if (!profile)
+        return status;
+    const Budget *budget = budgetFor(profile, id);
+    if (!budget) {
+        fail(QStringLiteral("leave: %1 has no budget called %2; omahouse profile show %1 "
+                            "lists them")
+                 .arg(user, id));
+        return kMissing;
+    }
+    if (!budget->hasLimit()) {
+        // A budget with no limit counts and never runs out, so there is nothing
+        // for a number to be left of. Refused rather than written, because a row
+        // in the report saying `-20m` against a budget that cannot end would be
+        // a sentence nobody can read.
+        fail(QStringLiteral("leave: %1 has no limit, so there is nothing to leave of it. "
+                            "omahouse limit %2 --budget %1=<time> writes one")
+                 .arg(id, user));
+        return kUsage;
+    }
+
+    Ledger ledger;
+    bool missing = false;
+    if (!loadLedger(user, today, &ledger, &missing, &status))
+        return status;
+
+    const int want = wantMinutes * 60;
+    const int used = ledger.secondsFor(id);
+    const int granted = ledger.grantedSeconds(id);
+    const int daily = budget->dailyMinutes * 60;
+
+    // What the total would have to be for exactly `want` to remain, floored so
+    // that the day can never be worth less than nothing.
+    int wantGranted = qMax(-daily, want + used - daily);
+    // Whole minutes, because that is what a grant carries and what the report
+    // says back. Rounded **down**, so `leave 30m` leaves at most thirty minutes
+    // and never a little more: of the two ways to be wrong here, the one that
+    // hands time back is the one nobody asked for.
+    const int deltaSeconds = wantGranted - granted;
+    const int deltaMinutes = deltaSeconds >= 0 ? deltaSeconds / 60
+                                               : -((-deltaSeconds + 59) / 60);
+
+    if (deltaMinutes != 0) {
+        Grant grant;
+        grant.at = QDateTime::currentDateTime();
+        grant.by = operatorUser();
+        grant.budget = id;
+        grant.minutes = deltaMinutes;
+        ledger.grants.append(grant);
+
+        QString writeError;
+        if (!writeLedger(paths::ledgerFile(user, today), ledger, &writeError)) {
+            fail(QStringLiteral("leave: %1").arg(writeError));
+            return kUsage;
+        }
+    }
+
+    const int nowGranted = ledger.grantedSeconds(id);
+    const int limit = daily + nowGranted;
+    const int left = qMax(0, limit - used);
+
+    if (g.json) {
+        printJson(QJsonObject {
+            {QStringLiteral("user"), user},
+            {QStringLiteral("budget"), id},
+            {QStringLiteral("askedSeconds"), want},
+            {QStringLiteral("minutes"), deltaMinutes},
+            {QStringLiteral("by"), operatorUser()},
+            {QStringLiteral("usedSeconds"), used},
+            {QStringLiteral("grantedSeconds"), nowGranted},
+            {QStringLiteral("limitSeconds"), limit},
+            {QStringLiteral("leftSeconds"), left},
+        });
+        return kOk;
+    }
+
+    if (deltaMinutes == 0) {
+        // Said out loud, because a loop that repeats itself has to be able to
+        // tell "nothing to do" from "it did not work".
+        out() << QStringLiteral("%1: %2 already has %3 left today; nothing written.\n")
+                     .arg(user, id, humanDuration(left));
+        return kOk;
+    }
+    // The sign is spelled out in words rather than handed to
+    // `durationFromMinutes`, which answers `0m` to anything at or below zero --
+    // that is its contract everywhere else in this program, where time is only
+    // ever given, and it is not this verb's to change.
+    out() << QStringLiteral("%1: %2 of %3 left today, %4 %5.\n")
+                 .arg(user, humanDuration(left), id,
+                      durationFromMinutes(qAbs(deltaMinutes)),
+                      deltaMinutes > 0 ? QStringLiteral("handed back")
+                                       : QStringLiteral("taken back"))
+          << QStringLiteral("       by %1.\n").arg(operatorUser());
+    return kOk;
+}
+
 // -- watch -------------------------------------------------------------------
 //
 // The loop of docs/design.md §5, and the one verb of this build that keeps running.
@@ -3584,6 +3733,9 @@ Writing, and root needed — the studio gets there by pkexec:
   deny  <user> <app>                 do not let it run
   limit <user> --session 2h | --budget minecraft=45m | --site youtube.com=30m
   grant <user> --session 10m | --budget minecraft=15m
+  leave <user> --session 30m | --budget minecraft=15m
+                           what should be left of today, rather than what to
+                           take away — so a loop can say it twice
   web block <user> <domain>          do not let that site open
   web allow <user> <domain>          let it open through what is blocked
   web <user> --all-but-listed | --only-listed
@@ -3706,6 +3858,12 @@ int dispatch(const Globals &g, const QStringList &args)
                               verb))
             return kUsage;
         return cmdLimit(g, positionals, options);
+    }
+    if (verb == QLatin1String("leave")) {
+        if (!onlyTheseOptions(options, {QStringLiteral("--session"),
+                                        QStringLiteral("--budget")}, verb))
+            return kUsage;
+        return cmdLeave(g, positionals, options);
     }
     if (verb == QLatin1String("grant")) {
         if (!onlyTheseOptions(options, {QStringLiteral("--session"), QStringLiteral("--budget")},

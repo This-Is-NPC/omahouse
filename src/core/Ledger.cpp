@@ -131,9 +131,21 @@ void Ledger::addSiteSeconds(const QString &site, int amount)
 
 int Ledger::grantedSeconds(const QString &budgetId) const
 {
+    // Negative minutes count. A grant used to be a gift and nothing else, and
+    // the sum skipped anything not above zero -- which was defensive rather
+    // than meant, because there was no verb that could write one.
+    //
+    // `leave` is that verb. A household with more than one computer has one
+    // number to spend and several machines spending it, and the only way a
+    // central can push the truth down is to say what should remain here --
+    // which is a grant with a sign when what remains is less than what a
+    // machine thought.
+    //
+    // Zero is still skipped: it says nothing and would only be a row in the
+    // report for somebody to wonder about.
     int total = 0;
     for (const Grant &grant : grants) {
-        if (grant.budget == budgetId && grant.minutes > 0)
+        if (grant.budget == budgetId && grant.minutes != 0)
             total += grant.minutes * 60;
     }
     return total;

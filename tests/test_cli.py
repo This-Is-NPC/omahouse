@@ -1925,6 +1925,71 @@ def check_watch_refuses_a_window_it_cannot_honour(box):
         assert "whole seconds" in said.stderr, said.stderr
 
 
+def check_leave_says_what_is_left_and_can_be_said_twice(box):
+    """The other end of `grant`, and the property a loop needs.
+
+    A household with more than one computer consolidates on a loop: read every
+    machine's day, add it up, push the truth back. "Take ten minutes off" said
+    every minute drains the day by teatime; "leave thirty minutes of today"
+    said twice is the same as said once. Idempotence is the whole reason this
+    verb says what should remain rather than what to remove.
+    """
+    box.write_profiles(watching_profile())
+    box.write_day(TODAY, {"session": 1800})
+
+    # Two hours a day, half an hour spent: ninety minutes stand. Leaving thirty
+    # takes an hour back.
+    first = box.run("leave", USER, "--session", "30m")
+    assert first.returncode == 0, first.stderr
+    assert "30m of session left today" in first.stdout, first.stdout
+    assert "1h taken back" in first.stdout, first.stdout
+
+    # And again, and again. Nothing is written and it says so, because a loop
+    # has to be able to tell "nothing to do" from "it did not work".
+    for _ in range(2):
+        again = box.run("leave", USER, "--session", "30m")
+        assert again.returncode == 0, again.stderr
+        assert "nothing written" in again.stdout, again.stdout
+    assert len(box.day(TODAY)["grants"]) == 1, box.day(TODAY)["grants"]
+
+    # Asking for more than stands hands time back, because "what should remain"
+    # is a statement about the day and not a direction of travel.
+    more = box.run("leave", USER, "--session", "45m")
+    assert more.returncode == 0, more.stderr
+    assert "15m handed back" in more.stdout, more.stdout
+
+    minutes = [g["minutes"] for g in box.day(TODAY)["grants"]]
+    assert minutes == [-60, 15], minutes
+
+    document = json.loads(box.run("leave", USER, "--session", "1h", "--json").stdout)
+    assert document["leftSeconds"] == 3600, document
+    assert document["minutes"] == 15, document
+
+
+def check_leave_refuses_what_it_cannot_leave(box):
+    """Every refusal, because this verb is made to be driven by a machine."""
+    box.write_profiles(watching_profile())
+
+    both = box.run("leave", USER, "--session", "10m", "--budget", "code=5m")
+    assert both.returncode == 1 and "One of them" in both.stderr, both.stderr
+
+    neither = box.run("leave", USER)
+    assert neither.returncode == 1 and "One of them" in neither.stderr, neither.stderr
+
+    unknown = box.run("leave", USER, "--budget", "ghost=10m")
+    assert unknown.returncode == 2, unknown.stderr
+    assert "no budget called ghost" in unknown.stderr, unknown.stderr
+
+    # `code` counts and never runs out, so there is nothing for a number to be
+    # left of. A `-20m` against a budget that cannot end is a row nobody reads.
+    endless = box.run("leave", USER, "--budget", "code=10m")
+    assert endless.returncode == 1, endless.stderr
+    assert "no limit" in endless.stderr, endless.stderr
+
+    shapeless = box.run("leave", USER, "--budget", "session")
+    assert shapeless.returncode == 1 and "wants an id" in shapeless.stderr, shapeless.stderr
+
+
 # -- time per site ------------------------------------------------------------
 #
 # docs/design.md §5.2, end to end, with no browser on the machine and no root.
@@ -2680,6 +2745,8 @@ def main():
         check_watch_writes_the_block_and_refuses_to_end_a_session_behind_it,
         check_watch_dry_run_never_writes_the_block,
         check_watch_refuses_what_it_does_not_do,
+        check_leave_says_what_is_left_and_can_be_said_twice,
+        check_leave_refuses_what_it_cannot_leave,
         check_watch_counts_a_faster_tick,
         check_watch_runs_for_a_while_and_then_stops,
         check_watch_refuses_a_window_it_cannot_honour,
