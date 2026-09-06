@@ -143,6 +143,71 @@ class VM:
         self._peers = []
 
     @property
+    def battery_checkout(self):
+        """The omahouse Battery from the checkout beside this one.
+
+        A path, never a clone from GitHub, for the same reason the omakure
+        binary is a path: a case that pulled the published Battery would be
+        testing whatever was pushed last rather than the scripts on this disk,
+        and the two are different exactly when it matters.
+        """
+        here = ROOT.parent / "omahouse-battery"
+        if not (here / "omakure-battery.toml").exists():
+            raise Blocked(f"{here} is not a Battery checkout")
+        return here
+
+    def fresh_omakure(self):
+        """An Omakure on this machine with no identity and no state.
+
+        The parts the shipped installer would do -- the service account, the
+        directories, their modes -- done here because that installer will only
+        provision the service alongside a tokens file that already holds hashed
+        entries, and the entries are made by the node it is about to start.
+
+        From nothing, every time. `node init` refuses to replace an identity, so
+        a half-made one from an earlier attempt is a machine that can never be
+        initialised again. That state belongs to the suite rather than to the
+        machine, which is what makes wiping it honest here and wrong anywhere
+        else.
+        """
+        self.put(str(self.omakure_binary), "/tmp/omakure")
+        self.ssh("chmod +x /tmp/omakure")
+        self.root("install -m 0755 /tmp/omakure /usr/local/bin/omakure")
+        self.root("sh -c 'getent group omakure >/dev/null || groupadd --system omakure'")
+        self.root("sh -c 'id omakure >/dev/null 2>&1 || useradd --system --gid omakure "
+                  "--home-dir /var/lib/omakure-workspace --shell /usr/sbin/nologin "
+                  "omakure'")
+        self.root("systemctl disable --now omakure-node.service", check=False)
+        # Bracketed, or `pkill -f` matches the very shell running it.
+        self.root("pkill -f 'omakure node[ ]serve' || true", check=False)
+        self.root("rm -rf /etc/systemd/system/omakure-node.service "
+                  "/etc/systemd/system/omakure-node.service.d /etc/omakure "
+                  "/var/lib/omakure /var/lib/omakure-workspace")
+        self.root("systemctl daemon-reload", check=False)
+        self.root("mkdir -p /etc/omakure /var/lib/omakure /var/lib/omakure-workspace")
+        self.root("chown -R omakure:omakure /var/lib/omakure /var/lib/omakure-workspace")
+        self.root("chmod 0700 /var/lib/omakure")
+        self.root("chmod 0750 /var/lib/omakure-workspace")
+
+    def put_the_battery(self):
+        """The Battery from this disk, in a place the node's account can add."""
+        self.root("rm -rf /tmp/battery && mkdir -p /tmp/battery")
+        for path in sorted(self.battery_checkout.iterdir()):
+            if path.is_file():
+                self.put(str(path), f"/tmp/battery/{path.name}")
+        # A Battery is a git repository to Omakure, so it has to be one here.
+        self.ssh("command -v git >/dev/null || sudo pacman -S --noconfirm --needed git",
+                 timeout=300, check=False)
+        self.ssh("cd /tmp/battery && git init -q -b master && git add -A && "
+                 "git -c user.email=vm@omahouse -c user.name=vm commit -qm battery")
+        # Owned by the account that will clone it. Git refuses to read a
+        # repository owned by somebody else -- "detected dubious ownership" --
+        # and it is right to: the node's account is about to run what is in it.
+        self.root("chown -R omakure:omakure /tmp/battery")
+        self.root("chmod -R a+rX /tmp/battery")
+        return "/tmp/battery"
+
+    @property
     def build_binary(self):
         """The omahouse this run is about, from `build/bin`.
 

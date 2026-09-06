@@ -26,8 +26,15 @@ struct NodeConfig {
     /// What this node calls itself in Omakure's own status. The household's
     /// name for the machine, which is not the node id.
     QString displayName;
-    /// Where the local HTTP API answers. Loopback, always: this is the door to
-    /// everything the node can do, and it is nobody else's business.
+    /// Where the local HTTP API answers. Loopback, always, and not by our
+    /// choice: Omakure refuses to load a config whose `api.bind` is anything
+    /// else -- "api.bind must use a loopback address and a non-zero port".
+    ///
+    /// A machine that really is meant to answer its household is opened at the
+    /// unit instead, with `node serve --bind ... --allow-non-loopback`. That is
+    /// the better arrangement and it is Omakure's, not a workaround: the file
+    /// that gets copied between machines cannot carry an open door, and opening
+    /// one is a per-machine act somebody had to take.
     QString apiBind = QStringLiteral("127.0.0.1:8787");
     /// Where the wire listens. Not loopback -- that is the point of it.
     QString directBind = QStringLiteral("0.0.0.0:8788");

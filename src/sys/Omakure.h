@@ -96,21 +96,27 @@ public:
     static bool writeSystemFile(const QString &path, const QString &contents,
                                 const QString &group, int mode, QString *error);
 
-    /// Whether this machine's config puts its console on the network.
-    static bool apiOnTheNetwork();
-
     /// The drop-in that makes the shipped unit answer on the wire, and the
     /// reload and enable that follow.
     ///
     /// A drop-in and never an edit of the unit: the unit is Omakure's file, it
     /// is rewritten by every reinstall, and a household that upgrades Omakure
-    /// must not silently lose its wire. Two things are overridden and both are
-    /// deliberate. `--allow-non-loopback-direct`, because the wire binds every
-    /// address and Omakure refuses that by default -- a machine is never on the
-    /// network because somebody forgot a flag. And `NoNewPrivileges=no`, because
-    /// the account that answers a Cue reaches omahouse through one sudoers line
-    /// and `NoNewPrivileges` makes that line a no-op.
-    static bool enableService(QString *error);
+    /// must not silently lose its wire. Three things are overridden and every
+    /// one is deliberate.
+    ///
+    /// `--allow-non-loopback-direct`, because the wire binds every address and
+    /// Omakure refuses that by default -- a machine is never on the network
+    /// because somebody forgot a flag. `NoNewPrivileges=no`, because the account
+    /// that answers a Cue reaches omahouse through one sudoers line and
+    /// `NoNewPrivileges` makes that line a no-op.
+    ///
+    /// And `--bind ... --allow-non-loopback` when `consoleOnTheNetwork`, which
+    /// is the only way there is: Omakure will not load a config whose `api.bind`
+    /// is not loopback, so a console that answers the household is opened here
+    /// or nowhere. Passed in rather than inferred, because the caller is the
+    /// only one that knows -- `machine prepare` opens it and `machine invite`
+    /// does not, and a machine that guessed would be a door nobody chose.
+    static bool enableService(bool consoleOnTheNetwork, QString *error);
 
     /// A bearer for this node's own API, and the hashed line for its tokens
     /// file. `node serve` refuses to start without one at all -- "auth required:

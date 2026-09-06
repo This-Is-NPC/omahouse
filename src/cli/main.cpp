@@ -1598,6 +1598,27 @@ QString sudoersFile()
     return dir + QStringLiteral("/omahouse-node");
 }
 
+/// The one route from the node's account to root, and it names one binary.
+///
+/// Both sides need it and for the same reason. The account that runs a Battery
+/// script is the node's: it has no shell and no sudo, and omahouse's writing
+/// verbs need root because `/etc/omahouse` is a root daemon's directory. On the
+/// machine under rules that script is a Cue; on the operator's it is the
+/// scheduled job that fetches days. Neither can do its work without this line.
+///
+/// One binary, and no arguments constrained. The checks are omahouse's own, and
+/// a rule naming `ALL` here would turn one script into a route to everything.
+bool letTheNodeReachOmahouse(const QString &verb, QString *error)
+{
+    const QString rule = QStringLiteral("%1 ALL=(root) NOPASSWD: %2\n")
+                                 .arg(Omakure::account(),
+                                      QCoreApplication::applicationFilePath());
+    if (Omakure::writeSystemFile(sudoersFile(), rule, QString(), 0440, error))
+        return true;
+    fail(QStringLiteral("%1: %2").arg(verb, *error));
+    return false;
+}
+
 /// This machine's Omakure config as omahouse last wrote it, or defaults.
 NodeConfig currentNodeConfig()
 {
@@ -1741,6 +1762,11 @@ int cmdMachineInvite(const Globals &g, const Options &options)
         fail(QStringLiteral("%1: %2").arg(verb, error));
         return kUsage;
     }
+    // And the route to root, here as well as on the machines this one will
+    // administer. What runs on a schedule here -- the job that fetches every
+    // machine's day -- runs as the node's account and files what it fetched.
+    if (!letTheNodeReachOmahouse(verb, &error))
+        return kUsage;
 
     Pairing mine;
     if (!Omakure::describe(options.at, &mine, &error)) {
@@ -1810,13 +1836,6 @@ int cmdMachinePrepare(const Globals &g, const Options &options)
     if (config.displayName.isEmpty())
         config.displayName = QSysInfo::machineHostName();
     config.directBind = wireBindFor(options.at);
-    // The console goes on the network here and nowhere else. It is the one way
-    // a day can come back: Omakure's wire carries `cue_dispatch` and `cue_ack`
-    // and the ack has no body, so a Cue can tell this machine to do something
-    // and can never bring a document. Only the machine being administered opens
-    // this door -- the operator's stays on loopback, because nobody pulls from
-    // it.
-    config.apiBind = wireBindFor(apiEndpointFor(options.at));
     config.staticPeers = {staticPeer(conductor.nodeId, conductor.endpoint)};
     config.cueBatteries = {options.battery.isEmpty() ? QStringLiteral("omahouse")
                                                      : options.battery};
@@ -1857,25 +1876,20 @@ int cmdMachinePrepare(const Globals &g, const Options &options)
         return kUsage;
     }
 
-    // One binary, and no arguments constrained. The account that answers a Cue
-    // is the node's, it has no shell and no sudo, and omahouse's writing verbs
-    // need root because `/etc/omahouse/profiles.json` is a root daemon's file.
-    // The checks are omahouse's own; a rule naming `ALL` here would turn a Cue
-    // for one script into a route to everything.
-    const QString rule = QStringLiteral("%1 ALL=(root) NOPASSWD: %2\n")
-                                 .arg(Omakure::account(),
-                                      QCoreApplication::applicationFilePath());
-    if (!Omakure::writeSystemFile(sudoersFile(), rule, QString(), 0440, &error)) {
-        fail(QStringLiteral("%1: %2").arg(verb, error));
+    if (!letTheNodeReachOmahouse(verb, &error))
         return kUsage;
-    }
 
     // Last, and allowed to fail. Everything above is the part that is hard to
     // get right and impossible to guess at; a machine with no systemd still has
     // its identity, its trust and its config, and calling the pairing failed
     // because nothing started would be throwing all of that away.
     QString notStarted;
-    const bool serving = Omakure::enableService(&notStarted);
+    // The console goes on the network here and nowhere else. It is the one way
+    // a day can come back: Omakure's wire carries `cue_dispatch` and `cue_ack`
+    // and the ack has no body, so a Cue can tell this machine to do something
+    // and can never bring a document. Only the machine being administered opens
+    // this door; the operator's stays shut, because nobody pulls from it.
+    const bool serving = Omakure::enableService(true, &notStarted);
 
     Pairing mine;
     if (!Omakure::describe(options.at, &mine, &error)) {
@@ -2029,7 +2043,7 @@ int cmdMachineAdd(const Globals &g, const QStringList &positionals, const Option
             fail(QStringLiteral("machine add: %1").arg(error));
             return kUsage;
         }
-        serving = Omakure::enableService(&notStarted);
+        serving = Omakure::enableService(false, &notStarted);
 
         // The bearer last, and only once everything it is for exists. A token
         // written down for a machine this one never came to trust is a

@@ -22,6 +22,17 @@
 namespace omahouse {
 namespace {
 
+/// Where a console that answers the household listens: every address, on the
+/// port the config names for loopback. The two ports agree on purpose -- a
+/// machine whose console moved when it was opened would be a machine the
+/// pairing line points at wrongly.
+QString consoleBind()
+{
+    const QByteArray set = qgetenv("OMAHOUSE_OMAKURE_API_PORT");
+    return QStringLiteral("0.0.0.0:%1")
+            .arg(set.isEmpty() ? QStringLiteral("8787") : QString::fromLocal8Bit(set));
+}
+
 /// The workspace, which is never the state directory. See Omakure.h.
 QString workspace()
 {
@@ -348,25 +359,7 @@ bool Omakure::writeSystemFile(const QString &path, const QString &contents,
     return true;
 }
 
-/// Whether this machine's own config puts the console on the network.
-///
-/// Read back from the file rather than passed in, so the flag and the bind can
-/// never disagree: `node serve` refuses a non-loopback API without the flag,
-/// and a unit carrying the flag for a loopback bind would be a machine that
-/// looks open and is not, which is the more dangerous of the two mistakes to
-/// make about a door.
-bool Omakure::apiOnTheNetwork()
-{
-    QFile file(nodeConfigFile());
-    if (!file.open(QIODevice::ReadOnly))
-        return false;
-    NodeConfig config;
-    const bool ours = readRenderedNodeConfig(QString::fromUtf8(file.readAll()), &config);
-    file.close();
-    return ours && !config.apiBind.startsWith(QLatin1String("127."));
-}
-
-bool Omakure::enableService(QString *error)
+bool Omakure::enableService(bool consoleOnTheNetwork, QString *error)
 {
     const QString unit = QStringLiteral("omakure-node.service");
     const QString systemd = environmentOr("OMAHOUSE_SYSTEMD_DIR",
@@ -414,8 +407,11 @@ bool Omakure::enableService(QString *error)
             "ExecStart=\n"
             "ExecStart=%1 node serve --allow-non-loopback-direct%2 --workers 1\n"
             "NoNewPrivileges=no\n")
-            .arg(binary(), apiOnTheNetwork() ? QStringLiteral(" --allow-non-loopback")
-                                             : QString());
+            .arg(binary(),
+                 consoleOnTheNetwork
+                         ? QStringLiteral(" --bind %1 --allow-non-loopback")
+                                   .arg(consoleBind())
+                         : QString());
     if (!writeSystemFile(dropIn, contents, QString(), 0644, error))
         return false;
 

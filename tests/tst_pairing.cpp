@@ -179,17 +179,16 @@ private slots:
         QVERIFY2(error.contains(QStringLiteral("console")), qPrintable(error));
     }
 
-    void theConsoleOnTheNetworkIsVisibleInTheConfig()
+    void theConsoleInTheConfigIsAlwaysLoopback()
     {
-        // The unit's `--allow-non-loopback` is decided by reading this back, so
-        // the two can never disagree about whether the door is open.
-        NodeConfig open;
-        open.displayName = QStringLiteral("the kitchen laptop");
-        open.apiBind = QStringLiteral("0.0.0.0:8787");
-        NodeConfig back;
-        QVERIFY(readRenderedNodeConfig(renderNodeConfig(open), &back));
-        QCOMPARE(back.apiBind, QStringLiteral("0.0.0.0:8787"));
-        QVERIFY(!back.apiBind.startsWith(QStringLiteral("127.")));
+        // Not our choice: Omakure refuses to load a config whose `api.bind` is
+        // anything else, and it is right to. The file that gets copied between
+        // machines cannot carry an open door; opening one is a per-machine act,
+        // and it happens in the unit.
+        NodeConfig config;
+        config.displayName = QStringLiteral("the kitchen laptop");
+        QVERIFY(renderNodeConfig(config).contains(
+                QStringLiteral("bind = \"127.0.0.1:8787\"")));
     }
 
     // -- the config that line writes -----------------------------------------
