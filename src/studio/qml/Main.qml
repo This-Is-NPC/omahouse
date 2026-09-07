@@ -950,7 +950,17 @@ Window {
                         spacing: 12
                         Label {
                             width: parent.width
-                            text: "Household machines · " + win.subject
+                            // The person's name, as the status bar and
+                            // every other view say it -- not the login.
+                            // This is the only heading in the window
+                            // that names the account it is about, and
+                            // the word for an account nobody selected
+                            // is already `nobody`: an account whose
+                            // login happens to be that word would read
+                            // here as no account at all.
+                            text: win.person === null
+                                  ? "Household machines"
+                                  : "Household machines · " + win.person.name
                             font.pixelSize: 20
                         }
                         Label {
