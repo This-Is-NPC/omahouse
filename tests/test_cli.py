@@ -2496,6 +2496,44 @@ def check_a_machine_file_that_is_wrong_is_said_and_not_guessed(box):
     assert "still enforcing its own rules on its own" in said.stdout, said.stdout
 
 
+def check_link_refuses_before_it_touches_the_far_machine(box):
+    """Every refusal `machine link` can make on its own.
+
+    The order matters more than the messages: this machine has to fail before
+    anything reaches the far one. Finding out that the manager cannot describe
+    itself *after* installing a package on somebody else's computer would leave
+    that computer half linked, with no verb here that knows it.
+    """
+    nowhere = box.root / "no-omakure-here"
+    nowhere.mkdir()
+    against = {"OMAHOUSE_OMAKURE_BIN": str(nowhere / "omakure"),
+               "OMAHOUSE_OMAKURE_CONFIG_DIR": str(nowhere),
+               # An ssh that would fail loudly if it were ever reached.
+               "OMAHOUSE_SSH": str(nowhere / "no-ssh-here")}
+
+    said = box.run("machine", "link", extra_env=against)
+    assert said.returncode == 1, said.stdout
+    assert "which computer" in said.stderr, said.stderr
+
+    said = box.run("machine", "link", "arch@10.0.0.2", extra_env=against)
+    assert said.returncode == 1, said.stdout
+    assert "--at <host:port>" in said.stderr, said.stderr
+
+    # And the one that says the install is not whole. omahouse ships with
+    # omakure, so a machine with one and not the other is broken rather than
+    # missing a prerequisite -- telling somebody to install a second product
+    # would be telling them to work around their own package manager.
+    said = box.run("machine", "link", "arch@10.0.0.2", "--at", "10.0.0.1:7879",
+                   extra_env=against)
+    assert said.returncode == 2, said.stdout
+    assert "this install is not whole" in said.stderr, said.stderr
+    assert "pacman -S omahouse" in said.stderr, said.stderr
+
+    # Nothing was written, and nothing was reached.
+    assert not (box.config / "machine.json").exists(), "a kind was written anyway"
+    assert not (box.config / "machines.json").exists(), "a machine was written anyway"
+
+
 def check_the_machine_verbs_refuse_what_they_cannot_do(box):
     """Every refusal, because this file is edited by hand.
 
@@ -2506,8 +2544,9 @@ def check_the_machine_verbs_refuse_what_they_cannot_do(box):
         (("machine", "add"), 1, "which machine"),
         (("machine", "remove"), 1, "which machine"),
         (("machine", "remove", "nobody"), 2, "no machine called"),
-        (("machine",), 1, "kind, invite, prepare, add, remove or token"),
-        (("machine", "polish"), 1, "kind, invite, prepare, add, remove or token"),
+        (("machine",), 1, "link, kind, invite, prepare, add, remove or token"),
+        (("machine", "polish"), 1,
+         "link, kind, invite, prepare, add, remove or token"),
         (("machine", "token"), 1, "which machine"),
         (("machine", "token", "nobody"), 2, "nothing to read nobody with"),
     ):
@@ -2594,8 +2633,8 @@ def check_pairing_says_when_there_is_no_omakure_to_pair_with(box):
 
     Every verb below this would fail on the same missing thing with a different
     sentence -- `node path is insecure`, `io_failed: Permission denied` -- and
-    none of those name the installer. So the question is asked once, up front,
-    and answered with the line to run.
+    none of those name what is really wrong. So the question is asked once, up
+    front, and answered with the line to run.
     """
     nowhere = box.root / "no-omakure-here"
     nowhere.mkdir()
@@ -2607,7 +2646,9 @@ def check_pairing_says_when_there_is_no_omakure_to_pair_with(box):
     # tells a script "install it" from "you typed it wrong".
     assert said.returncode == 2, said.stdout
     assert "no omakure on this machine" in said.stderr, said.stderr
-    assert "--install-node-service" in said.stderr, said.stderr
+    # A broken install and not a missing prerequisite: the omahouse package
+    # depends on omakure, so the way back is the package manager.
+    assert "this install is not whole" in said.stderr, said.stderr
 
     # And nothing was written on the way to finding out.
     assert not (nowhere / "node.toml").exists(), "a config was written anyway"
@@ -3070,6 +3111,7 @@ def main():
         check_the_transport_refuses_a_day_it_should_not_file,
         check_the_house_refuses_what_it_cannot_add_up,
         check_a_machine_says_what_it_is,
+        check_link_refuses_before_it_touches_the_far_machine,
         check_a_machine_file_that_is_wrong_is_said_and_not_guessed,
         check_the_machine_verbs_refuse_what_they_cannot_do,
         check_pairing_refuses_a_line_that_did_not_arrive_whole,

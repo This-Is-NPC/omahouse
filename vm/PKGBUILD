@@ -31,7 +31,12 @@ license=('MIT')
 # them is the same silent shape as the one libnotify has: the scriptlet cannot
 # make the archive, no policy is written, and the first anybody knows is a
 # household with no time per site in the report and nothing saying why.
-depends=('qt6-base' 'qt6-declarative' 'polkit' 'libnotify' 'openssl' 'zip')
+# omakure is a dependency and not a bundle. It is its own product and stands on
+# its own; what this line buys is that installing omahouse installs everything
+# omahouse needs, in one command, with nothing for a household to go and find.
+# The same will be true of omastore when there is one to depend on.
+depends=('qt6-base' 'qt6-declarative' 'polkit' 'libnotify' 'openssl' 'zip'
+         'omakure')
 makedepends=('qt6-base' 'qt6-declarative' 'qt6-tools' 'gcc' 'make')
 # `vm/omahouse.install` is a symlink to `packaging/omahouse.install`, so the
 # scriptlet pacman runs here is the very file the repo ships and not a copy that

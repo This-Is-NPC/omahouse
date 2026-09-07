@@ -293,6 +293,36 @@ The trust is asymmetric on purpose. The new machine trusts the operator's as a C
 
 The list itself is `omahouse machines`.
 
+## `omahouse machine link`
+
+- **Usage:** `omahouse machine link [--name <name>] [--at <host:port>] <destination>`
+
+Install omahouse on another computer and link it here, in one command.
+
+This is what the whole of the pairing walk exists to make possible. A household buys a second computer, puts Omarchy on it, and the operator has ssh to it. From their own machine:
+
+    sudo omahouse machine link arch@192.168.1.20 \
+         --name "the kitchen laptop" --at 192.168.1.10:7879
+
+and that computer is installed, linked, and in the list. What it does is the three verbs of `machine invite`, `machine prepare` and `machine add --pair`, with the walking done over ssh instead of by a person carrying a line between two keyboards.
+
+**Only ssh access is needed on the far side**, which is the one thing the operator was promised would be enough. ssh is not wrapped or replaced and is given no options of its own beyond a destination: whatever their ssh already does — their keys, their config, their agent — is what this uses. The terminal is kept, so a sudo password on the far side can be typed.
+
+**One install, and nothing to go and find.** The omahouse package depends on omakure, so putting omahouse on that computer puts the wire on it too, and the browser's meter with it. It installs only when omahouse is not already there: re-linking a computer is an ordinary thing to do — an address changed, a manager was rebuilt — and it must not reinstall the package underneath somebody.
+
+**The far computer gets the whole of omahouse, not an agent.** That is the point of it. If this computer can never reach it again, whoever has root there sits at it and reads the day, hands over time, or switches the teeth off. A computer that could only be administered from somewhere else is a computer that is unadministrable exactly when something has gone wrong.
+
+The address of the far computer is taken from the destination that was just typed rather than asked for again, because that is the address which demonstrably reaches it, and two addresses somebody has to keep in agreement are two addresses that will one day disagree.
+
+Everything this machine can get wrong is refused before anything touches the far one. Finding out that the manager cannot describe itself *after* installing a package on somebody else's computer would leave that computer half linked, with no verb here that knows it.
+
+### Arguments
+- **`<destination>`** — An ssh destination, like arch@192.168.1.20
+
+### Flags
+- **`--name <name>`** — What the household calls it; its address by default
+- **`--at <host:port>`** — Where the other computers will reach this one
+
 ## `omahouse machine kind`
 
 - **Usage:** `omahouse machine kind`

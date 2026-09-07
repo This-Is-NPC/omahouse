@@ -31,6 +31,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QProcess>
 #include <QSocketNotifier>
 #include <QString>
 #include <QStringList>
@@ -1571,6 +1572,60 @@ QString wireBindFor(const QString &endpoint)
             .arg(endpoint.mid(endpoint.lastIndexOf(QLatin1Char(':'))));
 }
 
+/// The wire's port, and the one number both sides have to agree on.
+constexpr int kWirePort = 7879;
+
+/// One argument, safe to paste into a shell on the far side.
+QString shellQuoted(const QString &value)
+{
+    return QLatin1Char('\'') + QString(value).replace(QLatin1String("'"),
+                                                       QLatin1String("'\\''"))
+            + QLatin1Char('\'');
+}
+
+/// Run one command on another computer, with the operator's own ssh.
+///
+/// Not wrapped, not replaced, and given no options of its own beyond a
+/// destination: whatever their ssh already does -- their keys, their config,
+/// their agent -- is what this uses, because ssh access is the one thing they
+/// were promised would be enough.
+///
+/// `$OMAHOUSE_SSH` moves it, and that is what lets the suite prove the whole
+/// walk against a script that answers like a machine without one being there.
+bool overSsh(const QString &target, const QString &command, QString *answer,
+             QString *error)
+{
+    const QByteArray set = qgetenv("OMAHOUSE_SSH");
+    const QString program = set.isEmpty() ? QStringLiteral("ssh")
+                                          : QString::fromLocal8Bit(set);
+    QProcess asking;
+    asking.setProgram(program);
+    asking.setArguments({target, command});
+    // The far side may ask for a sudo password, and a person watching has to be
+    // able to answer it. So this is the one subprocess in omahouse that keeps
+    // the terminal it was started from.
+    asking.setProcessChannelMode(QProcess::ForwardedErrorChannel);
+    asking.setInputChannelMode(QProcess::ForwardedInputChannel);
+    asking.start();
+    if (!asking.waitForStarted(10000)) {
+        *error = QStringLiteral("cannot run %1: %2").arg(program, asking.errorString());
+        return false;
+    }
+    // Generous: this waits on a package install on somebody else's machine.
+    if (!asking.waitForFinished(600000)) {
+        asking.kill();
+        asking.waitForFinished();
+        *error = QStringLiteral("%1 did not answer in ten minutes").arg(target);
+        return false;
+    }
+    *answer = QString::fromLocal8Bit(asking.readAllStandardOutput()).trimmed();
+    if (asking.exitStatus() != QProcess::NormalExit || asking.exitCode() != 0) {
+        *error = QStringLiteral("it came back %1").arg(asking.exitCode());
+        return false;
+    }
+    return true;
+}
+
 /// Where this machine's console answers, given where its wire does.
 ///
 /// The same host, on Omakure's own API port. Derived rather than asked for: two
@@ -1639,12 +1694,16 @@ bool omakureIsReady(const QString &verb)
     QString why;
     if (Omakure::installed(&why))
         return true;
+    // A broken install and not a missing prerequisite. The omahouse package
+    // depends on omakure, so a machine with one and not the other is a machine
+    // where something took it away -- and telling somebody to go and install a
+    // second product would be telling them to work around their own package
+    // manager.
+    const QString pad(verb.size(), QLatin1Char(' '));
     fail(QStringLiteral("%1: %2.").arg(verb, why));
-    fail(QStringLiteral("%1  Omakure is what carries this between machines. "
-                        "Install it with its own installer first:")
-                 .arg(QString(verb.size(), QLatin1Char(' '))));
-    fail(QStringLiteral("%1    sudo omakure-install --install-node-service")
-                 .arg(QString(verb.size(), QLatin1Char(' '))));
+    fail(QStringLiteral("%1  omahouse ships with omakure, so this install is not "
+                        "whole. Put it back with:").arg(pad));
+    fail(QStringLiteral("%1    sudo pacman -S omahouse").arg(pad));
     return false;
 }
 
@@ -1764,9 +1823,16 @@ int cmdMachineKind(const Globals &g)
     return kOk;
 }
 
-int cmdMachineInvite(const Globals &g, const Options &options)
+/// Make this machine the household's console, and hand back the line that lets
+/// another computer trust it.
+///
+/// Extracted from `machine invite` so `machine link` can do the same thing
+/// without shelling out to omahouse and parsing its own output. Running it again
+/// is safe: it renders the config whole with every machine already paired still
+/// in the peer list, and `node init` is skipped once there is an identity.
+int becomeTheManager(const Globals &g, const QString &verb, const Options &options,
+                     Pairing *mine, bool *hadIdentity)
 {
-    const QString verb = QStringLiteral("machine invite");
     if (options.at.isEmpty() || !looksLikeEndpoint(options.at)) {
         fail(QStringLiteral("%1: --at <host:port>, where the other machines will "
                             "reach this one — like 192.168.1.10:7879")
@@ -1831,18 +1897,29 @@ int cmdMachineInvite(const Globals &g, const Options &options)
     if (!letTheNodeReachOmahouse(verb, &error))
         return kUsage;
 
-    Pairing mine;
-    if (!Omakure::describe(options.at, &mine, &error)) {
+    if (!Omakure::describe(options.at, mine, &error)) {
         fail(QStringLiteral("%1: %2").arg(verb, error));
         return kUsage;
     }
-    mine.name = config.displayName;
-    const QString line = encodePairing(mine);
+    mine->name = config.displayName;
 
     // This machine is the household's console from here on, and it says so in a
     // file rather than only in what it happens to have configured.
-    if (!rememberKind(verb, Kind::Manager, mine.name, QString()))
+    if (!rememberKind(verb, Kind::Manager, mine->name, QString()))
         return kUsage;
+    *hadIdentity = had;
+    return kOk;
+}
+
+int cmdMachineInvite(const Globals &g, const Options &options)
+{
+    const QString verb = QStringLiteral("machine invite");
+    Pairing mine;
+    bool had = false;
+    const int status = becomeTheManager(g, verb, options, &mine, &had);
+    if (status != kOk)
+        return status;
+    const QString line = encodePairing(mine);
 
     if (g.json) {
         printJson(QJsonObject {{QStringLiteral("name"), mine.name},
@@ -2172,6 +2249,121 @@ int cmdMachineAdd(const Globals &g, const QStringList &positionals, const Option
     return kOk;
 }
 
+/// The one command the whole of this exists to make possible.
+///
+/// A household buys a second computer, puts Omarchy on it, and the operator has
+/// ssh to it. From their own machine, one line:
+///
+///     sudo omahouse machine link arch@192.168.1.20 --as "the kitchen laptop" \
+///          --at 192.168.1.10:7879
+///
+/// and that computer is installed, linked, and in the list. What it does is the
+/// three verbs of the pairing walk with the walking done over ssh instead of by
+/// a person: this machine becomes the manager, the far one is prepared with the
+/// invitation, and the line that comes back is added here.
+///
+/// It is a verb and not a shell script for one reason: it already holds the
+/// invitation in memory. A script would have to run `machine invite`, parse its
+/// own output, and hope the format never changed -- three chances to be wrong
+/// about something this program already knows.
+///
+/// ssh is not wrapped or replaced. Whatever the operator's ssh already does --
+/// their keys, their config, their agent -- is what this uses, because the one
+/// thing they were promised is that ssh access is enough.
+int cmdMachineLink(const Globals &g, const QStringList &positionals,
+                   const Options &options)
+{
+    const QString verb = QStringLiteral("machine link");
+    if (positionals.isEmpty()) {
+        fail(QStringLiteral("%1: which computer? An ssh destination, like "
+                            "arch@192.168.1.20").arg(verb));
+        return kUsage;
+    }
+    const QString target = positionals.first();
+
+    // The far machine's address, taken from the destination rather than asked
+    // for again. Two addresses a person has to keep in agreement are two
+    // addresses that will one day disagree -- and the one they just typed is
+    // the one that demonstrably reaches it.
+    const QString host = target.contains(QLatin1Char('@'))
+                                 ? target.section(QLatin1Char('@'), 1)
+                                 : target;
+    if (host.isEmpty()) {
+        fail(QStringLiteral("%1: '%2' names no computer").arg(verb, target));
+        return kUsage;
+    }
+    const QString name = options.name.isEmpty() ? host : options.name;
+
+    // This machine first. A manager that could not describe itself has nothing
+    // to hand over, and finding that out after touching the far machine would
+    // leave it half linked.
+    Pairing mine;
+    bool had = false;
+    const int became = becomeTheManager(g, verb, options, &mine, &had);
+    if (became != kOk)
+        return became;
+
+    QString error;
+    QString said;
+    // Installed only when it is not there. Re-linking a computer is an ordinary
+    // thing to do -- an address changed, a manager was rebuilt -- and it must
+    // not reinstall the package underneath somebody.
+    if (!overSsh(target, QStringLiteral("command -v omahouse >/dev/null || "
+                                        "sudo pacman -S --needed --noconfirm omahouse"),
+                 &said, &error)) {
+        fail(QStringLiteral("%1: could not put omahouse on %2: %3")
+                     .arg(verb, target, error));
+        fail(QStringLiteral("%1  omahouse brings omakure and the browser's meter "
+                            "with it, so this is the only install there is.")
+                     .arg(QString(verb.size(), QLatin1Char(' '))));
+        return kUsage;
+    }
+
+    // The far machine prepares itself from the invitation and nothing else. Not
+    // this machine's node id, not its key, not its certificate -- they are all
+    // inside the one line, which is what the line is for.
+    const QString prepare =
+            QStringLiteral("sudo omahouse --json machine prepare --invite %1 "
+                           "--at %2:%3 --name %4")
+                    .arg(encodePairing(mine), host, QString::number(kWirePort),
+                         shellQuoted(name));
+    if (!overSsh(target, prepare, &said, &error)) {
+        fail(QStringLiteral("%1: %2 would not prepare itself: %3")
+                     .arg(verb, target, error));
+        return kUsage;
+    }
+
+    const QJsonObject prepared =
+            QJsonDocument::fromJson(said.toUtf8()).object();
+    Pairing theirs;
+    if (!decodePairing(prepared.value(QStringLiteral("pair")).toString(), &theirs,
+                       &error)) {
+        fail(QStringLiteral("%1: %2 answered without a usable pairing line: %3")
+                     .arg(verb, target, error));
+        return kUsage;
+    }
+
+    // And the last step is the local one this program already knows how to do.
+    Options adding;
+    adding.pair = encodePairing(theirs);
+    adding.given = {QStringLiteral("--pair")};
+    const int added = cmdMachineAdd(g, {name}, adding);
+    if (added != kOk)
+        return added;
+
+    if (g.json)
+        return kOk;
+    out() << QStringLiteral("\n%1 is linked. From here you can put an account on it "
+                            "under rules,\nand `omahouse house <user>` will add its "
+                            "day to this one's.\n").arg(name);
+    // Said because it is the reason the whole of omahouse went onto that machine
+    // rather than an agent, and somebody should know it before they need it.
+    out() << QStringLiteral("\nIf this computer ever cannot reach it, log in there "
+                            "as root: everything\nomahouse does works on that "
+                            "machine on its own.\n");
+    return kOk;
+}
+
 int cmdMachineRemove(const Globals &g, const QStringList &positionals)
 {
     if (positionals.isEmpty()) {
@@ -2253,6 +2445,13 @@ int cmdMachine(const Globals &g, const QStringList &positionals, const Options &
             return kUsage;
         return cmdMachineRemove(g, rest);
     }
+    if (what == QLatin1String("link")) {
+        if (!onlyTheseOptions(options,
+                              {QStringLiteral("--at"), QStringLiteral("--name")},
+                              QStringLiteral("machine link")))
+            return kUsage;
+        return cmdMachineLink(g, rest, options);
+    }
     if (what == QLatin1String("kind")) {
         if (!onlyTheseOptions(options, {}, QStringLiteral("machine kind")))
             return kUsage;
@@ -2263,8 +2462,8 @@ int cmdMachine(const Globals &g, const QStringList &positionals, const Options &
             return kUsage;
         return cmdMachineToken(g, rest);
     }
-    fail(QStringLiteral("machine: kind, invite, prepare, add, remove or token, "
-                        "not '%1'").arg(what));
+    fail(QStringLiteral("machine: link, kind, invite, prepare, add, remove or "
+                        "token, not '%1'").arg(what));
     return kUsage;
 }
 
@@ -4681,6 +4880,10 @@ Writing, and root needed — the studio gets there by pkexec:
   day <user> [--date YYYY-MM-DD]
                            what this computer spent, as a document another one
                            can read. Exit 2 when there is no such day
+  machine link <user@host> --at host:port [--name "the kitchen laptop"]
+                           install omahouse on another computer and link it
+                           here, over ssh. One command, and the far machine
+                           gets the whole of omahouse rather than an agent
   machine invite --at host:port
                            print the line that lets another computer trust this
                            one. Run it where the operator sits
