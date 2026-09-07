@@ -140,6 +140,7 @@ class TestStudio : public QObject
     Q_OBJECT
 
 private slots:
+    void everyQuietWordIsReadableOnEveryTheme();
     void initTestCase();
     void cleanupTestCase();
     void init();
@@ -1827,6 +1828,71 @@ void TestStudio::writesTheSubjectShots()
     emptyTheHouse();
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
     shoot(QStringLiteral("30-subject-nothing"));
+}
+
+// The quietest text in the window is still text somebody has to read.
+//
+// `dim` comes from the theme's `muted`, and `muted` is not a colour for text.
+// Measured against the twenty-two themes Omarchy ships on this machine, twenty
+// put it under 4.5:1 on that theme's own background; `matte-black` is 1.48:1,
+// and `last-horizon` sets it to the same value as `selection` -- a colour whose
+// job is to sit behind a word rather than to be one. omahouse's own fallback is
+// 2.91:1, so this is our defect and not somebody else's.
+//
+// Real themes, by their real numbers, and the assertion is the ratio and never
+// a hex: a colour a household can read is a property, and an expected colour
+// would be a copy of the implementation, rewritten every time a theme moves.
+void TestStudio::everyQuietWordIsReadableOnEveryTheme()
+{
+    struct Case { const char *name, *background, *foreground, *muted; };
+    static const Case themes[] = {
+        {"matte-black",      "#121212", "#bebebe", "#333333"},  // 1.48:1
+        {"everforest",       "#2d353b", "#d3c6aa", "#475258"},  // 1.55:1
+        {"nord",             "#2e3440", "#d8dee9", "#4c566a"},  // 1.69:1
+        {"catppuccin-latte", "#eff1f5", "#4c4f69", "#acb0be"},  // 1.91:1, a light theme
+        {"tokyo-night",      "#1a1b26", "#a9b1d6", "#414868"},  // 1.91:1
+        {"last-horizon",     "#0c0b0c", "#FAFCFB", "#584e51"},  // 2.45:1, muted == selection
+        {"omahouse's own",   "#16161e", "#c0caf5", "#565f89"},  // 2.91:1
+    };
+
+    int wereUnreadable = 0;
+    for (const Case &theme : themes) {
+        const QColor background(QLatin1String(theme.background));
+        const QColor foreground(QLatin1String(theme.foreground));
+        const QColor muted(QLatin1String(theme.muted));
+        QVERIFY2(background.isValid() && foreground.isValid() && muted.isValid(),
+                 theme.name);
+
+        if (Theme::contrast(muted, background) < Theme::kReadable)
+            ++wereUnreadable;
+
+        const QColor quiet = Theme::quietOn(muted, background, foreground);
+        const qreal given = Theme::contrast(quiet, background);
+        QVERIFY2(given >= Theme::kReadable,
+                 qPrintable(QStringLiteral("%1: the quietest word is %2:1 on its "
+                                           "own background")
+                                    .arg(QLatin1String(theme.name))
+                                    .arg(given, 0, 'f', 2)));
+
+        // And it is still the quietest thing on the screen.
+        // Strictly quieter, and not merely no louder: a floor that answered
+        // `foreground` for everything would satisfy the line above and would
+        // have taken the whole distinction away.
+        QVERIFY2(Theme::contrast(quiet, background)
+                         < Theme::contrast(foreground, background),
+                 qPrintable(QStringLiteral("%1: dim is the foreground, so nothing "
+                                           "on this screen is quiet any more")
+                                    .arg(QLatin1String(theme.name))));
+    }
+
+    // Every theme passing because every theme was already fine would be a case
+    // that never reaches the floor it exists to measure.
+    QCOMPARE(wereUnreadable, int(std::size(themes)));
+
+    // And a theme that asks for something readable is left exactly alone.
+    const QColor plain(QStringLiteral("#c0caf5"));
+    const QColor dark(QStringLiteral("#16161e"));
+    QCOMPARE(Theme::quietOn(plain, dark, plain), plain);
 }
 
 QTEST_MAIN(TestStudio)
