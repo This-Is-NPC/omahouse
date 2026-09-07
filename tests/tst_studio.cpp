@@ -993,6 +993,13 @@ void TestStudio::everyKeyOnTheSheetIsAnswered()
                 promised << binding.value(QStringLiteral("key")).toString();
         }
     }
+    // Guarded, because the list this walks is built by matching a heading, and
+    // renaming a heading is an ordinary edit to a help sheet. Empty, the loop
+    // below does nothing and the whole claim -- every key the sheet promises is
+    // answered -- evaporates with the case still green.
+    QVERIFY2(!promised.isEmpty(),
+             "the sheet has no `here, right now` group, so nothing below is checked");
+
     for (const QString &shortcut : std::as_const(promised)) {
         QVariant found;
         QMetaObject::invokeMethod(root(), "commandFor", Q_RETURN_ARG(QVariant, found),
@@ -1259,20 +1266,22 @@ void TestStudio::theWindowNeverWritesToTheMachine()
     QVERIFY2(before == after,
              "a command reached the machine without going through the CLI");
 
-    // And everything that did ask for a write asked the CLI for it, by verb.
-    QFile log(recorded);
-    if (log.open(QIODevice::ReadOnly)) {
-        const QStringList lines =
-                QString::fromUtf8(log.readAll()).split(QLatin1Char('\n'),
-                                                       Qt::SkipEmptyParts);
-        log.close();
-        for (const QString &line : lines) {
-            const QString verb = line.section(QLatin1Char(' '), 0, 0);
-            QVERIFY2(!verb.isEmpty() && !verb.startsWith(QLatin1Char('/')),
-                     qPrintable(QStringLiteral("the window ran something that is not "
-                                               "an omahouse verb: %1").arg(line)));
-        }
-    }
+    // And nothing wrote on the way in, which is not the sentence above.
+    //
+    // Performing a command opens its prompt or its confirmation; the write
+    // happens when somebody answers, and this case answers nothing -- it
+    // escapes each dialog and moves on. So no call is the correct outcome, and
+    // asserting it catches what would otherwise hide here: a command that
+    // writes before anybody confirmed.
+    //
+    // Written this way round because the first version asked whether every
+    // recorded call named a verb, and there were no recorded calls -- a loop
+    // over an empty list, green, proving nothing. Found by guarding it, which
+    // is what the omastore session had just named: what iterates and what
+    // asserts a negative do not fail on their own. That the writes which really
+    // happen go through the CLI is proved by `theWholeJobOnTheKeyboard`, which
+    // answers the dialogs.
+    QVERIFY2(!QFile::exists(recorded), "a command wrote before anybody confirmed");
 
     qputenv("OMAHOUSE_CLI", m_cli.toLocal8Bit());
     m_admin->setProperty("program", m_cli);
