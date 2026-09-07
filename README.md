@@ -97,7 +97,8 @@ day](docs/how-to-limit-the-time.md), [stop a site
 opening](docs/how-to-block-sites.md), [give a site so many minutes a
 day](docs/how-to-limit-time-on-a-site.md), [hand over more
 time](docs/how-to-hand-over-more-time.md), [read the
-day](docs/how-to-read-the-day.md), [install it and take it off
+day](docs/how-to-read-the-day.md), [link another
+computer](docs/how-to-link-another-computer.md), [install it and take it off
 again](docs/how-to-install-and-remove.md) — and every verb in full is in
 [the command line](docs/cli.md).
 

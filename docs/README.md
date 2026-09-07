@@ -27,11 +27,18 @@ it was about.
 6. [**How to hand over more time**](how-to-hand-over-more-time.md) — ten more
    minutes, with the game still open.
 
+A second computer is its own step, and needs 1 to 4 done on this one first:
+
+7. [**How to link another computer**](how-to-link-another-computer.md) — one
+   command over ssh, and one day read across both. The far computer gets the
+   whole of omahouse and not an agent, which is what makes it still work when
+   this one cannot be reached.
+
 The browser is its own half, and needs nothing above it except a profile:
 
-7. [**How to stop a site opening**](how-to-block-sites.md) — blocking, allowing,
+8. [**How to stop a site opening**](how-to-block-sites.md) — blocking, allowing,
    incognito, and the one surprise: the policy holds for the whole machine.
-8. [**How to give a site so many minutes a day**](how-to-limit-time-on-a-site.md)
+9. [**How to give a site so many minutes a day**](how-to-limit-time-on-a-site.md)
    — thirty minutes of YouTube rather than none, and why the minutes are counted
    only while somebody is in front of the screen.
 
