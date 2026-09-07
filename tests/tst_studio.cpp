@@ -52,6 +52,7 @@
 #include <QQuickWindow>
 #include <QSignalSpy>
 #include <QStyleHints>
+#include <QDirIterator>
 #include <QTemporaryDir>
 #include <QtQml>
 #include <QtTest>
@@ -152,6 +153,7 @@ private slots:
     void saysWhatIsReallyInsideAShim();
     void drawsItself();
     void theSubjectFaceHasNothingToPress();
+    void theWindowNeverWritesToTheMachine();
     void writesTheOperatorShots();
     void writesTheSubjectShots();
 
@@ -168,6 +170,11 @@ private:
     QQuickItem *awaitItem(const QString &objectName, int milliseconds = 4000);
     QQuickItem *awaitRow(const QString &listName, int index, int milliseconds = 4000);
     bool waitForWrite();
+    /// Every file under a directory, by path and by bytes.
+    ///
+    /// A fingerprint of a tree, so that "nothing was written" can be asserted
+    /// as one comparison rather than as a list of files somebody remembered.
+    static QByteArray treeUnder(const QString &directory);
     void emptyTheHouse();
     QString shotsDir() const;
     void shoot(const QString &name);
@@ -1096,6 +1103,109 @@ void TestStudio::saysWhatIsReallyInsideAShim()
 // rather than four of them, and they run the same check on every frame before
 // saving it -- which is the whole reason the check is a function and not four
 // lines in this case.
+QByteArray TestStudio::treeUnder(const QString &directory)
+{
+    QByteArray fingerprint;
+    QDirIterator walk(directory, QDir::Files, QDirIterator::Subdirectories);
+    QStringList paths;
+    while (walk.hasNext())
+        paths << walk.next();
+    // Sorted, because the walk order is the filesystem's and two identical
+    // trees would otherwise fingerprint differently on the same machine.
+    paths.sort();
+    for (const QString &path : std::as_const(paths)) {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly))
+            continue;
+        fingerprint += path.toUtf8() + '\n' + file.readAll() + '\n';
+        file.close();
+    }
+    return fingerprint;
+}
+
+void TestStudio::theWindowNeverWritesToTheMachine()
+{
+    if (!root()->property("operating").toBool())
+        QSKIP("not in wheel");
+
+    // Every command of every view, performed, with the CLI replaced by something
+    // that records and writes nothing. What is asserted afterwards is that the
+    // tree is byte for byte what it was: if any command had reached a file
+    // itself instead of going through `Admin`, that is where it would show.
+    //
+    // The window already writes only through `pkexec omahouse <verb>` -- the
+    // same CLI an operator would have typed, with the same checks and the same
+    // refusals -- and until now nothing held it to that. A second path to the
+    // machine would be a second set of refusals to keep in step, and the day it
+    // appeared no test would have noticed.
+    //
+    // The idea is not mine: the omastore window was built on this one's model
+    // and turned this argument into an assertion, which is what sent me back to
+    // write it here.
+    const QString recorder = m_tree.path() + QStringLiteral("/recording-cli");
+    const QString recorded = m_tree.path() + QStringLiteral("/recorded");
+    {
+        QFile file(recorder);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QStringLiteral("#!/bin/sh\nprintf '%s\\n' \"$*\" >> %1\nexit 0\n")
+                           .arg(recorded).toUtf8());
+        file.close();
+        QVERIFY(QFile::setPermissions(recorder,
+                                      QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                              | QFileDevice::ExeOwner));
+    }
+    qputenv("OMAHOUSE_CLI", recorder.toLocal8Bit());
+    m_admin->setProperty("program", recorder);
+
+    const QByteArray before = treeUnder(m_tree.path() + QStringLiteral("/etc"))
+            + treeUnder(m_tree.path() + QStringLiteral("/var"));
+
+    QVariantList performed;
+    for (const QVariant &view : QVariantList {0, 1, 2, 3}) {
+        QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, view));
+        settle();
+        const QVariantList commands = root()->property("commands").toList();
+        for (const QVariant &row : commands) {
+            const QVariantMap command = row.toMap();
+            if (!command.value(QStringLiteral("usable")).toBool())
+                continue;
+            QMetaObject::invokeMethod(root(), "perform", Q_ARG(QVariant, row));
+            settle();
+            performed.append(command.value(QStringLiteral("id")));
+            // Anything that opened a sheet or a field is closed again, so the
+            // next command is performed from the same standing start.
+            key(Qt::Key_Escape);
+            settle();
+        }
+    }
+    QVERIFY2(performed.size() >= 4,
+             qPrintable(QStringLiteral("only %1 commands were reachable")
+                                .arg(performed.size())));
+
+    const QByteArray after = treeUnder(m_tree.path() + QStringLiteral("/etc"))
+            + treeUnder(m_tree.path() + QStringLiteral("/var"));
+    QVERIFY2(before == after,
+             "a command reached the machine without going through the CLI");
+
+    // And everything that did ask for a write asked the CLI for it, by verb.
+    QFile log(recorded);
+    if (log.open(QIODevice::ReadOnly)) {
+        const QStringList lines =
+                QString::fromUtf8(log.readAll()).split(QLatin1Char('\n'),
+                                                       Qt::SkipEmptyParts);
+        log.close();
+        for (const QString &line : lines) {
+            const QString verb = line.section(QLatin1Char(' '), 0, 0);
+            QVERIFY2(!verb.isEmpty() && !verb.startsWith(QLatin1Char('/')),
+                     qPrintable(QStringLiteral("the window ran something that is not "
+                                               "an omahouse verb: %1").arg(line)));
+        }
+    }
+
+    qputenv("OMAHOUSE_CLI", m_cli.toLocal8Bit());
+    m_admin->setProperty("program", m_cli);
+}
+
 void TestStudio::drawsItself()
 {
     if (!root()->property("operating").toBool())
