@@ -838,7 +838,16 @@ void TestStudio::everyCommandIsBothAKeyAndAChip()
     // window does not escapes this proof entirely, because there is no row in
     // the table for it to be a row of. That is how `web block`, `limit --site`
     // and the incognito switch went a whole release without a button.
+    // At the narrowest the window says it works. `minimumWidth` is a promise,
+    // and the chips are the part of it most likely to be broken by one more
+    // command: at the default width there is room to spare and the bar can be
+    // wrong for a year without showing it.
+    const int wasWide = window()->width();
+    window()->setWidth(window()->minimumWidth());
+    settle();
+
     QSet<QString> keysSeen;
+    QMap<QString, bool> reachable;
     for (int view = 1; view <= 4; ++view) {
         QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(view)));
         settle();
@@ -870,6 +879,25 @@ void TestStudio::everyCommandIsBothAKeyAndAChip()
             QCOMPARE(chip->property("usable").toBool(),
                      command.value(QStringLiteral("usable")).toBool());
 
+            // Whether the pointer can reach it, which existing is not.
+            //
+            // The bar clips on purpose -- it says so where it is drawn -- and
+            // `:` lists whatever did not fit, so a chip past the right edge is
+            // not an unreachable action. What would make it one is the palette
+            // itself going the same way, and that is the thing worth holding:
+            // the door to everything clipped has to stay clickable at the
+            // narrowest width this window says it works at.
+            //
+            // Asserting instead that every chip is inside the window is what I
+            // tried first, and it fails honestly at `minimumWidth` on a layout
+            // that is behaving as designed. The omastore window hit the real
+            // version of this defect -- a bar with no palette behind it -- and
+            // that is what sent me to measure mine.
+            const QRectF box = chip->mapRectToScene(
+                    QRectF(0, 0, chip->width(), chip->height()));
+            reachable.insert(id, box.right() <= window()->width() + 0.5
+                                         && box.left() >= -0.5);
+
             // And the window agrees that the key belongs to that action.
             QVariant found;
             QMetaObject::invokeMethod(root(), "commandFor", Q_RETURN_ARG(QVariant, found),
@@ -877,6 +905,36 @@ void TestStudio::everyCommandIsBothAKeyAndAChip()
             QCOMPARE(found.toMap().value(QStringLiteral("id")).toString(), id);
         }
     }
+
+    // The door to whatever the bar could not fit.
+    //
+    // The first half of this is the one that keeps the second honest: at least
+    // one chip has to be clipped at this width, or the check below is a
+    // sentence about a situation that never happens. It is clipped -- measured,
+    // and the reason this case narrows the window at all.
+    //
+    // The second half guards something that is structurally safe today: the
+    // palette chip is anchored in the header and not inside the clipping row,
+    // so narrowing does not move it -- tried at 260 and it stays. What it would
+    // catch is somebody putting it in that row, which is the change that would
+    // make every clipped action unreachable by pointer at once.
+    QVERIFY2(reachable.values().contains(false),
+             "nothing was clipped at the narrowest width, so this proves nothing "
+             "about what happens when something is");
+    QQuickItem *palette = itemNamed(window()->contentItem(),
+                                    QStringLiteral("paletteChip"));
+    QVERIFY2(palette, "there is no palette chip, so a clipped action has no door");
+    const QRectF door = palette->mapRectToScene(
+            QRectF(0, 0, palette->width(), palette->height()));
+    QVERIFY2(door.right() <= window()->width() + 0.5 && door.left() >= -0.5,
+             qPrintable(QStringLiteral("the palette chip sits at %1..%2 and the "
+                                       "window is %3 wide, so everything the bar "
+                                       "clipped is out of the pointer's reach")
+                                .arg(door.left()).arg(door.right())
+                                .arg(window()->width())));
+
+    window()->setWidth(wasWide);
+    settle();
 
     // The window's own keys are not in the table, and they have chips of their
     // own in the header. Same promise, written by hand because they are about
