@@ -2951,7 +2951,7 @@ def artifacts_the_install_declares():
         parts = line.strip().split(None, 2)
         if not parts:
             continue
-        assert parts[0] in ("take", "prune", "borrow", "keep"), line
+        assert parts[0] in ("take", "prune", "borrow", "keep", "unlink"), line
         assert len(parts) >= 2 and parts[1].startswith("/"), line
         declared.append((parts[0], parts[1]))
     assert declared, "the list is empty"
@@ -2992,6 +2992,60 @@ def may_outlive_the_removal(path, declared):
             return True
     return False
 
+
+def check_the_removal_leaves_the_other_program_its_own_unit(box):
+    """A node unit omahouse did not write survives `pacman -R`, and its drop-in
+    does not.
+
+    `machine link` writes `omakure-node.service` only when there is none,
+    because Omakure's own installer will not provision it before a tokens file
+    that only a running node can produce -- so a household following that order
+    has nowhere to begin. Omakure's installer writes its own at that same path
+    on a later upgrade, and from that moment the file is not ours.
+
+    Removing it anyway would take a household's wire down on omahouse's way out,
+    on a machine where Omakure is a product of its own that nobody asked to
+    uninstall. So the `unlink` verb removes a file only while its first line
+    still says omahouse wrote it, and this is the case for the other branch --
+    the branch a marker check has no reason to get right by accident.
+
+    The drop-in goes either way: it is ours by name, it is the file that put the
+    console on the household network, and a node still serving that console
+    after the household is gone is the thing this whole removal is about.
+    """
+    machine = box.root / "othersunit"
+    unit = machine / "etc/systemd/system/omakure-node.service"
+    unit.parent.mkdir(parents=True, exist_ok=True)
+    theirs = ("[Unit]\nDescription=Omakure machine node service\n"
+              "\n[Service]\nExecStart=/usr/bin/omakure node serve\n")
+    unit.write_text(theirs)
+    drop = machine / "etc/systemd/system/omakure-node.service.d/omahouse.conf"
+    drop.parent.mkdir(parents=True, exist_ok=True)
+    drop.write_text("# Written by omahouse.\n[Service]\n"
+                    "ExecStart=\nExecStart=/usr/bin/omakure node serve --bind 0.0.0.0:8787\n")
+    # One of the three `_was_linked` asks about, so the removal knows there was
+    # a household here at all. Without it nothing below runs and this case
+    # passes for the wrong reason.
+    (machine / "etc/omahouse").mkdir(parents=True, exist_ok=True)
+    (machine / "etc/omahouse/machine.json").write_text('{"kind":"managed"}\n')
+
+    done = subprocess.run(
+        ["bash", "-c", f". {INSTALL_SCRIPT}; pre_remove; post_remove"],
+        capture_output=True, text=True,
+        env=dict(os.environ, OMAHOUSE_PACK_ROOT=str(machine)))
+    assert done.returncode == 0, done.stderr
+
+    assert unit.is_file(), (
+        "omahouse removed a unit it did not write, so taking omahouse off a "
+        "computer took that household's wire down with it")
+    assert unit.read_text() == theirs, "omahouse rewrote another program's unit"
+    assert not drop.exists(), (
+        "the drop-in that opened the console on the household network survived "
+        "the removal, so the node goes on serving it")
+    assert not (machine / "etc/omahouse/machine.json").exists()
+    # And it said so, because an operator reading this is deciding whether they
+    # still have a node.
+    assert "Omakure is left as it was" in done.stdout + done.stderr
 
 def check_the_removal_covers_what_the_install_makes(box):
     """The property `packaging/omahouse.install` exists to have: **nothing can
@@ -3083,6 +3137,28 @@ def check_the_removal_covers_what_the_install_makes(box):
     (machine / "etc/omahouse/blocked").write_text("kid\n")
     (machine / "etc/chromium/policies/managed/omahouse.json").write_text(
         '{"URLBlocklist":["youtube.com"]}\n')
+
+    # And the same for what `omahouse machine link` writes, which is the other
+    # half of what omahouse leaves on a machine and the half no install ever
+    # puts there: linking happens long after the package went on, so nothing
+    # above could have made these and nothing above would have missed them. A
+    # VM run of the walkthrough found all six still on a machine that had taken
+    # omahouse off -- a sudoers rule, two bearer tokens and a running node --
+    # and this is that finding moved to where it costs a commit instead.
+    for named, contents in (
+            ("etc/omahouse/machine.json", '{"kind":"managed"}\n'),
+            ("etc/omahouse/machine-tokens.json", '{"the kitchen laptop":"omk_…"}\n'),
+            ("etc/omahouse/omakure-token", "omk_a_bearer\n"),
+            ("etc/sudoers.d/omahouse-node", "omakure ALL=(root) NOPASSWD: /usr/bin/omahouse\n"),
+            ("etc/systemd/system/omakure-node.service.d/omahouse.conf",
+             "# Written by omahouse.\n[Service]\n"),
+            # With the marker, because that is the unit omahouse wrote. The one
+            # without it is a case of its own below.
+            ("etc/systemd/system/omakure-node.service",
+             "# Written by omahouse because there was none.\n[Unit]\n")):
+        target = machine / named
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(contents)
 
     made = paths_under(machine) - before
     undeclared = sorted(path for path in made if not is_declared(path, declared))
@@ -3236,6 +3312,7 @@ def main():
         check_pairing_refuses_a_line_that_did_not_arrive_whole,
         check_pairing_says_when_there_is_no_omakure_to_pair_with,
         check_the_removal_covers_what_the_install_makes,
+        check_the_removal_leaves_the_other_program_its_own_unit,
         check_the_reading_verbs_write_nothing,
     ]
     for case in cases:
