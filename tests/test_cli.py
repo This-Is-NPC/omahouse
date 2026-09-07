@@ -438,6 +438,61 @@ def check_version_is_said_once(box):
     assert box.run("--help").stdout.splitlines()[0].split()[1] == version
 
 
+
+def check_the_help_and_the_declaration_name_the_same_verbs(box):
+    """`--help`, omahouse.usage.kdl and docs/cli.md offer the same commands.
+
+    Three copies of one interface, and only two of them are held together:
+    `usage-check.sh` regenerates docs/cli.md from the declaration and refuses a
+    commit where they differ. The screen a person actually reads is the third
+    copy, and it is written by hand in `usage()` -- so a verb can be declared,
+    documented, implemented and never once offered, which is exactly what
+    `machine token` was when this check was written.
+
+    The top level is compared as a set, in both directions: a verb on the screen
+    and not in the declaration is as wrong as the reverse. Subcommands are only
+    checked for presence, because the screen writes them the way a person reads
+    them -- `allocation init|enroll|apply|plan|show` is one line for five verbs
+    -- and a parser that understood that line would be a second thing to keep
+    right. Presence still catches the failure that matters: a verb nobody can
+    find.
+    """
+    helped = box.run("--help")
+    assert helped.returncode == 0, helped.stderr
+
+    # Down to `Globals:`, because `Files:` below it is a column of program names
+    # -- loginctl, notify-send, systemd-run -- indented exactly like a verb.
+    screen = helped.stdout.split("\nGlobals:", 1)[0]
+    offered = set(re.findall(r"(?m)^  ([a-z][a-z-]*)", screen))
+
+    declaration = (ROOT / "omahouse.usage.kdl").read_text()
+    declared = set(re.findall(r'(?m)^cmd "([^"]+)"', declaration))
+
+    generated = (ROOT / "docs" / "cli.md").read_text()
+    documented = {heading for heading in
+                  re.findall(r"(?m)^## `omahouse ([^`]+)`$", generated)
+                  if " " not in heading}
+
+    # Every one of the three is derived by a regular expression, and a regular
+    # expression that has stopped matching produces an empty set that equals
+    # nothing and passes everything.
+    for label, names in (("the screen", offered), ("the declaration", declared),
+                         ("docs/cli.md", documented)):
+        assert names, f"{label} named no commands at all, so nothing below is checked"
+    assert "machine" in offered, sorted(offered)
+
+    assert offered == declared, {"only on the screen": sorted(offered - declared),
+                                 "only declared": sorted(declared - offered)}
+    assert declared == documented, {"only declared": sorted(declared - documented),
+                                    "only in docs": sorted(documented - declared)}
+
+    # And every subcommand is somewhere on the screen. `machine token` was
+    # declared, documented and implemented while `--help` had never heard of it.
+    for path in re.findall(r"(?m)^## `omahouse ([a-z]+ [a-z]+)`$", generated):
+        parent, leaf = path.split()
+        assert re.search(rf"(?m)^  {parent}\b.*\b{leaf}\b", screen), \
+            f"`{path}` is documented and `--help` never names it"
+
 def check_help_and_refusals(box):
     helped = box.run("--help")
     assert helped.returncode == 0, helped.stderr
@@ -3107,6 +3162,7 @@ def main():
     assert CLI.is_file(), f"missing CLI at {CLI}"
     cases = [
         check_version_is_said_once,
+        check_the_help_and_the_declaration_name_the_same_verbs,
         check_help_and_refusals,
         check_status_scans_without_a_profile,
         check_status_reports_what_it_cannot_see,
