@@ -285,7 +285,7 @@ The list itself is `omahouse machines`.
 
 ## `omahouse machine link`
 
-- **Usage:** `omahouse machine link [--name <name>] [--at <host:port>] <destination>`
+- **Usage:** `omahouse machine link [FLAGS] <destination>`
 
 Install omahouse on another computer and link it here, in one command.
 
@@ -311,6 +311,11 @@ Everything this machine can get wrong is refused before anything touches the far
 
 ### Flags
 - **`--name <name>`** — What the household calls it; its address by default
+- **`--as <name>`** — What to call **this** computer, where `--name` is the other one's.
+
+  Two flags, because this is the one verb that speaks about two computers at once and a household has a word for each. One flag doing both was the first thing tried and it made a household where every computer answered to the same name: `--name` reached the step that makes this machine a manager, and the study renamed itself after the laptop it had just linked -- on the one screen `machine kind` exists to tell them apart.
+
+  Left out, this computer keeps whatever it was already called, and a computer that has never been named goes by its hostname. A hostname is a fine default and it is not what a household says out loud, which is the whole reason `--name` exists for the other side.
 - **`--at <host:port>`** — Where the other computers will reach this one
 
 ## `omahouse machine kind`

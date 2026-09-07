@@ -96,6 +96,15 @@ struct Globals {
 struct Options {
     QString since;
     QString name;
+    /// What **this** computer is to be called, where `--name` is another one's.
+    ///
+    /// Two flags because `machine link` is the one verb that speaks about two
+    /// computers at once, and a household has a word for each. One flag doing
+    /// both would be a flag whose meaning depends on which verb it is under --
+    /// and it was: `--name` was passed through to the verb that makes this
+    /// machine a manager, and the study renamed itself after the laptop it had
+    /// just linked.
+    QString asName;
     QString limit;
     QString session;
     QString budget;
@@ -208,6 +217,7 @@ bool parseOptions(const QStringList &args, Options *options, QStringList *positi
     static const Value values[] = {
         {"--since", &Options::since, "a date like 2026-09-01"},
         {"--name", &Options::name, "a name, like \"Júlia\""},
+        {"--as", &Options::asName, "what to call this computer, like \"the study\""},
         {"--limit", &Options::limit, "a length of time, like 45m"},
         {"--session", &Options::session, "a length of time, like 2h"},
         {"--budget", &Options::budget, "an id and a length of time, like minecraft=45m"},
@@ -2341,7 +2351,7 @@ int cmdMachineLink(const Globals &g, const QStringList &positionals,
     // itself `the kitchen laptop` -- the study included, on the very screen the
     // walkthrough says will tell them apart.
     Options asMyself = options;
-    asMyself.name.clear();
+    asMyself.name = options.asName;
     const int became = becomeTheManager(g, verb, asMyself, &mine, &had);
     if (became != kOk)
         return became;
@@ -2490,7 +2500,8 @@ int cmdMachine(const Globals &g, const QStringList &positionals, const Options &
     }
     if (what == QLatin1String("link")) {
         if (!onlyTheseOptions(options,
-                              {QStringLiteral("--at"), QStringLiteral("--name")},
+                              {QStringLiteral("--at"), QStringLiteral("--name"),
+                               QStringLiteral("--as")},
                               QStringLiteral("machine link")))
             return kUsage;
         return cmdMachineLink(g, rest, options);
@@ -5091,10 +5102,12 @@ Writing, and root needed — the studio gets there by pkexec:
   day <user> [--date YYYY-MM-DD]
                            what this computer spent, as a document another one
                            can read. Exit 2 when there is no such day
-  machine link <user@host> --at host:port [--name "the kitchen laptop"]
+  machine link <user@host> --at host:port
+               [--name "the kitchen laptop"] [--as "the study"]
                            install omahouse on another computer and link it
                            here, over ssh. One command, and the far machine
-                           gets the whole of omahouse rather than an agent
+                           gets the whole of omahouse rather than an agent.
+                           --name is that computer; --as is this one
   machine invite --at host:port
                            print the line that lets another computer trust this
                            one. Run it where the operator sits
