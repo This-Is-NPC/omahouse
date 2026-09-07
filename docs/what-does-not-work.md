@@ -81,10 +81,10 @@ sudo omahouse allow kid chromium --limit 45m
 sudo omahouse allow kid org.chromium.Chromium --limit 45m
 ```
 
-## 5. The filter narrows all four lists at once
+## 5. The filter narrows every list at once
 
 **What happens.** There is one filter in the window, and `/` applies it to the
-people, the programs, the day and the sites together. A needle that misses the
+people, the programs, the day, the sites and the machines together. A needle that misses the
 person on the people list empties the people list — and then the programs view
 has nobody to be about and draws *nobody is under rules yet* over a household
 that is right there. The key sheet says `filter this list`. This is not yet

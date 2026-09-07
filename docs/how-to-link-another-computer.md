@@ -187,6 +187,33 @@ adjustments are excluded from household credit, and enrolled profiles refuse
 
 ---
 
+## In the window
+
+Everything above is typed, and there is a screen for it. Open the studio, pick
+the account on **people**, and press **f**:
+
+![The machines view: `MACHINE / BUDGET` beside `USED / PORTION / LEFT`; `here / session` at 1h10m / 1h15m / 5m, marked `portion received` and `Last report: local`; and `station-02 / session` at 40m / 45m / 5m, marked `stale report; portion reserved` and `Last report: 2026-09-01T09:30:00`.](img/31-operator-machines.png)
+
+One row is one budget on one computer. What that computer last reported
+spending, the daily portion it was given, what is left of it, and when the
+report came in.
+
+`here` reports `local` and can never go stale. Every other row carries the
+instant its report came in, and **that line is the one to read first.** A
+portion stays reserved whether or not the computer is reporting, so `5m left`
+beside a week-old observation is five minutes that may already have been spent
+over there. The row says `stale report; portion reserved` in those words rather
+than leaving somebody to work it out from the date.
+
+**+** records household credit, through the same privileged CLI a terminal
+would use. It does not deliver it: the next successful Battery cycle divides it
+among the portions. Nothing in this window runs a scheduler, and nothing in it
+reaches the other computer — it reads what was collected here.
+
+The fiscalised person's own face cannot open this view.
+
+---
+
 ## What this does not do
 
 - **It does not create the account on the far computer.** `kid` has to exist

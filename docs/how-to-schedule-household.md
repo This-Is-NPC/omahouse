@@ -125,6 +125,8 @@ remaining time and observation timestamp. **+** records household credit through
 the same CLI. A recent report is not a live connection indicator. Pairing,
 enrollment and schedule configuration remain explicit CLI/setup operations.
 
+![The machines view: `MACHINE / BUDGET` beside `USED / PORTION / LEFT`; `here / session` at 1h10m / 1h15m / 5m, marked `portion received` and `Last report: local`; and `station-02 / session` at 40m / 45m / 5m, marked `stale report; portion reserved` and `Last report: 2026-09-01T09:30:00`.](img/31-operator-machines.png)
+
 ## Failures preserve reservations
 
 - Every plan requires enrolled observations at most 120 seconds old. A missing,
