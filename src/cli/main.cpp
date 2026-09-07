@@ -5101,6 +5101,9 @@ Writing, and root needed — the studio gets there by pkexec:
                            write a computer down without pairing it; a note to
                            self, and nothing can be asked of it yet
   machine remove <name>    out of the list. The machine itself is untouched
+  machine token <name>     where that computer's console answers, and the
+                           bearer that opens it. Two lines, for the thing that
+                           fetches its days
   collect <machine> <user> take in a day another computer spent, on stdin:
                            omahouse day julia | ssh study omahouse collect …
   profile remove <user> [--keep-account]
