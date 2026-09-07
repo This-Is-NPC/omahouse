@@ -39,6 +39,7 @@ import os
 import re
 import shlex
 import socket
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -188,6 +189,34 @@ class VM:
         self.root("chown -R omakure:omakure /var/lib/omakure /var/lib/omakure-workspace")
         self.root("chmod 0700 /var/lib/omakure")
         self.root("chmod 0750 /var/lib/omakure-workspace")
+
+    def serve_a_repository(self, packages, name="omahouse-suite"):
+        """A pacman repository on this machine, holding the packages given.
+
+        So that `pacman -S omahouse` is a real install with real dependency
+        resolution, on a machine that has no `omarchy` repository configured and
+        no network to reach one. It stands in for the shelf a household would
+        have, and it is the only honest way to prove the install that
+        `omahouse machine link` performs: a case that reached around pacman
+        would be proving nothing about the package manager.
+
+        `SigLevel = Never`, because these packages are built by this suite
+        seconds earlier and signing them would be signing our own homework with
+        a key the guest would then have to trust.
+        """
+        root = f"/var/cache/{name}"
+        self.root(f"rm -rf {root} && mkdir -p {root}")
+        for package in packages:
+            self.put(str(package), f"/tmp/{package.name}")
+            self.root(f"mv /tmp/{package.name} {root}/")
+        self.root(f"sh -c 'cd {root} && repo-add {name}.db.tar.gz *.pkg.tar.*'")
+        # Written once and never twice: a second `[name]` section makes pacman
+        # refuse the whole file.
+        self.root(f"sh -c \"grep -q '^\\[{name}\\]' /etc/pacman.conf || "
+                  f"printf '\\n[{name}]\\nSigLevel = Never\\nServer = file://{root}\\n' "
+                  ">> /etc/pacman.conf\"")
+        self.root("pacman -Sy --noconfirm", timeout=300)
+        return root
 
     def put_the_battery(self):
         """The Battery from this disk, in a place the node's account can add."""
@@ -1007,6 +1036,35 @@ def build_the_package():
         raise Blocked("makepkg over vm/PKGBUILD failed:\n" + tail)
     built = sorted(p for p in (out / "pkg").glob("omahouse-[0-9]*.pkg.tar.*")
                    if "-debug-" not in p.name)
+    if not built:
+        raise Blocked(f"makepkg produced nothing under {out / 'pkg'}")
+    return built[0]
+
+
+def build_the_omakure_package(binary):
+    """The omakure binary under test, wrapped as the package pacman would get.
+
+    Needed for exactly one thing: `omahouse machine link` installs omahouse with
+    `pacman -S`, and omahouse depends on omakure. Without a package to resolve
+    that against, the case that proves the install would have to reach around
+    the package manager to prove something about the package manager.
+
+    It is not omakure's own packaging. When the `omarchy` repository carries
+    omakure this goes away.
+    """
+    here = HERE / "omakure-pkg"
+    shutil.copy(binary, here / "omakure")
+    out = Path(tempfile.mkdtemp(prefix="omakure-pkg."))
+    done = run(["makepkg", "-f", "-d", "--noconfirm"], cwd=str(here),
+               env={**os.environ,
+                    "BUILDDIR": str(out / "build"),
+                    "PKGDEST": str(out / "pkg"),
+                    "SRCDEST": str(out / "src"),
+                    "LOGDEST": str(out / "log")})
+    if done.returncode != 0:
+        tail = "\n".join((done.stdout + done.stderr).splitlines()[-20:])
+        raise Blocked("makepkg over vm/omakure-pkg/PKGBUILD failed:\n" + tail)
+    built = sorted((out / "pkg").glob("omakure-[0-9]*.pkg.tar.*"))
     if not built:
         raise Blocked(f"makepkg produced nothing under {out / 'pkg'}")
     return built[0]

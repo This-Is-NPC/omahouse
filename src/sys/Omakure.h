@@ -49,9 +49,29 @@ public:
 
     /// Whether there is an Omakure on this machine at all: a binary, and the
     /// service account its state directory belongs to. Both, because a binary
-    /// with no account is an install that never ran `--install-node-service`,
-    /// and every call below would fail on the same wrong thing.
+    /// with no account is a node that cannot read its own state, and every call
+    /// below would fail on the same wrong thing in a different sentence.
     static bool installed(QString *why = nullptr);
+
+    /// Make the account and the directories a node needs, if they are not there.
+    ///
+    /// omahouse does this because omahouse is what promised it. A household is
+    /// told that one command links a computer and that they will not have to go
+    /// and find anything: the package brings the binary, and the account and the
+    /// 0700 state directory are the rest of what "brings" has to mean.
+    ///
+    /// It never touches an account that already exists, so a machine where
+    /// Omakure's own installer has run is left exactly as that installer left
+    /// it. The modes are the ones that installer sets, and they are not
+    /// decoration: the state directory is a secrets directory, and a `node init`
+    /// that ran before the account existed leaves root-owned locks in it that
+    /// every later run refuses.
+    ///
+    /// The home is the workspace and never the state directory. An omakure
+    /// command run as this account without `OMAKURE_SCRIPTS_DIR` resolves its
+    /// scratch files under `$HOME`, so making the state directory the home
+    /// points the product's own scratch files at the one place that bricks it.
+    static bool provision(QString *error);
 
     /// Run `omakure <arguments>` as the node's account, and hand back what it
     /// said. `stdout` and `stderr` both, because Omakure's refusals are on the

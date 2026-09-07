@@ -1687,6 +1687,35 @@ NodeConfig currentNodeConfig()
     return config;
 }
 
+bool omakureIsReady(const QString &verb);
+
+/// The binary, the account, and the difference between them.
+///
+/// Only one of the two can be made from here. A missing binary is a package
+/// that is not whole and the answer is the package manager; a missing service
+/// account is something omahouse promised to handle and does. So the binary is
+/// asked about first and separately, and the account is provisioned rather than
+/// demanded.
+bool omakureIsInstalledAndProvisioned(const QString &verb, int *status)
+{
+    QString why;
+    if (Omakure::binary().isEmpty()) {
+        omakureIsReady(verb);
+        *status = kMissing;
+        return false;
+    }
+    if (!Omakure::provision(&why)) {
+        fail(QStringLiteral("%1: %2").arg(verb, why));
+        *status = kUsage;
+        return false;
+    }
+    if (!omakureIsReady(verb)) {
+        *status = kMissing;
+        return false;
+    }
+    return true;
+}
+
 /// The Omakure that has to be there before any of this means anything, and the
 /// line to run when it is not.
 bool omakureIsReady(const QString &verb)
@@ -1841,8 +1870,9 @@ int becomeTheManager(const Globals &g, const QString &verb, const Options &optio
     }
     if (!mayWrite(verb, Omakure::nodeConfigFile(), omakureConfigIsTheSystems(), g))
         return kUsage;
-    if (!omakureIsReady(verb))
-        return kMissing;
+    int ready = kOk;
+    if (!omakureIsInstalledAndProvisioned(verb, &ready))
+        return ready;
 
     int status = kOk;
     Fleet fleet;
@@ -1973,8 +2003,9 @@ int cmdMachinePrepare(const Globals &g, const Options &options)
     }
     if (!mayWrite(verb, Omakure::nodeConfigFile(), omakureConfigIsTheSystems(), g))
         return kUsage;
-    if (!omakureIsReady(verb))
-        return kMissing;
+    int ready = kOk;
+    if (!omakureIsInstalledAndProvisioned(verb, &ready))
+        return ready;
 
     NodeConfig config = currentNodeConfig();
     if (!options.name.isEmpty())

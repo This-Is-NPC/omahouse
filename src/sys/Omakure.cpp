@@ -128,6 +128,76 @@ bool Omakure::installed(QString *why)
     return true;
 }
 
+bool Omakure::provision(QString *error)
+{
+    if (binary().isEmpty()) {
+        *error = QStringLiteral("there is no omakure on this machine");
+        return false;
+    }
+
+    const QString user = account();
+    if (!accountExists(user)) {
+        // Through the machine's own tools, and only when there is nobody there.
+        // Both are `--system`: this account has no home to speak of, no shell,
+        // and no business appearing in a login screen.
+        // The group may already be there without the account -- a half-finished
+        // install, or a group of that name for another reason -- so `groupadd`
+        // failing is only a failure when there is still no group afterwards.
+        QProcess::execute(QStringLiteral("groupadd"),
+                          {QStringLiteral("--system"), user});
+        if (QProcess::execute(QStringLiteral("getent"),
+                              {QStringLiteral("group"), user}) != 0) {
+            *error = QStringLiteral("cannot make the %1 group").arg(user);
+            return false;
+        }
+        if (QProcess::execute(QStringLiteral("useradd"),
+                              {QStringLiteral("--system"),
+                               QStringLiteral("--gid"), user,
+                               QStringLiteral("--home-dir"), workspace(),
+                               QStringLiteral("--shell"),
+                               QStringLiteral("/usr/sbin/nologin"), user}) != 0) {
+            *error = QStringLiteral("cannot make the %1 account").arg(user);
+            return false;
+        }
+    }
+
+    const struct passwd *who = getpwnam(user.toLocal8Bit().constData());
+    if (!who) {
+        *error = QStringLiteral("the %1 account is still not there").arg(user);
+        return false;
+    }
+
+    // The config directory is root's; the state directory and the workspace are
+    // the node's. `-R` on the two it owns, because a `node init` that ran before
+    // the account existed leaves root-owned locks that every later run refuses
+    // -- "is owned by 0:0 but must be owned by 964:964" -- and that refusal is
+    // right and unrecoverable without deleting the identity.
+    for (const auto &directory : {std::make_pair(configDir(), 0755),
+                                  std::make_pair(stateDir(), 0700),
+                                  std::make_pair(workspace(), 0750)}) {
+        if (!QDir().mkpath(directory.first)) {
+            *error = QStringLiteral("cannot make %1").arg(directory.first);
+            return false;
+        }
+        if (chmod(directory.first.toLocal8Bit().constData(),
+                  static_cast<mode_t>(directory.second)) != 0) {
+            *error = QStringLiteral("cannot set the mode of %1: %2")
+                             .arg(directory.first,
+                                  QString::fromLocal8Bit(strerror(errno)));
+            return false;
+        }
+    }
+    for (const QString &owned : {stateDir(), workspace()}) {
+        if (QProcess::execute(QStringLiteral("chown"),
+                              {QStringLiteral("-R"),
+                               QStringLiteral("%1:%1").arg(user), owned}) != 0) {
+            *error = QStringLiteral("cannot give %1 to %2").arg(owned, user);
+            return false;
+        }
+    }
+    return true;
+}
+
 bool Omakure::run(const QStringList &arguments, QString *output, QString *error,
                   int timeoutMs)
 {
