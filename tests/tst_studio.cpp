@@ -933,12 +933,17 @@ void TestStudio::everyCommandIsBothAKeyAndAChip()
                                 .arg(door.left()).arg(door.right())
                                 .arg(window()->width())));
 
-    window()->setWidth(wasWide);
-    settle();
-
     // The window's own keys are not in the table, and they have chips of their
     // own in the header. Same promise, written by hand because they are about
     // the window and not about a profile.
+    //
+    // Measured here, still narrow, and that is the whole of what this loop
+    // gained. It used to run after the width was put back and it used to ask
+    // only whether each chip existed -- so the chips nobody thinks to measure,
+    // because they are always on screen, were the ones nothing measured. The
+    // omastore window had the identical hole and its `keysChip` was the one
+    // running past the edge; mine has a `keysChip` too, which is why this is
+    // being written rather than reasoned about.
     for (const QString &name : {QStringLiteral("viewChip1"), QStringLiteral("viewChip2"),
                                 QStringLiteral("viewChip3"), QStringLiteral("viewChip4"),
                                 QStringLiteral("filterChip"), QStringLiteral("paletteChip"),
@@ -946,7 +951,16 @@ void TestStudio::everyCommandIsBothAKeyAndAChip()
         QQuickItem *chip = itemNamed(window()->contentItem(), name);
         QVERIFY2(chip, qPrintable(name));
         QVERIFY2(!chip->property("key").toString().isEmpty(), qPrintable(name));
+        const QRectF box = chip->mapRectToScene(
+                QRectF(0, 0, chip->width(), chip->height()));
+        QVERIFY2(box.left() >= -0.5 && box.right() <= window()->width() + 0.5,
+                 qPrintable(QStringLiteral("at %1px wide, %2 runs from %3 to %4")
+                                    .arg(window()->width()).arg(name)
+                                    .arg(box.left()).arg(box.right())));
     }
+
+    window()->setWidth(wasWide);
+    settle();
 }
 
 void TestStudio::everyKeyOnTheSheetIsAnswered()
