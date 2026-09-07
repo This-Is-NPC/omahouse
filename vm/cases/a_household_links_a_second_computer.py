@@ -110,7 +110,8 @@ def walked(vm, dad):
     # The one command the page opens with.
     code, said = dad.root(
         f"omahouse machine link arch@{there} "
-        f"--name 'the kitchen laptop' --at {here}:{WIRE}", check=False, timeout=600)
+        f"--name 'the kitchen laptop' --as 'the study' --at {here}:{WIRE}",
+        check=False, timeout=600)
     if code != 0:
         raise Failed(f"the one command of step 1 came back {code}:\n{said[:900]}")
     for sentence in ("the kitchen laptop: paired",
@@ -136,6 +137,12 @@ def walked(vm, dad):
 
     # -- 2. Ask each computer what it is -------------------------------------
     manager = dad.root("omahouse machine kind")
+    # The word `--as` asked for, and not a hostname. The page prints it above
+    # the sentence below, and a household that cannot name its own console has
+    # a list of computers with a stranger at the top of it.
+    if "the study" not in manager:
+        raise Failed(f"the operator's machine is not called what --as asked "
+                     f"for:\n{manager}")
     if "the household's console" not in manager:
         raise Failed(f"the operator's machine does not call itself the console:\n"
                      f"{manager}")
