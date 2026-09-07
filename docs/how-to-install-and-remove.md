@@ -164,6 +164,27 @@ with no omahouse on it and nothing left to explain it. The removal ends that
 process by its exact command line, and the VM case measures that it was the
 removal which did so.
 
+**On a computer that was linked to a household, the link comes off too.** That
+is a second set of things, and no install put any of them there — `omahouse
+machine link` writes them onto a computer long after the package went on it:
+
+```
+>>>           This computer was linked to a household, and it is not any
+>>>           more. The sudoers line is gone, the bearer tokens are gone,
+>>>           and it no longer says it is managed by anybody. The console
+>>>           this household reached it on is closed.
+```
+
+**Omakure is left as it was**, and that is deliberate: it is its own program,
+and taking omahouse off is not a reason to take a household's wire down. If its
+node was started by omahouse it is stopped; if the node is Omakure's own it goes
+on running, on loopback, with the drop-in that had opened it to the household
+removed.
+
+**The manager still has that computer in its list.** Removing the package there
+cannot reach here. Run `sudo omahouse machine remove "<name>"` on the manager,
+or its sums go on waiting for a day that computer will never send.
+
 **None of this is a list somebody remembers to keep up to date.** The scriptlet
 declares what an installation puts on a machine, the removal is a loop over that
 declaration, and a test in `mise run verify` installs and removes the whole

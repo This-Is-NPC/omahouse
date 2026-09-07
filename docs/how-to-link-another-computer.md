@@ -248,4 +248,11 @@ ssh arch@192.168.1.20 sudo omahouse profile remove kid
 ```
 
 and to take omahouse off entirely, [how to install it and take it off
-again](how-to-install-and-remove.md) applies there exactly as it does here.
+again](how-to-install-and-remove.md) applies there exactly as it does here —
+including the link itself. `pacman -R` on a linked computer takes the sudoers
+line, the bearer tokens and the console with it, and leaves Omakure alone.
+
+Do it in that order if you can: forget the computer here first, then uninstall
+there. The other way round works and leaves this computer waiting for a day
+that will never come, which `omahouse house` reports as a machine that is not
+in the sum.
