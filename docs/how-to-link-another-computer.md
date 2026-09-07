@@ -31,7 +31,7 @@ One command, run here:
 
 ```bash
 sudo omahouse machine link arch@192.168.1.20 \
-     --name "the kitchen laptop" --at 192.168.1.10:7879
+     --name "the kitchen laptop" --as "the study" --at 192.168.1.10:7879
 ```
 
 ```
@@ -49,6 +49,12 @@ omahouse does works on that machine on its own.
 `--name` is the household's word for that computer — "the kitchen laptop", not a
 hostname. It is the handle every other verb takes, and it is kept apart from the
 identity underneath on purpose: renaming a computer must not break its trust.
+
+`--as` is the household's word for **this** one. Two flags, because this is the
+one command that is about two computers at once and a household has a word for
+each. Leave it out and this computer keeps whatever it was already called, or
+goes by its hostname if it has never been named — which is a fine default and is
+not what anybody says out loud.
 
 `--at` is where the **other** computers reach **this** one. It is asked for
 because a machine cannot know which of its addresses the household will use, and
