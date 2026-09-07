@@ -2335,7 +2335,14 @@ int cmdMachineLink(const Globals &g, const QStringList &positionals,
     // leave it half linked.
     Pairing mine;
     bool had = false;
-    const int became = becomeTheManager(g, verb, options, &mine, &had);
+    // Without `--name`, which on this verb is the **other** computer's. On
+    // `machine invite` the flag names the machine it is typed at, and passing
+    // the options straight through made a household where every computer called
+    // itself `the kitchen laptop` -- the study included, on the very screen the
+    // walkthrough says will tell them apart.
+    Options asMyself = options;
+    asMyself.name.clear();
+    const int became = becomeTheManager(g, verb, asMyself, &mine, &had);
     if (became != kOk)
         return became;
 
