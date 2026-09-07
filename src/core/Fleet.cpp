@@ -141,14 +141,12 @@ QVector<HouseBudget> consolidate(const Profile &profile,
             continue;
         HouseBudget total;
         total.id = budget.id;
-        // The grants are each machine's own and are added with the seconds they
-        // were given on: a grant of ten minutes on the laptop raised the
-        // laptop's limit, and what the house has to know is that the day's
-        // number moved. Not summing them would make `leave` fight every grant.
+        // Only operator credit changes the household total. Local adjustments
+        // made by leave must not feed back into the next consolidation.
         int granted = 0;
         for (const auto &day : days) {
             const int seconds = day.second.secondsFor(budget.id);
-            granted += day.second.grantedSeconds(budget.id);
+            granted += day.second.creditedSeconds(budget.id);
             total.spent.append(Contribution {day.first, seconds});
             total.totalSeconds += seconds;
         }

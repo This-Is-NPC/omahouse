@@ -17,6 +17,7 @@ TEMPLATE  = lib
 TARGET    = omahousecore
 
 HEADERS += \
+    Allocation.h \
     AppScope.h \
     Duration.h \
     Fleet.h \
@@ -33,6 +34,7 @@ HEADERS += \
     WebPolicy.h
 
 SOURCES += \
+    Allocation.cpp \
     AppScope.cpp \
     Duration.cpp \
     Fleet.cpp \

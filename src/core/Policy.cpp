@@ -1,4 +1,5 @@
 #include "Policy.h"
+#include "Allocation.h"
 
 #include "Furniture.h"
 
@@ -172,7 +173,7 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
         if (budget.id.isEmpty() || !budget.hasLimit())
             continue;
 
-        const int limit = budget.dailyMinutes * 60 + outcome.ledger.grantedSeconds(budget.id);
+        const int limit = allowanceSeconds(profile, budget, outcome.ledger, now.date());
         const int left = limit - outcome.ledger.secondsFor(budget.id);
 
         if (left > 0) {

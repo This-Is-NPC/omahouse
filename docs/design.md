@@ -1261,5 +1261,40 @@ a structural change when the time comes.
   through `nft meta skuid`. It is a **proposal**: none of it is built. What *is*
   built is §11, which blocks sites through the browser's own managed policy
   instead, and pays for it by being per machine rather than per account.
-- **Several machines on a network.** The model carries it; v1 is one machine.
 - **Credit that crosses days**, a time bank, time bought with a chore.
+
+
+## 12. Exclusive household credit and scheduled coordination
+
+The contract and operator setup are in
+[the household scheduling guide](how-to-schedule-household.md). `Allocation` in
+core plans and validates absolute daily portions. Profile allocation metadata
+changes enforcement and local balances; it does not create ledger grants.
+A `kind: adjustment` grant from `leave` affects standalone local balance, while
+only genuine grants contribute to household credit. Untagged historical grants
+remain credit because their original intent cannot be recovered.
+
+The Battery calls `day`, `collect`, `allocation plan` and `allocation apply`.
+Its optional manager-owned wrapper supplies Omakure's `Schedule`; there is no
+new omahouse scheduler or network daemon. Console API results remain outside
+the Health Plane. Partial delivery retains all reservations, and readback must
+match the issued document. All enrolled observations must be fresh before a
+new plan can divide credit, including newly granted time.
+
+Reservations are fsynced and atomically replaced before delivery. Revision,
+authority, date, account, budget IDs and frozen membership guard replay. Missing
+or rolled-back manager state is refused when a machine reports issued credit.
+CLI profile mutations share a lock across their read/modify/write cycles;
+`grant`, `leave` and the watcher share a per-day ledger lock. The Battery also
+holds a workspace lock to exclude simultaneous manual and scheduled runs.
+
+Studio reads the same files through core/sys and writes through the existing
+privileged CLI boundary. The machines view shows observations, received portions
+and their age. It never turns an HTTP launch into proof of applied credit.
+
+The host gate exercises arithmetic, refusals and keyboard/mouse interaction.
+The Battery's `.scripts/test-sync.py` uses real CLI processes with disposable
+file roots for retries, partial delivery, readback, offline peers and overlap.
+The VM case `a_battery_schedule_reserves_household_credit` exercises actual
+Omakure scheduled history, paired HTTP transport, repeated runs, restart,
+offline reservation and a subsequent grant in two disposable guests.

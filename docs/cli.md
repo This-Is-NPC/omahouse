@@ -38,7 +38,7 @@ The identity of a running app is its systemd scope and not the path of its execu
   - `profile show` -- the profile as `/etc/omahouse/profiles.json` holds it, including its `web` half when it has one.
   - `status` also carries `webPolicy`: the `path` of the managed policy file, `wholeMachine` (always true, and there so a reader cannot miss it), and `contents` -- the composed policy of every profile at once, or null when there should be no file on the machine at all.
   - every verb that writes a profile -- `profile add`, `profile remove`, `profile enforce`, `profile default`, `allow`, `deny`, `limit`, `web block`, `web allow`, `web incognito` -- prints the profile it wrote, or for `remove` the one it took out. So a script can write and read in one call, and the answer is the same shape `profile show` gives.
-  - `grant` -- `user`, `budget`, `minutes`, `by`, `at`, and the day's `usedSeconds`, `grantedSeconds`, `limitSeconds` and `leftSeconds` for that budget.
+  - `grant` -- `user`, `budget`, `minutes`, `by`, `at`, and the day's `usedSeconds`, `grantedSeconds`, `limitSeconds` and `leftSeconds` for that budget, plus `pendingAllocation` (true when household credit awaits the next successful Battery sync).
 
   A budget with no limit has `limitSeconds` and `leftSeconds` null rather than zero: zero left is a budget that has run out, and the two must never read the same.
 
@@ -249,17 +249,7 @@ Writing needs root, exactly as everything under `/var/lib/omahouse` does.
 
 - **Usage:** `omahouse house`
 
-What the house spent today, as opposed to what this computer spent.
-
-The profile's number is the household's. `session: 120` means two hours in the house and not two hours per computer -- so a machine on its own enforces the whole thing, which is right and is what makes one computer complete, and a house with three of them has to add the three up and push the truth back down with `omahouse leave`.
-
-It reads days and nothing else. This machine's is where it always was; the others are collected into `<stateDir>/elsewhere/<machine>/<user>/<date>.json`, in the same shape and read with the same reader, by whatever brings them. A central that held a database of everybody's days would be a second answer to what a day is, and the first one is already on disk.
-
-A machine whose day is not there is not in the sum, and the answer says which ones. A total quietly missing a computer reads exactly like a total of a quiet afternoon, and only one of those is a fact.
-
-Grants are added with the seconds they were given on: ten minutes handed over on the laptop raised the laptop's limit, and what the house has to know is that the day's number moved. Not adding them would make `leave` fight every grant an operator gives.
-
-A house that went over has nothing left rather than less than nothing, because a negative would only invite somebody to subtract it twice.
+Adds consumption and operator credit from collected days. Local leave adjustments do not change the household credit. Missing machines are named. For exclusive credit across concurrent or disconnected machines, enroll the Battery and use allocation plan/apply; never broadcast a remaining balance with leave.
 
 ## `omahouse machines`
 
@@ -519,17 +509,7 @@ A budget the profile does not have is refused: time added to a counter the daemo
 
 - **Usage:** `omahouse leave [--session <time>] [--budget <id=time>]`
 
-What should be left of today, rather than what to take away.
-
-The other end of `grant`, and it is a statement about the day rather than a direction of travel: `--session 30m` means thirty minutes should remain, whether that is an hour taken back or a quarter of an hour handed over.
-
-That is not a matter of taste. A household with more than one computer consolidates on a loop -- read every machine's day, add it up, push the truth back -- and "take ten minutes off" said every minute drains the day by teatime. "Leave thirty minutes" said twice is the same as said once, and a verb a loop can repeat is the only kind a loop can use. When there is nothing to do it writes nothing and says so, because a loop has to tell that apart from a failure.
-
-It lands on whole minutes, which is what a grant carries and what the report says back, and it rounds **down**: `leave 30m` leaves at most thirty minutes and never a little more. Of the two ways to be wrong, handing time back is the one nobody asked for.
-
-A budget with no limit is refused. It counts and never runs out, so there is nothing for a number to be left of, and a `-20m` against it would be a row in the report nobody can read.
-
-It writes the day's own file, so it expires with the day: tomorrow is the profile's number again, with nothing to undo.
+Set how much remains on this machine today. Zero (0m) is supported. Writes a local adjustment, excluded from household credit. This is a manual override for standalone profiles, not a distributed synchronization protocol: repeating an old remaining balance after consumption would recharge it. Enrolled profiles use allocation apply with an absolute daily portion instead. Untagged historical grants remain operator credit because their original intent cannot be recovered.
 
 ### Flags
 - **`--session <time>`** — What should be left of the session today
@@ -695,3 +675,58 @@ It stops on SIGINT and SIGTERM after the cycle it is in, which is a `rename` awa
 - **`--dry-run`** — Decide, and touch nothing.
 
   It reads the tree, debits the tick and prints the whole of the accounting -- including what it would have closed and who it would have refused at the next login -- and then writes no ledger, writes no `blocked`, sends no notification, signals nothing and ends nobody's session. What makes the loop safe to point at a machine nobody meant to fiscalise, and it needs no privilege of any kind.
+
+## `omahouse allocation`
+
+- **Usage:** `omahouse allocation <SUBCOMMAND>`
+
+Opt-in household allocation. The Battery schedules and transports commands; omahouse reserves and validates credit. Issued portions are not reclaimed from offline machines. Membership is frozen for the day, and all machines must report within 120 seconds before any extra allocation. Missing daily portions enforce zero. Keep manager reservations backed up.
+
+## `omahouse allocation init`
+
+- **Usage:** `omahouse allocation init <user>`
+
+Enroll this manager as here
+
+### Arguments
+- **`<user>`**
+
+## `omahouse allocation enroll`
+
+- **Usage:** `omahouse allocation enroll [--node <authority>] [--name <machine>] <user>`
+
+Bind a profile to an authority and machine; enforce zero until allocated
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--node <authority>`** — Authority returned by the manager init
+- **`--name <machine>`** — Exact registered machine name
+
+## `omahouse allocation apply`
+
+- **Usage:** `omahouse allocation apply <user>`
+
+Read and apply a current allocation JSON document from stdin
+
+### Arguments
+- **`<user>`**
+
+## `omahouse allocation plan`
+
+- **Usage:** `omahouse allocation plan <user>`
+
+Reserve exclusive portions before delivery, and print the plan
+
+### Arguments
+- **`<user>`**
+
+## `omahouse allocation show`
+
+- **Usage:** `omahouse allocation show <user>`
+
+Read enrollment and the manager reservation document
+
+### Arguments
+- **`<user>`**

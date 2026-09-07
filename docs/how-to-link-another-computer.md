@@ -173,24 +173,17 @@ afternoon, and only one of those is a fact.
 
 ---
 
-## 5. Push the truth back
+## 5. Share the allowance safely
 
-Each computer enforces the household's number as though it were its own — which
-is what makes one computer complete, and what makes two computers over-generous
-by exactly the amount the other one spent. `leave` is how the manager corrects
-that:
+Collection alone does not prevent both machines spending the same daily limit.
+For automatic sharing, follow [the Battery schedule setup](how-to-schedule-household.md).
+It enrolls each computer, reserves exclusive portions and delivers absolute daily
+caps. Omakure runs the schedule; omahouse decides and enforces the credit.
 
-```bash
-ssh arch@192.168.1.20 sudo omahouse leave kid --session 50m
-```
-
-```
-kid: this machine now has 50m of session left today.
-```
-
-It writes a grant, and the grant can be negative — that is the whole trick. The
-far computer goes on counting and closing on its own; what changed is the number
-it is counting towards.
+`leave` remains a standalone local adjustment. It must not be repeated as a
+synchronization loop: consumption between calls would be refilled. New local
+adjustments are excluded from household credit, and enrolled profiles refuse
+`leave` altogether.
 
 ---
 
@@ -202,9 +195,9 @@ it is counting towards.
   else's computer from here is not a thing to do by accident.
 - **It does not move the profile.** Two computers, two `profiles.json`. See
   step 3.
-- **It does not schedule the collecting.** Step 4's pipe is what the Battery's
-  job runs; on a household without it, it is a command you type or a cron line
-  you write.
+- **It does not schedule the collecting.** Enable the explicit
+  [Battery schedule](how-to-schedule-household.md) for collection, reservation
+  and delivery. Linking alone activates none of those jobs.
 
 ---
 

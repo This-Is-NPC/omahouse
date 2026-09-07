@@ -1,4 +1,7 @@
 #include "Fleet.h"
+#include "Allocation.h"
+#include "Policy.h"
+#include <QTimeZone>
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -16,6 +19,96 @@ class FleetTest : public QObject
     Q_OBJECT
 
 private slots:
+    void allocationsReserveCreditAndRejectReplay()
+    {
+        Profile profile;
+        profile.user = "kid";
+        profile.allocation = QJsonObject{{"authority", "manager"}, {"machine", "here"}};
+        Budget budget;
+        budget.id = "session"; budget.match = "*"; budget.dailyMinutes = 120;
+        budget.onExhausted = OnExhausted::Logout;
+        profile.budgets << budget;
+        const QDateTime now(QDate(2026, 9, 7), QTime(12, 0), QTimeZone::UTC);
+        Ledger a, b;
+        a.user = b.user = "kid"; a.date = b.date = now.date();
+        a.observedAt = b.observedAt = now;
+        a.allocation = profile.allocation;
+        b.allocation = QJsonObject{{"authority", "manager"}, {"machine", "b"}};
+        a.addSeconds("session", 1800); b.addSeconds("session", 2400);
+        QJsonObject plan;
+        QString error;
+        QVERIFY2(planAllocations(profile, {{"here", a}, {"b", b}}, {}, now, &plan, &error), qPrintable(error));
+        auto documents = plan.value("documents").toObject();
+        QCOMPARE(documents.size(), 2);
+        QCOMPARE(documents.value("here").toObject().value("limits").toObject().value("session").toInt(), 3300);
+        QCOMPARE(documents.value("b").toObject().value("limits").toObject().value("session").toInt(), 3900);
+        QVERIFY(applyAllocation(&profile, documents.value("here").toObject(), now.date(), &error));
+        const auto applied = profile.allocation;
+        QVERIFY(applyAllocation(&profile, applied, now.date(), &error));
+        a.addSeconds("session", 60);
+        QCOMPARE(allowanceSeconds(profile, budget, a, now.date()) - a.secondsFor("session"), 1440);
+        QCOMPARE(allowanceSeconds(profile, budget, a, now.date().addDays(1)), 0);
+        QJsonObject next;
+        a.allocation = profile.allocation;
+        b.allocation = documents.value("b").toObject();
+        QVERIFY(planAllocations(profile, {{"here", a}, {"b", b}}, plan, now, &next, &error));
+        QCOMPARE(next, plan); // Consumption/retry does not refill a portion.
+        QVERIFY(!planAllocations(profile, {{"here", a}, {"b", b}}, {}, now, &next, &error));
+        b.observedAt = now.addSecs(-121);
+        QVERIFY(!planAllocations(profile, {{"here", a}, {"b", b}}, plan, now, &next, &error));
+        b.observedAt = now;
+        QVERIFY(!planAllocations(profile, {{"here", a}}, plan, now, &next, &error));
+        a.grants.append(Grant{now, "operator", "session", 10});
+        QVERIFY(planAllocations(profile, {{"here", a}, {"b", b}}, plan, now, &next, &error));
+        auto newer = next.value("documents").toObject().value("here").toObject();
+        const auto oldRemote = b.allocation;
+        b.allocation = next.value("documents").toObject().value("b").toObject();
+        QJsonObject refusedPlan;
+        QVERIFY(!planAllocations(profile, {{"here", a}, {"b", b}}, plan, now, &refusedPlan, &error));
+        b.allocation = oldRemote;
+        auto corrupt = plan;
+        corrupt.insert("revision", 0);
+        QVERIFY(!planAllocations(profile, {{"here", a}, {"b", b}}, corrupt, now, &refusedPlan, &error));
+        QCOMPARE(newer.value("limits").toObject().value("session").toInt(), 3600);
+        QVERIFY(applyAllocation(&profile, newer, now.date(), &error));
+        QVERIFY(!applyAllocation(&profile, applied, now.date(), &error));
+        newer.insert("authority", "other");
+        QVERIFY(!applyAllocation(&profile, newer, now.date(), &error));
+        newer = profile.allocation;
+        newer.insert("limits", QJsonObject{{"session", 9000}});
+        QVERIFY(!applyAllocation(&profile, newer, now.date(), &error));
+        QCOMPARE(profile.allocation.value("limits").toObject().value("session").toInt(), 3600);
+    }
+
+    void allocationZeroExhaustsAndStandaloneStillWorks()
+    {
+        Profile profile;
+        profile.user = "kid"; profile.enforce = true;
+        Budget budget;
+        budget.id = "session"; budget.match = "*"; budget.dailyMinutes = 120;
+        budget.onExhausted = OnExhausted::Logout;
+        profile.budgets << budget;
+        const QDateTime now(QDate(2026, 9, 7), QTime(12, 0), QTimeZone::UTC);
+        Ledger day; day.user = "kid"; day.date = now.date();
+        QCOMPARE(allowanceSeconds(profile, budget, day, now.date()), 7200);
+        profile.allocation = QJsonObject{{"authority", "manager"}, {"machine", "here"}};
+        QCOMPARE(allowanceSeconds(profile, budget, day, now.date()), 0);
+        auto outcome = evaluate(profile, {}, day, now, 0);
+        QVERIFY(!outcome.decisions.isEmpty());
+        bool logout = false;
+        for (const auto &decision : outcome.decisions)
+            logout |= decision.kind == Decision::Kind::Logout;
+        QVERIFY(logout);
+        QString error;
+        QJsonObject zero{{"user", "kid"}, {"authority", "manager"}, {"machine", "here"},
+                         {"date", now.date().toString(Qt::ISODate)}, {"revision", 1},
+                         {"limits", QJsonObject{{"session", 0}}}};
+        QVERIFY(applyAllocation(&profile, zero, now.date(), &error));
+        QCOMPARE(allowanceSeconds(profile, budget, day, now.date()), 0);
+        zero.insert("date", now.date().addDays(1).toString(Qt::ISODate));
+        QVERIFY(!applyAllocation(&profile, zero, now.date(), &error));
+    }
+
     void aMachineSurvivesTheFile()
     {
         Machine machine;

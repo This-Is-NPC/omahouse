@@ -467,3 +467,24 @@ and the tabs, and `39-studio-mais-tempo-hoje.png`, where the `+` that opened
 Neither is reachable from the generator: the first needs a window somebody has
 resized, and the second is a keystroke arriving after the sheet is up, which is
 a race the offscreen run does not lose.
+
+
+## Household machines
+
+Select an account as the operator and press **f**. Each row is one limited
+budget on one computer: consumption, received daily portion and remaining time,
+followed by the observation state and timestamp. **/** filters these rows,
+**j/k** moves, **+** records household credit, and **h** returns to people.
+The same commands are clickable; the subject face cannot enter this view.
+
+![Two session portions, with the remote machine explicitly showing a stale report.](img/31-operator-machines.png)
+
+This generated fixture reserves 75 minutes here and 45 on station-02. After
+70 and 40 minutes of recorded consumption, each has five minutes left. The
+remote observation has a fixed old timestamp: its portion stays reserved, but
+its displayed remaining time may have been spent since that observation.
+
+Credit added here is delivered by the next successful Battery cycle. The window
+reads local snapshots and uses the existing privileged CLI for writes; it does
+not run a scheduler. Follow [the explicit setup](how-to-schedule-household.md)
+to enroll computers and activate the Omakure schedule.

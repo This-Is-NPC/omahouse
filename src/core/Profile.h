@@ -160,6 +160,9 @@ struct Profile {
     /// something, so a profile that was never given a web rule looks exactly
     /// like one whose last web rule was taken back.
     Web web;
+    /// Explicit opt-in to exclusive daily portions, bound to one authority and
+    /// logical machine. Empty retains standalone behavior.
+    QJsonObject allocation;
 
     /// The first rule that names `scopeId` wins; with none, the profile default
     /// decides. First and not last because the rules are read in the order the

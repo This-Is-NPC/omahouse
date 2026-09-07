@@ -131,21 +131,19 @@ void Ledger::addSiteSeconds(const QString &site, int amount)
 
 int Ledger::grantedSeconds(const QString &budgetId) const
 {
-    // Negative minutes count. A grant used to be a gift and nothing else, and
-    // the sum skipped anything not above zero -- which was defensive rather
-    // than meant, because there was no verb that could write one.
-    //
-    // `leave` is that verb. A household with more than one computer has one
-    // number to spend and several machines spending it, and the only way a
-    // central can push the truth down is to say what should remain here --
-    // which is a grant with a sign when what remains is less than what a
-    // machine thought.
-    //
-    // Zero is still skipped: it says nothing and would only be a row in the
-    // report for somebody to wonder about.
     int total = 0;
     for (const Grant &grant : grants) {
         if (grant.budget == budgetId && grant.minutes != 0)
+            total += grant.minutes * 60;
+    }
+    return total;
+}
+
+int Ledger::creditedSeconds(const QString &budgetId) const
+{
+    int total = 0;
+    for (const Grant &grant : grants) {
+        if (grant.budget == budgetId && !grant.adjustment)
             total += grant.minutes * 60;
     }
     return total;
@@ -186,12 +184,15 @@ QJsonObject Ledger::toJson() const
 
     QJsonArray grantArray;
     for (const Grant &grant : grants) {
-        grantArray.append(QJsonObject{
+        QJsonObject entry{
             {QStringLiteral("at"), isoWithOffset(grant.at)},
             {QStringLiteral("by"), grant.by},
             {QStringLiteral("budget"), grant.budget},
             {QStringLiteral("minutes"), grant.minutes},
-        });
+        };
+        if (grant.adjustment)
+            entry.insert(QStringLiteral("kind"), QStringLiteral("adjustment"));
+        grantArray.append(entry);
     }
 
     QJsonArray eventArray;
@@ -239,6 +240,8 @@ QJsonObject Ledger::toJson() const
             siteObject.insert(it.key(), it.value());
         document.insert(QStringLiteral("sites"), siteObject);
     }
+    if (!allocation.isEmpty()) document.insert(QStringLiteral("allocation"), allocation);
+    if (observedAt.isValid()) document.insert(QStringLiteral("observedAt"), isoWithOffset(observedAt));
     return document;
 }
 
@@ -261,6 +264,17 @@ bool Ledger::fromJson(const QJsonObject &object, Ledger *out, QString *error)
             *error = QStringLiteral("a ledger has an unreadable date: %1").arg(dateText);
         return false;
     }
+
+    if (object.contains(QStringLiteral("allocation"))) {
+        if (!object.value(QStringLiteral("allocation")).isObject()) {
+            if (error) *error = QStringLiteral("allocation must be an object");
+            return false;
+        }
+        ledger.allocation = object.value(QStringLiteral("allocation")).toObject();
+    }
+    if (object.contains(QStringLiteral("observedAt"))
+            && !wantsDateTime(object, QStringLiteral("observedAt"), what, &ledger.observedAt, error))
+        return false;
 
     const QJsonValue budgetsValue = object.value(QStringLiteral("budgets"));
     if (!budgetsValue.isUndefined() && !budgetsValue.isObject()) {
@@ -354,6 +368,13 @@ bool Ledger::fromJson(const QJsonObject &object, Ledger *out, QString *error)
             return false;
         }
         grant.minutes = minutes.toInt();
+        if (entry.contains(QStringLiteral("kind"))) {
+            if (entry.value(QStringLiteral("kind")) != QJsonValue(QStringLiteral("adjustment"))) {
+                if (error) *error = QStringLiteral("a grant has an unknown kind");
+                return false;
+            }
+            grant.adjustment = true;
+        }
         ledger.grants.append(grant);
     }
 

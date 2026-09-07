@@ -46,6 +46,7 @@ Window {
     property int cursorPrograms: 0
     property int cursorSites: 0
     property int cursorToday: 0
+    property int cursorFleet: 0
     property string filter: ""
     property bool filtering: false
     /// What `minutes`, `grant` and `drop` are about, kept from the moment the
@@ -95,6 +96,9 @@ Window {
         : (House.snapshot.sites[win.subject] || [])
     readonly property var allToday: win.subject === "" ? []
         : (House.snapshot.today[win.subject] || [])
+    readonly property var fleetRows: win.subject === "" ? []
+        : ((House.snapshot.fleet || {})[win.subject] || []).filter(win.matches)
+    readonly property int fleetCursor: win.clamp(win.cursorFleet, win.fleetRows.length)
     readonly property var catalogue: win.subject === "" ? []
         : (House.snapshot.catalog[win.subject] || [])
 
@@ -110,17 +114,19 @@ Window {
         return false
     }
 
-    readonly property var peopleRows: win.people.filter(win.matches)
+    readonly property var peopleRows: win.view === 5 ? win.people : win.people.filter(win.matches)
     readonly property var programRows: win.allPrograms.filter(win.matches)
     readonly property var siteRows: win.allSites.filter(win.matches)
     readonly property var todayRows: win.allToday.filter(win.matches)
 
     readonly property var rows: win.view === 1 ? win.peopleRows
                               : win.view === 2 ? win.programRows
+                              : win.view === 5 ? win.fleetRows
                               : win.view === 4 ? win.siteRows
                                                : win.todayRows
     readonly property int cursor: win.view === 1 ? win.peopleCursor
                                  : win.view === 2 ? win.programCursor
+                                 : win.view === 5 ? win.fleetCursor
                                  : win.view === 4 ? win.siteCursor
                                                   : win.todayCursor
     readonly property var currentRow: win.cursor < 0 || win.cursor >= win.rows.length
@@ -147,6 +153,14 @@ Window {
         if (!win.operating)
             return rows
 
+        rows.push({ id: "fleet", key: "f", hint: "machines",
+                    label: "manage the household machines", usable: person !== null && win.view !== 5 })
+        if (win.view === 5) {
+            rows.push({ id: "grant", key: "+", hint: "household credit",
+                        label: "add household credit for the next synchronization",
+                        usable: row !== null && row.limited })
+            return rows
+        }
         if (win.view === 1) {
             rows.push({ id: "new", key: "n", hint: "new profile",
                         label: "put an account under rules", usable: true })
@@ -320,6 +334,7 @@ Window {
     }
 
     function go(which) {
+        if (which === 5 && !win.operating) return
         win.view = which
         win.filter = ""
         win.filtering = false
@@ -333,6 +348,8 @@ Window {
             win.cursorPeople = at
         else if (win.view === 2)
             win.cursorPrograms = at
+        else if (win.view === 5)
+            win.cursorFleet = at
         else if (win.view === 4)
             win.cursorSites = at
         else
@@ -341,6 +358,8 @@ Window {
             peopleList.positionViewAtIndex(at, ListView.Contain)
         else if (win.view === 2)
             programList.positionViewAtIndex(at, ListView.Contain)
+        else if (win.view === 5)
+            fleetList.positionViewAtIndex(at, ListView.Contain)
         else if (win.view === 4)
             siteList.positionViewAtIndex(at, ListView.Contain)
         else
@@ -371,6 +390,10 @@ Window {
         const person = win.person
         const row = win.currentRow
 
+        if (id === "fleet") {
+            win.go(5)
+            return
+        }
         if (id === "open") {
             if (win.person !== null)
                 win.go(2)
@@ -918,6 +941,90 @@ Window {
                 height: parent.height - header.height - bar.height - status.height - 3
 
                 // ------------------------------------------------ 1 · people
+                Item {
+                    anchors.fill: parent
+                    visible: win.view === 5 && win.operating
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 16
+                        spacing: 12
+                        Label {
+                            width: parent.width
+                            text: "Household machines · " + win.subject
+                            font.pixelSize: 20
+                        }
+                        Label {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            quiet: true
+                            text: "Each portion stays reserved while its machine is offline. "
+                                  + "Added credit is distributed by the next Battery run. "
+                                  + "A recent report is not a live connection."
+                        }
+                        Label {
+                            width: parent.width
+                            visible: win.fleetRows.length === 0
+                            text: "No limited budgets to manage. Configure a profile and enroll the Battery."
+                            wrapMode: Text.WordWrap
+                        }
+                        Row {
+                            objectName: "fleetColumns"
+                            width: parent.width
+                            Label { width: parent.width * 0.45; text: "MACHINE / BUDGET"; quiet: true }
+                            Label { text: "USED / PORTION / LEFT"; quiet: true }
+                        }
+                        ListView {
+                            id: fleetList
+                            objectName: "fleetList"
+                            width: parent.width
+                            height: Math.max(0, parent.height - y)
+                            clip: true
+                            model: win.fleetRows
+                            spacing: 4
+                            delegate: Rectangle {
+                                id: fleetRow
+                                required property int index
+                                required property var modelData
+                                width: fleetList.width
+                                height: 96
+                                color: index === win.fleetCursor ? Theme.panel : "transparent"
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.margins: 8
+                                    spacing: 3
+                                    Row {
+                                        width: parent.width
+                                        Label {
+                                            width: parent.width * 0.45
+                                            elide: Text.ElideRight
+                                            text: fleetRow.modelData.name + " / " + fleetRow.modelData.id
+                                        }
+                                        Label {
+                                            width: parent.width * 0.55
+                                            elide: Text.ElideRight
+                                            text: fleetRow.modelData.used + " / "
+                                                  + fleetRow.modelData.portion + " / " + fleetRow.modelData.left
+                                        }
+                                    }
+                                    Label {
+                                        width: parent.width
+                                        text: fleetRow.modelData.state
+                                        quiet: true
+                                        elide: Text.ElideRight
+                                    }
+                                    Label {
+                                        width: parent.width
+                                        text: "Last report: " + fleetRow.modelData.lastReport
+                                        quiet: true
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                                TapHandler { onTapped: win.setCursor(fleetRow.index) }
+                            }
+                        }
+                    }
+                }
+
                 Item {
                     anchors.fill: parent
                     visible: win.view === 1

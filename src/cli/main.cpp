@@ -1,4 +1,8 @@
 #include "Chromium.h"
+#include "Allocation.h"
+#include "Json.h"
+#include <QLockFile>
+#include <QUuid>
 #include "Duration.h"
 #include "Focus.h"
 #include "FocusFile.h"
@@ -496,7 +500,8 @@ QVector<Balance> balancesOf(const Profile &profile, const Ledger &ledger)
         balance.grantedSeconds = ledger.grantedSeconds(budget.id);
         balance.usedSeconds = ledger.secondsFor(budget.id);
         if (budget.hasLimit()) {
-            balance.limitSeconds = budget.dailyMinutes * 60 + balance.grantedSeconds;
+            balance.limitSeconds = allowanceSeconds(profile, budget, ledger,
+                ledger.date.isValid() ? ledger.date : QDate::currentDate());
             balance.leftSeconds = qMax(0, balance.limitSeconds - balance.usedSeconds);
         }
         balances.append(balance);
@@ -3670,6 +3675,11 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
         return kMissing;
     }
 
+    const QString ledgerPath = paths::ledgerFile(user, today);
+    QLockFile ledgerLock(ledgerPath + QStringLiteral(".lock"));
+    if (!QDir().mkpath(QFileInfo(ledgerPath).absolutePath()) || !ledgerLock.tryLock(5000)) {
+        fail(QStringLiteral("cannot lock the day's ledger")); return kUsage;
+    }
     Ledger ledger;
     bool missing = false;
     if (!loadLedger(user, today, &ledger, &missing, &status))
@@ -3694,7 +3704,7 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
     const int granted = ledger.grantedSeconds(id);
     const int used = ledger.secondsFor(id);
     const bool limited = budget->hasLimit();
-    const int limit = limited ? budget->dailyMinutes * 60 + granted : 0;
+    const int limit = limited ? allowanceSeconds(*profile, *budget, ledger, today) : 0;
     const int left = limited ? qMax(0, limit - used) : 0;
 
     if (g.json) {
@@ -3710,13 +3720,16 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
         document.insert(QStringLiteral("limitSeconds"),
                         limited ? QJsonValue(limit) : QJsonValue());
         document.insert(QStringLiteral("leftSeconds"), limited ? QJsonValue(left) : QJsonValue());
+        document.insert(QStringLiteral("pendingAllocation"), !profile->allocation.isEmpty());
         printJson(document);
         return kOk;
     }
 
     out() << QStringLiteral("%1: +%2 of %3, from %4.")
                  .arg(user, durationFromMinutes(minutes), id, grant.by);
-    if (limited)
+    if (!profile->allocation.isEmpty())
+        out() << QStringLiteral(" Household credit recorded; the next successful Battery sync assigns it.");
+    else if (limited)
         out() << QStringLiteral(" %1 left today.").arg(humanDuration(left));
     else
         out() << QStringLiteral(" %1 has no limit, so it was only written down.").arg(id);
@@ -3726,14 +3739,8 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
 
 int cmdLeave(const Globals &g, const QStringList &positionals, const Options &options)
 {
-    // The other end of `grant`, and it says what should remain rather than what
-    // to take away.
-    //
-    // That is not a matter of taste. A household with more than one computer
-    // consolidates on a loop -- read every machine's day, add it up, push the
-    // truth back -- and "take ten minutes off" said every minute drains the day
-    // by teatime. "Leave thirty minutes of today" said twice is the same as
-    // said once, and a verb a loop can repeat is the only kind a loop can use.
+    // A local operator adjustment. Repeating it after consumption tops up
+    // remaining time, so distributed synchronization uses absolute allocations.
     if (positionals.size() != 1) {
         fail(QStringLiteral("leave: which user? (try omahouse --help)"));
         return kUsage;
@@ -3763,7 +3770,8 @@ int cmdLeave(const Globals &g, const QStringList &positionals, const Options &op
 
     int wantMinutes = 0;
     QString error;
-    if (!minutesFromDuration(written, &wantMinutes, &error)) {
+    if (written != QLatin1String("0m") && written != QLatin1String("0")
+            && !minutesFromDuration(written, &wantMinutes, &error)) {
         fail(QStringLiteral("leave: %1").arg(error));
         return kUsage;
     }
@@ -3780,6 +3788,10 @@ int cmdLeave(const Globals &g, const QStringList &positionals, const Options &op
     Profile *profile = profileToChange(QStringLiteral("leave"), &profiles, user, &status);
     if (!profile)
         return status;
+    if (!profile->allocation.isEmpty()) {
+        fail(QStringLiteral("leave: this profile uses exclusive portions; use allocation apply"));
+        return kUsage;
+    }
     const Budget *budget = budgetFor(profile, id);
     if (!budget) {
         fail(QStringLiteral("leave: %1 has no budget called %2; omahouse profile show %1 "
@@ -3798,6 +3810,11 @@ int cmdLeave(const Globals &g, const QStringList &positionals, const Options &op
         return kUsage;
     }
 
+    const QString ledgerPath = paths::ledgerFile(user, today);
+    QLockFile ledgerLock(ledgerPath + QStringLiteral(".lock"));
+    if (!QDir().mkpath(QFileInfo(ledgerPath).absolutePath()) || !ledgerLock.tryLock(5000)) {
+        fail(QStringLiteral("cannot lock the day's ledger")); return kUsage;
+    }
     Ledger ledger;
     bool missing = false;
     if (!loadLedger(user, today, &ledger, &missing, &status))
@@ -3825,6 +3842,7 @@ int cmdLeave(const Globals &g, const QStringList &positionals, const Options &op
         grant.by = operatorUser();
         grant.budget = id;
         grant.minutes = deltaMinutes;
+        grant.adjustment = true;
         ledger.grants.append(grant);
 
         QString writeError;
@@ -3912,6 +3930,18 @@ int cmdDay(const Globals &g, const QStringList &positionals, const Options &opti
     if (!readLedger(paths::ledgerFile(user, when), &ledger, &error, &missing)) {
         fail(QStringLiteral("day: %1").arg(error));
         return kUsage;
+    }
+    Profiles profiles;
+    int profileStatus = kOk;
+    if (!loadProfiles(&profiles, &profileStatus)) return profileStatus;
+    for (const auto &profile : profiles.all) {
+        if (profile.user == user && !profile.allocation.isEmpty()) {
+            ledger.user = user;
+            ledger.date = when;
+            ledger.allocation = profile.allocation;
+            ledger.observedAt = QDateTime::currentDateTimeUtc();
+            missing = false; // An enrolled, idle machine explicitly reports zero.
+        }
     }
     // `missing` and not the return value: a file that is not there is not a
     // failure to read, which is right everywhere else in omahouse and wrong
@@ -4015,6 +4045,25 @@ int cmdCollect(const Globals &g, const QStringList &positionals)
     }
     // The same writer this machine's own days go through, so a collected day and
     // a local one are the same bytes read by the same reader.
+    QLockFile snapshotLock(path + QStringLiteral(".lock"));
+    if (!snapshotLock.tryLock(5000)) {
+        fail(QStringLiteral("collect: cannot lock the observation")); return kUsage;
+    }
+    Ledger previous;
+    bool absent = false;
+    if (!readLedger(path, &previous, &error, &absent)) {
+        fail(QStringLiteral("collect: %1").arg(error)); return kUsage;
+    }
+    if (!absent && previous.observedAt.isValid()) {
+        if (!ledger.observedAt.isValid() || ledger.observedAt < previous.observedAt) {
+            fail(QStringLiteral("collect: stale snapshot")); return kUsage;
+        }
+        for (auto it = previous.seconds.begin(); it != previous.seconds.end(); ++it) {
+            if (ledger.secondsFor(it.key()) < it.value()) {
+                fail(QStringLiteral("collect: consumption moved backwards")); return kUsage;
+            }
+        }
+    }
     if (!writeLedger(path, ledger, &error)) {
         fail(QStringLiteral("collect: %1").arg(error));
         return kUsage;
@@ -4683,6 +4732,130 @@ bool stopWhenTold(QObject *guard)
     return true;
 }
 
+// -- exclusive household allocations -----------------------------------------
+
+int cmdAllocation(const Globals &g, const QStringList &args, const Options &options)
+{
+    const QString action = args.value(0);
+    const QString user = args.value(1);
+    if (args.size() != 2 || !QStringList{"init", "enroll", "apply", "plan", "show"}.contains(action)) {
+        fail(QStringLiteral("allocation: init|enroll|apply|plan|show <user>")); return kUsage;
+    }
+    if (!onlyTheseOptions(options, action == QLatin1String("enroll")
+                          ? QStringList{"--node", "--name"} : QStringList{}, "allocation"))
+        return kUsage;
+    const bool reading = action == QLatin1String("show");
+    if (!reading && !mayWrite("allocation", paths::profilesFile(), paths::configDirIsTheSystems(), g))
+        return kUsage;
+    const QString directory = paths::stateDir() + QStringLiteral("/allocations/") + user;
+    if (!reading && !QDir().mkpath(directory)) {
+        fail(QStringLiteral("allocation: cannot create reservation directory")); return kUsage;
+    }
+    // All allocation updates of profiles share one lock; planners of one user
+    // share it too, so issued credit is persisted exactly once before delivery.
+    QLockFile lock(paths::stateDir() + QStringLiteral("/allocation.lock"));
+    if (!reading && !lock.tryLock(5000)) {
+        fail(QStringLiteral("allocation: another allocation operation is running")); return kUsage;
+    }
+    Profiles profiles;
+    int status = kOk;
+    if (!loadProfiles(&profiles, &status)) return status;
+    Profile *profile = profileToChange("allocation", &profiles, user, &status);
+    if (!profile) return status;
+    QString error;
+    const QDateTime now = QDateTime::currentDateTime();
+    const QDate today = now.date();
+    const QString file = directory + QLatin1Char('/') + today.toString(Qt::ISODate) + QStringLiteral(".json");
+    if (reading) {
+        QJsonObject reservation;
+        bool absent = false;
+        if (!readJsonObject(file, &reservation, &error, &absent)) {
+            fail(error); return kUsage;
+        }
+        printJson(QJsonObject{{"user", user}, {"allocation", profile->allocation},
+                             {"reservation", reservation}});
+        return kOk;
+    }
+    if (action == QLatin1String("init") || action == QLatin1String("enroll")) {
+        const QString authority = action == QLatin1String("init")
+                ? (profile->allocation.isEmpty() ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+                   : profile->allocation.value("authority").toString()) : options.node;
+        const QString machine = action == QLatin1String("init") ? QStringLiteral("here") : options.name;
+        const QJsonObject enrollment{{"authority", authority}, {"machine", machine}};
+        if (!validAllocation(enrollment, &error)) { fail(error); return kUsage; }
+        if (!profile->allocation.isEmpty()) {
+            if (profile->allocation.value("authority").toString() != authority
+                    || profile->allocation.value("machine").toString() != machine) {
+                fail(QStringLiteral("allocation: already bound to another authority/machine")); return kUsage;
+            }
+        } else {
+            bool limited = false;
+            for (const auto &budget : profile->budgets) {
+                if (budget.hasLimit()) {
+                    limited = true;
+                    if (budget.onExhausted == OnExhausted::Warn) {
+                        fail(QStringLiteral("allocation: limited budgets must close, log out or block"));
+                        return kUsage;
+                    }
+                }
+            }
+            if (!limited) { fail(QStringLiteral("allocation: profile has no limited budgets")); return kUsage; }
+            profile->allocation = enrollment;
+            profile->enabled = true;
+            profile->enforce = true;
+            // Exclusive credit has no extra grace allowance per machine.
+            profile->graceSeconds = 0;
+            if (!saveProfiles("allocation enroll", profiles.all)) return kUsage;
+        }
+        printJson(QJsonObject{{"user", user}, {"allocation", profile->allocation}});
+        return kOk;
+    }
+    if (action == QLatin1String("apply")) {
+        QFile input;
+        if (!input.open(stdin, QIODevice::ReadOnly)) {
+            fail(QStringLiteral("allocation: cannot read stdin")); return kUsage;
+        }
+        QJsonParseError parsing;
+        const auto doc = QJsonDocument::fromJson(input.read(1024 * 1024 + 1), &parsing);
+        if (parsing.error != QJsonParseError::NoError || !doc.isObject()
+                || !applyAllocation(profile, doc.object(), today, &error)) {
+            fail(QStringLiteral("allocation: %1").arg(error.isEmpty() ? "invalid JSON document" : error));
+            return kUsage;
+        }
+        if (!saveProfiles("allocation apply", profiles.all)) return kUsage;
+        printJson(profile->allocation);
+        return kOk;
+    }
+    // A local day is live; each remote one must have arrived via collect.
+    QVector<QPair<QString, Ledger>> days;
+    Ledger mine;
+    bool missing = false;
+    if (!loadLedger(user, today, &mine, &missing, &status)) return status;
+    mine.allocation = profile->allocation;
+    mine.observedAt = now;
+    days.append({"here", mine});
+    Fleet fleet;
+    if (!loadMachines(&fleet, &status)) return status;
+    for (const auto &machine : fleet.all) {
+        Ledger theirs;
+        if (!readLedger(paths::elsewhereLedgerFile(machine.name, user, today), &theirs, &error, &missing)
+                || missing) {
+            fail(QStringLiteral("allocation: %1 needs a collected day: %2").arg(machine.name, error));
+            return kUsage;
+        }
+        days.append({machine.name, theirs});
+    }
+    QJsonObject previous, plan;
+    if (!readJsonObject(file, &previous, &error, &missing)
+            || !planAllocations(*profile, days, previous, now, &plan, &error)
+            || (plan != previous && !writeJsonAtomically(file, plan, &error))) {
+        fail(QStringLiteral("allocation: %1").arg(error)); return kUsage;
+    }
+    printJson(plan);
+    return kOk;
+}
+
+
 int cmdWatch(const Globals &g, const QStringList &positionals, const Options &options)
 {
     if (!positionals.isEmpty()) {
@@ -4936,6 +5109,8 @@ Writing, and root needed — the studio gets there by pkexec:
   allow <user> <app> [--limit 45m]   let it run, and put it on the clock
   deny  <user> <app>                 do not let it run
   limit <user> --session 2h | --budget minecraft=45m | --site youtube.com=30m
+  allocation init|enroll|apply|plan|show <user>
+      enroll: --node <authority> --name <machine>; apply reads JSON from stdin
   grant <user> --session 10m | --budget minecraft=15m
   leave <user> --session 30m | --budget minecraft=15m
                            what should be left of today, rather than what to
@@ -5024,6 +5199,24 @@ int dispatch(const Globals &g, const QStringList &args)
     const QString verb = rest.value(0);
     const QStringList positionals = rest.mid(1);
 
+    // The scheduler may apply a portion while an operator edits a rule. Both
+    // replace profiles.json, so serialize the entire read/modify/write cycle.
+    const bool profileWrite = QStringList{"allow", "deny", "limit"}.contains(verb)
+        || (verb == QLatin1String("profile") && !QStringList{"show", "list"}.contains(rest.value(1)))
+        || (verb == QLatin1String("web") && rest.value(1) != QLatin1String("show"))
+        || (verb == QLatin1String("allocation") && rest.value(1) != QLatin1String("show"));
+    QLockFile profileLock(paths::profilesFile() + QStringLiteral(".lock"));
+    if (profileWrite) {
+        if (!mayWrite(verb, paths::profilesFile(), paths::configDirIsTheSystems(), g))
+            return kUsage;
+        if (!QDir().mkpath(paths::configDir()) || !profileLock.tryLock(5000)) {
+            fail(QStringLiteral("%1: cannot lock profiles for writing").arg(verb));
+            return kUsage;
+        }
+    }
+
+    if (verb == QLatin1String("allocation"))
+        return cmdAllocation(g, positionals, options);
     if (verb == QLatin1String("status")) {
         if (!onlyTheseOptions(options, {}, verb))
             return kUsage;

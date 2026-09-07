@@ -7,6 +7,9 @@
 #include "Users.h"
 
 #include <algorithm>
+#include <QDir>
+#include <QFileInfo>
+#include <QLockFile>
 
 namespace omahouse {
 
@@ -365,6 +368,12 @@ void Watch::observe(const Profile &profile, Watched *watched, const SeatReading 
     // §2 still stands is a question about their day and not about whether they
     // are at the keyboard.
     const QString path = paths::ledgerFile(profile.user, now.date());
+    QLockFile ledgerLock(path + QStringLiteral(".lock"));
+    if (!m_options.dryRun && (!QDir().mkpath(QFileInfo(path).absolutePath())
+                              || !ledgerLock.tryLock(5000))) {
+        watched->error = QStringLiteral("cannot lock the day's ledger");
+        return;
+    }
     Ledger before;
     bool missing = false;
     QString error;

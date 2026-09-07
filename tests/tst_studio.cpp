@@ -37,6 +37,7 @@
 #include "Catalog.h"
 #include "House.h"
 #include "Ledger.h"
+#include "Fleet.h"
 #include "Profile.h"
 #include "Theme.h"
 #include "Paths.h"
@@ -152,6 +153,7 @@ private slots:
     void aRefusalIsASentenceAndNotASilence();
     void saysWhatIsReallyInsideAShim();
     void drawsItself();
+    void fleetPanelShowsMissingMachinesAndUsesTheKeyboard();
     void theSubjectFaceHasNothingToPress();
     void theWindowNeverWritesToTheMachine();
     void writesTheOperatorShots();
@@ -848,7 +850,7 @@ void TestStudio::everyCommandIsBothAKeyAndAChip()
 
     QSet<QString> keysSeen;
     QMap<QString, bool> reachable;
-    for (int view = 1; view <= 4; ++view) {
+    for (int view = 1; view <= 5; ++view) {
         QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(view)));
         settle();
         const QVariantList commands = root()->property("commands").toList();
@@ -1576,6 +1578,46 @@ void TestStudio::seedTheExampleSession(uid_t uid)
         makeProcess(procRoot, pid, QStringLiteral("/usr/share/code/code"));
 }
 
+void TestStudio::fleetPanelShowsMissingMachinesAndUsesTheKeyboard()
+{
+    if (!root()->property("operating").toBool()) QSKIP("operator only");
+    seedTheExampleHousehold();
+    m_admin->run("fixture", {"machine", "add", "station-02"});
+    QVERIFY(waitForWrite());
+    key('f');
+    QCOMPARE(root()->property("view").toInt(), 5);
+    const auto rows = root()->property("rows").toList();
+    QVERIFY(rows.size() >= 2);
+    bool missing = false;
+    for (const auto &row : rows) {
+        const auto item = row.toMap();
+        if (item.value("name").toString() == "station-02") {
+            missing = true;
+            QCOMPARE(item.value("state").toString(), QStringLiteral("no report today"));
+            QCOMPARE(item.value("used").toString(), QStringLiteral("?"));
+        }
+    }
+    QVERIFY(missing);
+    QVERIFY(awaitItem("fleetColumns"));
+    root()->setProperty("filter", QStringLiteral("station-02"));
+    settle();
+    QVERIFY(!root()->property("rows").toList().isEmpty());
+    for (const auto &row : root()->property("rows").toList())
+        QCOMPARE(row.toMap().value("name").toString(), QStringLiteral("station-02"));
+    root()->setProperty("filter", QStringLiteral(""));
+    settle();
+    key('j');
+    QCOMPARE(root()->property("cursor").toInt(), 1);
+    key('+');
+    QVERIFY(root()->property("blocked").toBool());
+    key(Qt::Key_Escape);
+    key('h');
+    QCOMPARE(root()->property("view").toInt(), 1);
+    // A subject cannot enter the operator's fleet view through its public go.
+    m_admin->run("fixture", {"machine", "remove", "station-02"});
+    QVERIFY(waitForWrite());
+}
+
 void TestStudio::writesTheOperatorShots()
 {
     if (shotsDir().isEmpty())
@@ -1595,6 +1637,37 @@ void TestStudio::writesTheOperatorShots()
     shoot(QStringLiteral("02-operator-programs"));
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(3)));
     shoot(QStringLiteral("03-operator-today"));
+    // The machines picture uses the same local day plus an explicitly stale
+    // remote observation. A fixed timestamp keeps the generated image stable.
+    QVector<Profile> originalProfiles;
+    QString fleetError;
+    QVERIFY(readProfiles(paths::profilesFile(), &originalProfiles, &fleetError));
+    auto enrolledProfiles = originalProfiles;
+    const QString date = QDate::currentDate().toString(Qt::ISODate);
+    QJsonObject document{{"authority", "example"}, {"machine", "here"},
+        {"user", "nobody"}, {"date", date}, {"revision", 1},
+        {"limits", QJsonObject{{"session", 4500}, {"code", 2700}, {"firefox", 3600}, {"youtube.com", 1800}}}};
+    for (auto &profile : enrolledProfiles)
+        if (profile.user == QLatin1String("nobody")) profile.allocation = document;
+    QVERIFY(writeProfiles(paths::profilesFile(), enrolledProfiles, &fleetError));
+    Machine station; station.name = QStringLiteral("station-02");
+    QVERIFY(writeMachines(paths::machinesFile(), {station}, &fleetError));
+    Ledger remote;
+    remote.user = QStringLiteral("nobody"); remote.date = QDate::currentDate();
+    remote.addSeconds(QStringLiteral("session"), 2400);
+    document.insert("machine", "station-02");
+    document.insert("limits", QJsonObject{{"session", 2700}});
+    remote.allocation = document;
+    remote.observedAt = QDateTime::fromString(QStringLiteral("2026-09-01T09:30:00"), Qt::ISODate);
+    QVERIFY(writeLedger(paths::elsewhereLedgerFile(station.name, remote.user, remote.date), remote, &fleetError));
+    m_house->reload();
+    key('f');
+    root()->setProperty("filter", QStringLiteral("session"));
+    shoot(QStringLiteral("31-operator-machines"));
+    root()->setProperty("filter", QStringLiteral(""));
+    QVERIFY(writeProfiles(paths::profilesFile(), originalProfiles, &fleetError));
+    QVERIFY(writeMachines(paths::machinesFile(), {}, &fleetError));
+    m_house->reload();
 
     // The window's own three sheets.
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));

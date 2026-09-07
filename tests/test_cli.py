@@ -1970,6 +1970,67 @@ def check_leave_says_what_is_left_and_can_be_said_twice(box):
     assert document["minutes"] == 15, document
 
 
+def check_allocations_are_absolute_and_fail_closed(box):
+    box.write_profiles(watching_profile())
+    box.write_day(TODAY, {"session": 1800})
+    enrolled = box.run("allocation", "init", USER)
+    assert enrolled.returncode == 0, enrolled.stderr
+    initial = json.loads(enrolled.stdout)["allocation"]
+    zero = json.loads(box.run("status", USER, "--json").stdout)["budgets"][0]
+    assert zero["leftSeconds"] == 0, zero
+    refused_leave = box.run("leave", USER, "--session", "30m")
+    assert refused_leave.returncode == 1 and "exclusive portions" in refused_leave.stderr
+    planned = box.run("allocation", "plan", USER)
+    assert planned.returncode == 0, planned.stderr
+    plan = json.loads(planned.stdout)
+    document = plan["documents"]["here"]
+    assert document["limits"]["session"] == 7200
+    for _ in range(2):
+        applied = box.run("allocation", "apply", USER, stdin=json.dumps(document))
+        assert applied.returncode == 0, applied.stderr
+    box.write_day(TODAY, {"session": 1860})
+    balance = json.loads(box.run("status", USER, "--json").stdout)["budgets"][0]
+    assert balance["leftSeconds"] == 5340, balance
+    same = box.run("allocation", "plan", USER)
+    assert same.returncode == 0 and json.loads(same.stdout) == plan, same.stderr
+    for changed in ({"revision": 0}, {"limits": {"session": 8000}},
+                    {"authority": "another"}, {"date": "2000-01-01"}):
+        bad = box.run("allocation", "apply", USER, stdin=json.dumps(dict(document, **changed)))
+        assert bad.returncode == 1, bad.stdout
+    granted = box.run("grant", USER, "--session", "10m", "--json")
+    assert granted.returncode == 0, granted.stderr
+    assert json.loads(granted.stdout)["pendingAllocation"] is True
+    assert json.loads(granted.stdout)["leftSeconds"] == 5340
+    next_plan = json.loads(box.run("allocation", "plan", USER).stdout)
+    assert next_plan["documents"]["here"]["limits"]["session"] == 7800
+    assert next_plan["revision"] == 2
+    # Reservations cannot be reconstructed from consumption after state loss.
+    (box.state / "allocations" / USER / f"{TODAY}.json").unlink()
+    refused = box.run("allocation", "plan", USER)
+    assert refused.returncode == 1 and "restore" in refused.stderr, refused.stderr
+    exported = json.loads(box.run("day", USER).stdout)
+    assert exported["allocation"]["authority"] == initial["authority"]
+    assert exported["observedAt"]
+
+
+def check_leave_does_not_change_household_credit(box):
+    """A local synchronization adjustment must not become global credit."""
+    box.write_profiles(watching_profile())
+    box.write_day(TODAY, {"session": 1800})
+    before = json.loads(box.run("house", USER, "--json").stdout)["budgets"][0]
+    assert before["limitSeconds"] == 7200
+    for remaining in ("30m", "45m", "0m", "0m"):
+        applied = box.run("leave", USER, "--session", remaining)
+        assert applied.returncode == 0, applied.stderr
+        after = json.loads(box.run("house", USER, "--json").stdout)["budgets"][0]
+        assert after["limitSeconds"] == 7200, after
+        assert after["totalSeconds"] == 1800, after
+    assert all(g.get("kind") == "adjustment" for g in box.day(TODAY)["grants"])
+    assert box.run("grant", USER, "--session", "10m").returncode == 0
+    credited = json.loads(box.run("house", USER, "--json").stdout)["budgets"][0]
+    assert credited["limitSeconds"] == 7800, credited
+
+
 def check_leave_refuses_what_it_cannot_leave(box):
     """Every refusal, because this verb is made to be driven by a machine."""
     box.write_profiles(watching_profile())
@@ -3092,6 +3153,8 @@ def main():
         check_watch_refuses_what_it_does_not_do,
         check_leave_says_what_is_left_and_can_be_said_twice,
         check_leave_refuses_what_it_cannot_leave,
+        check_leave_does_not_change_household_credit,
+        check_allocations_are_absolute_and_fail_closed,
         check_watch_counts_a_faster_tick,
         check_watch_runs_for_a_while_and_then_stops,
         check_watch_refuses_a_window_it_cannot_honour,

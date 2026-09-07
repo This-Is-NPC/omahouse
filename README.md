@@ -9,6 +9,12 @@ when the credit does.
 ![the day, live](docs/img/03-operator-today.png)
 ![the sites, and the minutes on them](docs/img/15-operator-sites.png)
 
+A household can share one daily allowance across computers using
+[exclusive portions and an Omakure Battery schedule](docs/how-to-schedule-household.md).
+The operator's window shows each machine with **f**. Omakure runs automation;
+omahouse owns the credit and local enforcement. One-machine use needs no
+scheduler, and Omastore remains an independent application.
+
 ## Install
 
 Not published as an Omarchy default yet. From a checkout:

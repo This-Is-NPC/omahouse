@@ -1,4 +1,6 @@
 #include "House.h"
+#include "Allocation.h"
+#include "Fleet.h"
 
 #include "AppScope.h"
 #include "Catalog.h"
@@ -117,17 +119,63 @@ const Budget *budgetFor(const Profile &profile, const QString &id, Selects selec
     return nullptr;
 }
 
-/// The clock of one budget, as both numbers and words.
-///
-/// `allowanceSeconds` is the limit plus whatever an operator handed over today,
-/// because a grant that did not show up in the limit would read on this window
-/// as though it had gone nowhere -- and `docs/design.md` §7 keeps `grant` precisely so
-/// that an operator can add ten minutes and see it land.
-QVariantMap clockOf(const Budget &budget, const Ledger &ledger, bool running)
+/// Last observations and delivered portions; network collection belongs to the Battery.
+QVariantList fleetRows(const Profile &profile, const Ledger &local, const QDateTime &now)
+{
+    QVector<Machine> machines;
+    QString error;
+    bool absent = false;
+    QVariantList rows;
+    if (!readMachines(paths::machinesFile(), &machines, &error, &absent)) {
+        rows.append(QVariantMap{{"name", "machine list"}, {"state", error}, {"id", ""},
+                                {"limited", false}, {"used", "?"}, {"portion", "?"}, {"left", "?"},
+                                {"lastReport", "unreadable"}});
+        return rows;
+    }
+    QVector<QPair<QString, Ledger>> days{{"here", local}};
+    QMap<QString, QString> faults;
+    for (const auto &machine : machines) {
+        Ledger day;
+        if (!readLedger(paths::elsewhereLedgerFile(machine.name, profile.user, now.date()),
+                        &day, &error, &absent) || absent)
+            faults.insert(machine.name, absent ? QStringLiteral("no report today") : error);
+        days.append({machine.name, day});
+    }
+    for (const auto &day : days) {
+        const bool here = day.first == QLatin1String("here");
+        const auto allocation = here ? profile.allocation : day.second.allocation;
+        const bool fresh = here || (day.second.observedAt.isValid()
+            && day.second.observedAt.secsTo(now) >= -5 && day.second.observedAt.secsTo(now) <= 120);
+        const bool allocated = allocation.value("date").toString() == now.date().toString(Qt::ISODate);
+        const auto limits = allocation.value("limits").toObject();
+        for (const auto &budget : profile.budgets) {
+            if (!budget.hasLimit()) continue;
+            const int used = day.second.secondsFor(budget.id);
+            const int portion = allocated ? limits.value(budget.id).toInt(0) : 0;
+            const QString state = faults.contains(day.first) ? faults.value(day.first)
+                : allocation.isEmpty() ? QStringLiteral("not enrolled")
+                : !fresh ? QStringLiteral("stale report; portion reserved")
+                : !allocated ? QStringLiteral("waiting for today's portion")
+                             : QStringLiteral("portion received");
+            rows.append(QVariantMap{{"name", day.first}, {"id", budget.id}, {"kind", "budget"},
+                {"state", state}, {"limited", true}, {"hasBudget", true},
+                {"used", faults.contains(day.first) ? "?" : spellSeconds(used)},
+                {"portion", allocated ? spellSeconds(portion) : "0m"},
+                {"left", allocated ? spellSeconds(qMax(0, portion - used)) : "0m"},
+                {"lastReport", here ? QStringLiteral("local") : day.second.observedAt.isValid()
+                    ? day.second.observedAt.toLocalTime().toString(Qt::ISODate) : QStringLiteral("never")}});
+        }
+    }
+    return rows;
+}
+
+/// A local clock uses its received portion when enrolled; grants await a plan.
+QVariantMap clockOf(const Profile &profile, const Budget &budget, const Ledger &ledger, bool running)
 {
     const int granted = ledger.grantedSeconds(budget.id);
     const int spent = ledger.secondsFor(budget.id);
-    const int allowance = budget.hasLimit() ? budget.dailyMinutes * 60 + granted : 0;
+    const int allowance = budget.hasLimit() ? allowanceSeconds(profile, budget, ledger,
+        ledger.date.isValid() ? ledger.date : QDate::currentDate()) : 0;
     const int left = budget.hasLimit() ? std::max(0, allowance - spent) : 0;
 
     QVariantMap clock;
@@ -207,7 +255,7 @@ QVariantList programsOf(const Profile &profile, const Ledger &ledger,
         const Budget *budget = budgetFor(profile, id, Selects::App);
         const Live live = liveFor(scopes, id);
 
-        QVariantMap row = budget ? clockOf(*budget, ledger, live.pids > 0)
+        QVariantMap row = budget ? clockOf(profile, *budget, ledger, live.pids > 0)
                                  : noClock(0);
         row.insert(QStringLiteral("kind"), QStringLiteral("program"));
         row.insert(QStringLiteral("id"), id);
@@ -252,7 +300,7 @@ QVariantList todayOf(const Profile &profile, const Ledger &ledger,
         // is neither that account nor root, so it cannot look, and it says
         // nothing rather than answering from the app scopes, where a name that
         // happened to match would be a coincidence and not a browser.
-        QVariantMap row = clockOf(budget, ledger,
+        QVariantMap row = clockOf(profile, budget, ledger,
                                   !budget.isSite() && anythingMatching(scopes, budget.match));
         row.insert(QStringLiteral("kind"), QStringLiteral("budget"));
         row.insert(QStringLiteral("id"), budget.id);
@@ -389,7 +437,7 @@ QVariantList sitesOf(const Profile &profile, const Ledger &ledger,
         const Budget *budget = budgetFor(profile, domain, Selects::Site);
         const int onIt = ledger.siteSecondsFor(domain);
 
-        QVariantMap row = budget ? clockOf(*budget, ledger, false) : noClock(onIt);
+        QVariantMap row = budget ? clockOf(profile, *budget, ledger, false) : noClock(onIt);
         row.insert(QStringLiteral("kind"), QStringLiteral("site"));
         row.insert(QStringLiteral("id"), domain);
         row.insert(QStringLiteral("name"), domain);
@@ -714,6 +762,7 @@ void House::refresh()
     QVariantMap todays;
     QVariantMap catalogs;
     QVariantMap sites;
+    QVariantMap fleet;
 
     for (const Profile &profile : std::as_const(visible)) {
         uid_t uid = 0;
@@ -735,6 +784,7 @@ void House::refresh()
         }
 
         const Ledger ledger = days.value(profile.user);
+        if (administers) fleet.insert(profile.user, fleetRows(profile, ledger, when));
 
         const QVariantList programRows = programsOf(profile, ledger, scopes, byId);
         const QVariantList todayRows = todayOf(profile, ledger, scopes, byId);
@@ -818,6 +868,7 @@ void House::refresh()
     snapshot.insert(QStringLiteral("people"), people);
     snapshot.insert(QStringLiteral("programs"), programs);
     snapshot.insert(QStringLiteral("sites"), sites);
+    snapshot.insert(QStringLiteral("fleet"), fleet);
     snapshot.insert(QStringLiteral("today"), todays);
     snapshot.insert(QStringLiteral("catalog"), catalogs);
 

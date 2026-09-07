@@ -1,4 +1,5 @@
 #include "Profile.h"
+#include "Allocation.h"
 
 #include "Json.h"
 
@@ -310,6 +311,8 @@ QJsonObject Profile::toJson() const
             webObject.insert(QStringLiteral("incognito"), verdictName(web.incognito));
         object.insert(QStringLiteral("web"), webObject);
     }
+    if (!allocation.isEmpty())
+        object.insert(QStringLiteral("allocation"), allocation);
     return object;
 }
 
@@ -326,6 +329,12 @@ bool Profile::fromJson(const QJsonObject &object, Profile *out, QString *error)
         return false;
     }
     const QString named = QStringLiteral("the profile of %1").arg(profile.user);
+    if (object.contains(QStringLiteral("allocation"))) {
+        if (!object.value(QStringLiteral("allocation")).isObject()
+                || !validAllocation(object.value(QStringLiteral("allocation")).toObject(), error))
+            return false;
+        profile.allocation = object.value(QStringLiteral("allocation")).toObject();
+    }
 
     if (!wantsString(object, QStringLiteral("displayName"), named, &profile.displayName, false,
                      error))

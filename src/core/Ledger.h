@@ -37,6 +37,8 @@ struct Grant {
     QString by;
     QString budget;
     int minutes = 0;
+    /// Local balance adjustment, excluded from household credit.
+    bool adjustment = false;
 };
 
 struct Event {
@@ -90,6 +92,8 @@ struct Ledger {
     /// A QMap for the same reason `seconds` is one: the file is written every
     /// couple of seconds and read by people.
     QMap<QString, int> sites;
+    QJsonObject allocation;
+    QDateTime observedAt;
     QVector<Grant> grants;
     QVector<Event> events;
 
@@ -105,6 +109,7 @@ struct Ledger {
     /// Minutes an operator added today, as seconds, for one budget. Grants are
     /// in the day's own file, so they expire by the file expiring.
     int grantedSeconds(const QString &budgetId) const;
+    int creditedSeconds(const QString &budgetId) const;
 
     bool hasWarned(const QString &budgetId, int minutes) const;
     bool hasDenied(const QString &scopeUnit) const;
