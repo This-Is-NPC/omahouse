@@ -213,3 +213,48 @@ def walked(vm, dad):
         raise Failed("forgetting the computer took its profile with it, and the "
                      "page says it does not")
     print("      forgotten here, and untouched there")
+
+    # -- And taking omahouse off it entirely ---------------------------------
+    #
+    # The page's last line says how-to-install-and-remove.md "applies there
+    # exactly as it does here", and that sentence has never been tested on a
+    # machine that was linked. Everything the removal is measured against was
+    # put there by the install; linking puts more on a machine afterwards, and
+    # the scriptlet's `_artifacts` -- the one place any of those paths is
+    # written down -- has never heard of any of it.
+    code, said = vm.root("pacman -Rns --noconfirm omahouse", check=False)
+    if code != 0:
+        raise Failed(f"taking omahouse off the linked computer said {code}:\n{said[:500]}")
+    if "everything omahouse put on this machine is off it" not in said:
+        raise Failed(f"the removal no longer says what it promises:\n{said[:600]}")
+
+    # What linking put there, in the order it would hurt. Each is checked for
+    # itself, because `they are all still there` and `one of them is still
+    # there` are different reports and only the second one is ever surprising.
+    left = []
+    for path, why in (
+            ("/etc/sudoers.d/omahouse-node",
+             "a sudoers rule, with nothing on the machine left to explain it"),
+            ("/etc/systemd/system/omakure-node.service",
+             "the node's unit"),
+            ("/etc/systemd/system/omakure-node.service.d/omahouse.conf",
+             "the drop-in that puts the console on the household network"),
+            ("/etc/omahouse/machine.json",
+             "the machine still calls itself managed"),
+            ("/etc/omahouse/machine-tokens.json",
+             "a bearer token, 0600 and readable by root alone"),
+            ("/etc/omahouse/omakure-token",
+             "the node's own bearer"),
+    ):
+        if vm.root(f"test -e {path}", check=False)[0] == 0:
+            left.append(f"  {path}\n      {why}")
+    running = vm.root("systemctl is-active omakure-node.service", check=False)[1].strip()
+    if running == "active":
+        left.append("  omakure-node.service is still running, on a machine with "
+                    "no omahouse on it")
+
+    if left:
+        raise Failed(
+            "`pacman -R` says everything omahouse put on this machine is off it, "
+            "and this is still on it:\n" + "\n".join(left))
+    print("      and pacman -R took the link off with it")
