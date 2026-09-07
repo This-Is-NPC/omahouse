@@ -205,10 +205,19 @@ class VM:
         a key the guest would then have to trust.
         """
         root = f"/var/cache/{name}"
-        self.root(f"rm -rf {root} && mkdir -p {root}")
+        # `sh -c` around anything with a `&&` in it: `sudo a && b` puts only `a`
+        # under sudo, and the second half then fails on a directory root has
+        # just made.
+        self.root(f"sh -c 'rm -rf {root} && mkdir -p {root}'")
         for package in packages:
             self.put(str(package), f"/tmp/{package.name}")
             self.root(f"mv /tmp/{package.name} {root}/")
+            # And any copy pacman already has under that name. These are built
+            # fresh every run with the same version, so a cached one from a
+            # previous run has the right name and the wrong bytes -- which
+            # pacman reports as `invalid or corrupted package (checksum)`,
+            # reading like a broken build and meaning a stale cache.
+            self.root(f"rm -f /var/cache/pacman/pkg/{package.name}", check=False)
         self.root(f"sh -c 'cd {root} && repo-add {name}.db.tar.gz *.pkg.tar.*'")
         # Written once and never twice: a second `[name]` section makes pacman
         # refuse the whole file.
@@ -235,6 +244,26 @@ class VM:
         self.root("chown -R omakure:omakure /tmp/battery")
         self.root("chmod -R a+rX /tmp/battery")
         return "/tmp/battery"
+
+    @property
+    def built_package(self):
+        """The omahouse package, built once per run and remembered.
+
+        A property rather than a step in the run, because only the cases that
+        install through pacman need it and `makepkg` is twenty seconds nobody
+        else should pay.
+        """
+        global _built_package
+        if _built_package is None:
+            _built_package = build_the_package()
+        return _built_package
+
+    @property
+    def built_omakure_package(self):
+        global _built_omakure_package
+        if _built_omakure_package is None:
+            _built_omakure_package = build_the_omakure_package(self.omakure_binary)
+        return _built_omakure_package
 
     @property
     def build_binary(self):
@@ -1009,6 +1038,10 @@ def log_in_on_omarchy(vm):
     # a few seconds after the compositor.
     vm.wait_for(lambda: vm.ssh(f"pgrep -u {vm.subject} -x quickshell", check=False)[0] == 0,
                 vm.pace["patience_seconds"], "the Omarchy shell to come up")
+
+
+_built_package = None
+_built_omakure_package = None
 
 
 def build_the_package():
