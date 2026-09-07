@@ -140,6 +140,15 @@ def walked(vm, dad):
         raise Failed(f"the operator's machine does not call itself the console:\n"
                      f"{manager}")
 
+    # And it calls itself something of its own. `--name` on `machine link` is
+    # the *other* computer's name, and passing it through to the verb that makes
+    # this one a manager gave a household where every computer answered `the
+    # kitchen laptop` -- on the one screen the page says will tell them apart.
+    # The sentence below was already checked and could never have caught it.
+    if "the kitchen laptop" in manager:
+        raise Failed(f"the operator's machine took the name of the computer it "
+                     f"just linked:\n{manager}")
+
     managed = dad.root(f"ssh arch@{there} omahouse machine kind", check=False)[1]
     # The sentence the whole design turns on, and the page says so in bold.
     if "still enforcing its own rules on its own" not in managed:
@@ -147,6 +156,11 @@ def walked(vm, dad):
                      f"rules:\n{managed}")
     if "its manager is" not in managed:
         raise Failed(f"the linked machine does not name its manager:\n{managed}")
+    # Two computers, two names. The page prints them as two different words and
+    # a household that cannot tell its computers apart has no use for a list.
+    if managed.splitlines()[0].strip() == manager.splitlines()[0].strip():
+        raise Failed(f"both computers call themselves "
+                     f"{manager.splitlines()[0].strip()!r}")
     print("      each computer says what it is, and the managed one says it is "
           "still its own")
 
