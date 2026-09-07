@@ -26,6 +26,7 @@ SOURCES += \
     tst_enforce.cpp \
     tst_webpolicy.cpp \
     tst_fleet.cpp \
+    tst_kind.cpp \
     tst_pairing.cpp
 
 # The suite links the same archive the CLI links, rather than recompiling the

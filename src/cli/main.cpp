@@ -2,6 +2,7 @@
 #include "Duration.h"
 #include "Focus.h"
 #include "FocusFile.h"
+#include "Kind.h"
 #include "Ledger.h"
 #include "NodeConfig.h"
 #include "Notify.h"
@@ -1701,6 +1702,68 @@ int cmdMachineToken(const Globals &g, const QStringList &positionals)
     return kOk;
 }
 
+/// Write down what this machine has become, beside becoming it.
+///
+/// Called from the two verbs that already decide it, so the file and the fact
+/// cannot come apart: a machine that ran `machine prepare` is managed whether or
+/// not anything was written, and the point of the file is that a person can ask.
+bool rememberKind(const QString &verb, Kind kind, const QString &name,
+                  const QString &managedBy)
+{
+    ThisMachine machine;
+    QString error;
+    bool ignored = false;
+    readThisMachine(paths::thisMachineFile(), &machine, &error, &ignored);
+    machine.kind = kind;
+    machine.name = name;
+    machine.managedBy = managedBy;
+    machine.since = QDateTime::currentDateTime();
+    if (writeThisMachine(paths::thisMachineFile(), machine, &error))
+        return true;
+    fail(QStringLiteral("%1: %2").arg(verb, error));
+    return false;
+}
+
+int cmdMachineKind(const Globals &g)
+{
+    ThisMachine machine;
+    QString error;
+    bool missing = false;
+    if (!readThisMachine(paths::thisMachineFile(), &machine, &error, &missing)) {
+        fail(QStringLiteral("machine kind: %1").arg(error));
+        return kUsage;
+    }
+
+    if (g.json) {
+        printJson(QJsonObject {
+            {QStringLiteral("kind"), kindName(machine.kind)},
+            {QStringLiteral("name"), machine.name},
+            {QStringLiteral("managedBy"), machine.managedBy},
+            {QStringLiteral("since"), machine.since.isValid()
+                                              ? machine.since.toString(Qt::ISODate)
+                                              : QString()},
+        });
+        return kOk;
+    }
+
+    out() << QStringLiteral("%1\n")
+                 .arg(machine.name.isEmpty() ? QStringLiteral("this machine")
+                                             : machine.name);
+    out() << QStringLiteral("  %1.\n").arg(kindSaid(machine.kind));
+    if (!machine.managedBy.isEmpty())
+        out() << QStringLiteral("  its manager is %1\n").arg(machine.managedBy);
+    if (machine.kind == Kind::Alone) {
+        // Said out loud, because "alone" is the state somebody would otherwise
+        // read as "not set up yet". One computer under rules is the whole
+        // product working; linking is what a second computer needs.
+        out() << QStringLiteral("\n  Rules, budgets and the browser all work here "
+                                "exactly as they are.\n"
+                                "  Linking is what a second computer needs, not "
+                                "something this one is missing.\n");
+    }
+    return kOk;
+}
+
 int cmdMachineInvite(const Globals &g, const Options &options)
 {
     const QString verb = QStringLiteral("machine invite");
@@ -1776,10 +1839,16 @@ int cmdMachineInvite(const Globals &g, const Options &options)
     mine.name = config.displayName;
     const QString line = encodePairing(mine);
 
+    // This machine is the household's console from here on, and it says so in a
+    // file rather than only in what it happens to have configured.
+    if (!rememberKind(verb, Kind::Manager, mine.name, QString()))
+        return kUsage;
+
     if (g.json) {
         printJson(QJsonObject {{QStringLiteral("name"), mine.name},
                                {QStringLiteral("nodeId"), mine.nodeId},
                                {QStringLiteral("endpoint"), mine.endpoint},
+                               {QStringLiteral("kind"), kindName(Kind::Manager)},
                                {QStringLiteral("madeIdentity"), !had},
                                {QStringLiteral("invite"), line}});
         return kOk;
@@ -1900,6 +1969,14 @@ int cmdMachinePrepare(const Globals &g, const Options &options)
     mine.apiEndpoint = apiEndpointFor(options.at);
     mine.token = reading;
     const QString line = encodePairing(mine);
+
+    // Managed, and it names who by. Everything omahouse does here still works
+    // without that manager -- which is the point of installing the whole of it
+    // rather than an agent: when the console cannot be reached, whoever has root
+    // on this machine can still read the day, hand over time and switch the
+    // teeth off, sitting at it.
+    if (!rememberKind(verb, Kind::Managed, mine.name, conductor.nodeId))
+        return kUsage;
 
     if (g.json) {
         printJson(QJsonObject {{QStringLiteral("name"), mine.name},
@@ -2176,12 +2253,17 @@ int cmdMachine(const Globals &g, const QStringList &positionals, const Options &
             return kUsage;
         return cmdMachineRemove(g, rest);
     }
+    if (what == QLatin1String("kind")) {
+        if (!onlyTheseOptions(options, {}, QStringLiteral("machine kind")))
+            return kUsage;
+        return cmdMachineKind(g);
+    }
     if (what == QLatin1String("token")) {
         if (!onlyTheseOptions(options, {}, QStringLiteral("machine token")))
             return kUsage;
         return cmdMachineToken(g, rest);
     }
-    fail(QStringLiteral("machine: invite, prepare, add, remove or token, "
+    fail(QStringLiteral("machine: kind, invite, prepare, add, remove or token, "
                         "not '%1'").arg(what));
     return kUsage;
 }
@@ -4589,6 +4671,9 @@ Reading, and no privilege needed:
   profile show <user>      the rules, the budgets and what happens when they end
   machines                 the computers this household owns
   house <user>             what the house spent today, every machine added up
+
+  machine kind             what this computer is: alone, manager or managed.
+                           Alone is the ordinary state and nothing is missing
 
 Writing, and root needed — the studio gets there by pkexec:
   profile add <user>       a new profile: observing, and allowing everything

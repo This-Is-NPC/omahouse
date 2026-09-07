@@ -23,6 +23,7 @@ HEADERS += \
     Focus.h \
     Furniture.h \
     Json.h \
+    Kind.h \
     Ledger.h \
     NodeConfig.h \
     Pairing.h \
@@ -38,6 +39,7 @@ SOURCES += \
     Focus.cpp \
     Furniture.cpp \
     Json.cpp \
+    Kind.cpp \
     Ledger.cpp \
     NodeConfig.cpp \
     Pairing.cpp \

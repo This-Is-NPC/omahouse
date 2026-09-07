@@ -2435,6 +2435,67 @@ def check_the_house_writes_down_its_machines(box):
         == ["the kitchen laptop"]
 
 
+def check_a_machine_says_what_it_is(box):
+    """Alone, manager or managed -- and alone is not a lesser state.
+
+    It was implicit until now: a machine became a manager by running one verb
+    and managed by running another, and nobody could ask. Every verb after it
+    reads differently depending on the answer, so the answer has to be one a
+    person can get.
+    """
+    said = box.run("machine", "kind")
+    assert said.returncode == 0, said.stderr
+    assert "on its own, and nothing is missing" in said.stdout, said.stdout
+    # Said out loud, because "alone" is what somebody would otherwise read as
+    # "not set up yet".
+    assert "Linking is what a second computer needs" in said.stdout, said.stdout
+
+    document = json.loads(box.run("machine", "kind", "--json").stdout)
+    assert document["kind"] == "alone", document
+    assert document["managedBy"] == "", document
+
+    # No file at all is that same answer, and never a failure.
+    assert not (box.config / "machine.json").exists()
+
+
+def check_a_machine_file_that_is_wrong_is_said_and_not_guessed(box):
+    """What it refuses, because this file decides how every later verb reads.
+
+    Reading a half-written link as `alone` would drop a machine out of a
+    household it is really in, and nothing downstream would notice.
+    """
+    for document, says in (
+        ({"schemaVersion": 1, "kind": "managed"}, "names no manager"),
+        ({"schemaVersion": 1, "kind": "overlord"}, "overlord"),
+        ({"schemaVersion": 1, "kind": "manager", "since": "yesterday"}, "yesterday"),
+        ({"schemaVersion": 99, "kind": "manager"}, "schema version 99"),
+    ):
+        (box.config / "machine.json").write_text(json.dumps(document))
+        said = box.run("machine", "kind")
+        assert said.returncode == 1, f"{document} came back {said.returncode}"
+        assert says in said.stderr, said.stderr
+
+    # A manager, written properly, reads back as one.
+    (box.config / "machine.json").write_text(json.dumps({
+        "schemaVersion": 1, "kind": "manager", "name": "the study",
+        "since": "2026-09-06T10:00:00",
+    }))
+    said = box.run("machine", "kind")
+    assert said.returncode == 0, said.stderr
+    assert "the study" in said.stdout, said.stdout
+    assert "household's console" in said.stdout, said.stdout
+
+    # And a managed one names who manages it.
+    (box.config / "machine.json").write_text(json.dumps({
+        "schemaVersion": 1, "kind": "managed", "name": "the kitchen laptop",
+        "managedBy": "omk1_abc123", "since": "2026-09-06T10:00:00",
+    }))
+    said = box.run("machine", "kind")
+    assert said.returncode == 0, said.stderr
+    assert "its manager is omk1_abc123" in said.stdout, said.stdout
+    assert "still enforcing its own rules on its own" in said.stdout, said.stdout
+
+
 def check_the_machine_verbs_refuse_what_they_cannot_do(box):
     """Every refusal, because this file is edited by hand.
 
@@ -2445,8 +2506,8 @@ def check_the_machine_verbs_refuse_what_they_cannot_do(box):
         (("machine", "add"), 1, "which machine"),
         (("machine", "remove"), 1, "which machine"),
         (("machine", "remove", "nobody"), 2, "no machine called"),
-        (("machine",), 1, "invite, prepare, add, remove or token"),
-        (("machine", "polish"), 1, "invite, prepare, add, remove or token"),
+        (("machine",), 1, "kind, invite, prepare, add, remove or token"),
+        (("machine", "polish"), 1, "kind, invite, prepare, add, remove or token"),
         (("machine", "token"), 1, "which machine"),
         (("machine", "token", "nobody"), 2, "nothing to read nobody with"),
     ):
@@ -3008,6 +3069,8 @@ def main():
         check_a_day_travels_from_one_machine_to_another,
         check_the_transport_refuses_a_day_it_should_not_file,
         check_the_house_refuses_what_it_cannot_add_up,
+        check_a_machine_says_what_it_is,
+        check_a_machine_file_that_is_wrong_is_said_and_not_guessed,
         check_the_machine_verbs_refuse_what_they_cannot_do,
         check_pairing_refuses_a_line_that_did_not_arrive_whole,
         check_pairing_says_when_there_is_no_omakure_to_pair_with,

@@ -293,6 +293,22 @@ The trust is asymmetric on purpose. The new machine trusts the operator's as a C
 
 The list itself is `omahouse machines`.
 
+## `omahouse machine kind`
+
+- **Usage:** `omahouse machine kind`
+
+What this computer is in the household: alone, the manager, or managed.
+
+It was implicit until this verb existed -- a machine became the manager by running `machine invite` and became managed by running `machine prepare` -- and implicit is exactly wrong for it. Every verb after reads differently depending on the answer: `house` is the manager's question, `day` is a managed machine's answer, and a console open to the household belongs on one of them and not the other. Somebody who cannot ask a computer which it is cannot check any of that.
+
+**Alone is the default and it is not a lesser state.** Most households are one computer, and one computer under rules is the whole product working: the budgets are enforced, the browser is held, the day is written. Linking is what a second computer needs, not what the first one was missing -- and this verb says so in as many words, because `alone` is what somebody would otherwise read as `not set up yet`.
+
+**A managed computer gets the whole of omahouse, not an agent.** That is deliberate and it is what this file records. A thin client would be smaller and would fail the one situation it exists for: when the manager cannot be reached, whoever has root on the managed computer sits at it and fixes it there -- reads the day, hands over time, switches the teeth off. A computer that could only be administered from somewhere else is a computer that is unadministrable exactly when something has gone wrong.
+
+It lives in `/etc/omahouse/machine.json`, and deliberately not in `machines.json`: that file is the household's list of *other* computers, and a computer can be in somebody else's list without knowing it. This is what this one says about itself. Its absence is a computer on its own, which is most of them and never an error.
+
+A file that says `managed` and names no manager is refused rather than read, and so is a kind this build does not know. Reading either as `alone` would drop a computer out of a household it is really in, and nothing downstream would notice.
+
 ## `omahouse machine invite`
 
 - **Usage:** `omahouse machine invite [--at <host:port>] [--name <name>]`
