@@ -551,6 +551,49 @@ private slots:
         QVERIFY2(error.contains(QStringLiteral("weekly")), qPrintable(error));
     }
 
+// Who wrote a profile down, and when, survives the file and is absent
+    // until somebody writes it.
+    void theStampSurvivesTheFileAndIsAbsentUntilItIsWritten()
+    {
+        Profile julia = person(QStringLiteral("julia"));
+        QVERIFY2(!julia.toJson().contains(QStringLiteral("writtenBy")),
+                 "a profile nobody has changed wrote a stamp, which rewrites every "
+                 "profiles.json on every machine");
+        QVERIFY(!julia.toJson().contains(QStringLiteral("writtenAt")));
+
+        julia.writtenBy = QStringLiteral("howl");
+        julia.writtenAt = QDateTime(QDate(2026, 9, 8), QTime(15, 1, 40),
+                                    QTimeZone::fromSecondsAheadOfUtc(-3 * 3600));
+
+        Profile read;
+        QString error;
+        QVERIFY2(Profile::fromJson(julia.toJson(), &read, &error), qPrintable(error));
+        QCOMPARE(read.writtenBy, QStringLiteral("howl"));
+        QCOMPARE(read.writtenAt, julia.writtenAt);
+        QCOMPARE(read.toJson(), julia.toJson());
+
+        // `withoutTheStamp` is what "did this change" is asked of, so it has to
+        // drop both halves and nothing else. Without this, every save would
+        // differ from the last by the stamp itself and every profile would be
+        // stamped on every run.
+        Profile other = julia;
+        other.writtenBy = QStringLiteral("ana");
+        other.writtenAt = julia.writtenAt.addDays(9);
+        QCOMPARE(other.withoutTheStamp(), julia.withoutTheStamp());
+        other.enforce = !other.enforce;
+        QVERIFY(other.withoutTheStamp() != julia.withoutTheStamp());
+
+        // A stamp that is there and unreadable is refused rather than dropped.
+        // Silently becoming "never" would make the profile that has one lose
+        // every tiebreak against one that does not.
+        QJsonObject broken = julia.toJson();
+        broken.insert(QStringLiteral("writtenAt"), QStringLiteral("last Tuesday"));
+        QVERIFY(!Profile::fromJson(broken, &read, &error));
+        QVERIFY2(error.contains(QStringLiteral("writtenAt")), qPrintable(error));
+        broken.insert(QStringLiteral("writtenAt"), 17);
+        QVERIFY(!Profile::fromJson(broken, &read, &error));
+    }
+
     // A site with no action named blocks, an app with none warns. Different
     // defaults because they are the honest reading of each: the observing stage
     // for apps is `enforce: false`, and for sites it was the whole of §5.2.

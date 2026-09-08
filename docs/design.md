@@ -185,6 +185,18 @@ Two files, both JSON, both read and written by `core`.
 profiles: `enabled`, `enforce`, `default`, `warnAt`, `grace`, `rules`,
 `budgets`. `user` is the only required field.
 
+A profile also carries `writtenBy` and `writtenAt` once something has changed
+it. The file is written by root and read by everybody, and the honest answer to
+*who put this here* used to be "somebody". `writtenBy` is the person and never
+`root`: under `pkexec` it is who polkit authenticated, the same answer a grant
+records. The stamp is set where the file is saved rather than by each verb —
+there are a dozen places that change a profile, and a stamp a caller has to
+remember is one that will be missing from whichever verb is added next — and
+what is on disk is compared against what is about to be written, so exactly the
+profiles that differ are stamped. A run that rewrites the file without changing
+anybody leaves every stamp where it was, or the record of who last changed a
+rule would be a record of who last ran a command.
+
 - A permitted program with no budget of its own spends the day's total.
 - `enforce: false` is **observing mode**: it counts and reports, and closes
   nothing.

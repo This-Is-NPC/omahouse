@@ -1059,7 +1059,15 @@ def check_a_profile_from_nothing_to_read_back(box):
 
     written = json.loads((box.config / "profiles.json").read_text())
     assert written["schemaVersion"] == 1
-    assert written["profiles"][0] == {
+    fresh = dict(written["profiles"][0])
+    # Who wrote it down and when, lifted out and checked separately: the whole
+    # of the rest is fixed and worth comparing as one object, and these two are
+    # a clock and an account name.
+    stamped_at = fresh.pop("writtenAt")
+    stamped_by = fresh.pop("writtenBy")
+    assert stamped_at.startswith(TODAY.isoformat()), stamped_at
+    assert stamped_by, stamped_by
+    assert fresh == {
         "user": "julia", "displayName": "Júlia", "enabled": True, "enforce": False,
         "default": "allow", "warnAt": [10, 5, 1], "grace": 20,
         "rules": [], "budgets": [],
@@ -1273,6 +1281,61 @@ def check_one_budget_covers_a_browsers_two_ids(box):
     twice = box.run("allow", USER, "chromium", "chromium")
     assert twice.returncode == 1, twice.stdout
     assert "named twice" in twice.stderr, twice.stderr
+
+
+def check_a_profile_records_who_changed_it_and_when(box):
+    """`/etc/omahouse/profiles.json` is written by root and read by everybody,
+    and until now the honest answer to "who put this here" was "somebody".
+
+    The stamp is written where the file is saved and not by each verb, because
+    there are a dozen places that change a profile and a stamp a caller has to
+    remember is one that will be missing from whichever verb somebody adds
+    next. What is on disk is compared against what is about to be written, so
+    exactly the profiles that differ are stamped.
+
+    That last part is the one worth a test of its own: a run that rewrites the
+    file without changing anybody must leave every stamp alone, or the record
+    of who last changed a rule becomes a record of who last ran a command.
+    """
+    # Two profiles with distinct old stamps, written by hand. The clock has a
+    # second's resolution, so a case that made two changes and compared the
+    # times would compare two identical numbers and prove nothing; old stamps
+    # from different years are what makes "was this one touched" answerable.
+    box.write_profiles({"schemaVersion": 1, "profiles": [
+        {"user": USER, "displayName": "Kid",
+         "writtenBy": "ana", "writtenAt": "2020-01-01T10:00:00-03:00"},
+        {"user": "daemon", "displayName": "Other",
+         "writtenBy": "pedro", "writtenAt": "2021-06-02T11:00:00-03:00"}]})
+
+    done = box.run("allow", USER, "code")
+    assert done.returncode == 0, done.stderr
+
+    profiles = {p["user"]: p for p in
+                json.loads((box.config / "profiles.json").read_text())["profiles"]}
+    changed = profiles[USER]
+    assert changed["writtenAt"] != "2020-01-01T10:00:00-03:00", changed
+    assert changed["writtenAt"].startswith(TODAY.isoformat()), changed
+    assert changed["writtenBy"] and changed["writtenBy"] != "ana", changed
+
+    # And the one nobody touched keeps the name and the date it had. Without
+    # this the case above passes on an implementation that stamps everything.
+    assert profiles["daemon"]["writtenBy"] == "pedro", profiles["daemon"]
+    assert profiles["daemon"]["writtenAt"] == "2021-06-02T11:00:00-03:00", profiles["daemon"]
+
+    # Running the same verb again changes nothing, so it restamps nothing.
+    before = json.loads((box.config / "profiles.json").read_text())
+    again = box.run("allow", USER, "code")
+    assert again.returncode == 0, again.stderr
+    assert json.loads((box.config / "profiles.json").read_text()) == before
+
+    # `profile show` answers the question out loud, and answers it either way.
+    shown = box.run("profile", "show", USER)
+    assert "Last changed:" in shown.stdout, shown.stdout
+    assert changed["writtenBy"] in shown.stdout, shown.stdout
+
+    box.write_profiles({"schemaVersion": 1, "profiles": [{"user": USER}]})
+    unstamped = box.run("profile", "show", USER)
+    assert "Last changed: not recorded" in unstamped.stdout, unstamped.stdout
 
 
 def check_it_refuses_a_profile_for_an_administrator(box):
@@ -3335,6 +3398,7 @@ def main():
         check_grant_writes_the_days_ledger,
         check_allow_warns_about_what_is_really_inside,
         check_one_budget_covers_a_browsers_two_ids,
+        check_a_profile_records_who_changed_it_and_when,
         check_it_refuses_a_profile_for_an_administrator,
         check_it_refuses_to_write_without_privilege,
         check_create_user_is_built_but_never_run_here,

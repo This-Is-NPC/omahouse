@@ -415,6 +415,16 @@ QJsonObject Profile::toJson() const
     }
     if (!allocation.isEmpty())
         object.insert(QStringLiteral("allocation"), allocation);
+    // The same discipline the rest of this file keeps: absent until something
+    // writes it, so every profiles.json already on a machine reads back byte
+    // for byte until the day somebody changes it.
+    if (!writtenBy.isEmpty())
+        object.insert(QStringLiteral("writtenBy"), writtenBy);
+    if (writtenAt.isValid()) {
+        object.insert(QStringLiteral("writtenAt"),
+                      writtenAt.toOffsetFromUtc(writtenAt.offsetFromUtc())
+                          .toString(Qt::ISODate));
+    }
     return object;
 }
 
@@ -436,6 +446,30 @@ bool Profile::fromJson(const QJsonObject &object, Profile *out, QString *error)
                 || !validAllocation(object.value(QStringLiteral("allocation")).toObject(), error))
             return false;
         profile.allocation = object.value(QStringLiteral("allocation")).toObject();
+    }
+
+    if (!wantsString(object, QStringLiteral("writtenBy"), named, &profile.writtenBy, false,
+                     error))
+        return false;
+    // Absent in every profiles.json written before this existed, which is every
+    // one on a machine today. Present and unreadable is refused rather than
+    // dropped: a stamp that silently became "never" would make the profile that
+    // has it lose every tiebreak against one that does not.
+    const QJsonValue stamped = object.value(QStringLiteral("writtenAt"));
+    if (!stamped.isUndefined() && !stamped.isNull()) {
+        if (!stamped.isString()) {
+            if (error)
+                *error = QStringLiteral("%1 has a non-string writtenAt").arg(named);
+            return false;
+        }
+        profile.writtenAt = QDateTime::fromString(stamped.toString(), Qt::ISODate);
+        if (!profile.writtenAt.isValid()) {
+            if (error) {
+                *error = QStringLiteral("%1 has a writtenAt that is not a date and time: %2")
+                             .arg(named, stamped.toString());
+            }
+            return false;
+        }
     }
 
     if (!wantsString(object, QStringLiteral("displayName"), named, &profile.displayName, false,
@@ -584,6 +618,14 @@ bool Profile::fromJson(const QJsonObject &object, Profile *out, QString *error)
 
     *out = profile;
     return true;
+}
+
+QJsonObject Profile::withoutTheStamp() const
+{
+    QJsonObject bare = toJson();
+    bare.remove(QStringLiteral("writtenBy"));
+    bare.remove(QStringLiteral("writtenAt"));
+    return bare;
 }
 
 QJsonObject profilesToJson(const QVector<Profile> &profiles)

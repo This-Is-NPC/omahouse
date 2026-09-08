@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QDateTime>
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
@@ -248,9 +249,31 @@ struct Profile {
     /// something, so a profile that was never given a web rule looks exactly
     /// like one whose last web rule was taken back.
     Web web;
-    /// Explicit opt-in to exclusive daily portions, bound to one authority and
+    /// Explicit opt-in to a household balance, bound to one authority and
     /// logical machine. Empty retains standalone behavior.
     QJsonObject allocation;
+
+    /// Who last changed this profile, and when. Absent until something does.
+    ///
+    /// One field doing two jobs, which is why it is one field. It answers the
+    /// question an operator asks out loud -- *who put this here, and when* --
+    /// on a file that root writes and everybody reads, where the honest answer
+    /// used to be "somebody, at some point". And it is what a household of
+    /// several computers needs before a profile can travel: two machines
+    /// holding different versions of one profile can only be told apart by
+    /// which was written last, and a profile a central omahouse issued can only
+    /// be told from one an administrator typed here by who wrote it.
+    ///
+    /// `writtenBy` is the person and never `root`. Under `pkexec` that is who
+    /// polkit authenticated, the same answer a grant records, because `root
+    /// changed the rules` is not a line anybody can act on.
+    ///
+    /// **Never a tiebreak for the ledger.** A profile is a decision and has one
+    /// correct version, so the most recent wins. Consumption is an observation
+    /// and adds up; a rule that overwrote it by timestamp would lose the
+    /// afternoon somebody spent the moment another computer reported later.
+    QString writtenBy;
+    QDateTime writtenAt;
 
     /// The first rule that names `scopeId` wins; with none, the profile default
     /// decides. First and not last because the rules are read in the order the
@@ -264,6 +287,13 @@ struct Profile {
 
     QJsonObject toJson() const;
     static bool fromJson(const QJsonObject &object, Profile *out, QString *error);
+
+    /// Everything about this profile except who wrote it down and when.
+    ///
+    /// What "did this profile change" is asked of, so that saving a file
+    /// nobody edited does not restamp it and make every write look like a
+    /// change to whoever reads the stamps.
+    QJsonObject withoutTheStamp() const;
 };
 
 /// The whole of /etc/omahouse/profiles.json, docs/design.md §4.

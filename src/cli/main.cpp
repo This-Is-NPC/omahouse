@@ -2677,6 +2677,19 @@ int cmdProfileShow(const Globals &g, const QStringList &positionals)
     }
 
     printWebRules(*profile, profiles.all);
+
+    // Last, because it is about the file rather than about the rules, and
+    // because it is the line somebody reads when the rules are not what they
+    // expected. Absent on every profile nobody has touched since this shipped,
+    // and said as "not recorded" rather than left out, so the question has an
+    // answer either way.
+    out() << QStringLiteral("\nLast changed: %1\n")
+                 .arg(profile->writtenAt.isValid()
+                          ? QStringLiteral("%1, by %2")
+                                .arg(profile->writtenAt.toString(Qt::ISODate),
+                                     profile->writtenBy.isEmpty() ? QStringLiteral("somebody")
+                                                                  : profile->writtenBy)
+                          : QStringLiteral("not recorded"));
     return kOk;
 }
 
@@ -2794,8 +2807,44 @@ void refreshWebPolicy(const QString &verb, const QVector<Profile> &profiles)
     }
 }
 
-bool saveProfiles(const QString &verb, const QVector<Profile> &profiles)
+/// Who changed what, stamped on the way out.
+///
+/// Here and not at each verb, because there are a dozen places that change a
+/// profile and a stamp a caller has to remember is a stamp that will be missing
+/// from whichever verb somebody adds next. What is on disk is read back and
+/// compared, so exactly the profiles that differ are stamped: a run that
+/// rewrites the file without changing anybody -- and there are several -- leaves
+/// every stamp where it was, or the record of who last changed a rule would be
+/// a record of who last ran a command.
+///
+/// The comparison is `withoutTheStamp`, or every save would differ from the
+/// last by the stamp itself and every profile would be stamped every time.
+void stampWhatChanged(QVector<Profile> *profiles)
 {
+    QVector<Profile> before;
+    QString error;
+    bool missing = false;
+    if (!readProfiles(paths::profilesFile(), &before, &error, &missing) && !missing)
+        return;  // Unreadable: the write below will say so. Nothing to compare against.
+
+    QHash<QString, QJsonObject> was;
+    for (const Profile &profile : std::as_const(before))
+        was.insert(profile.user, profile.withoutTheStamp());
+
+    const QString who = operatorUser();
+    const QDateTime now = QDateTime::currentDateTime();
+    for (Profile &profile : *profiles) {
+        const auto found = was.constFind(profile.user);
+        if (found != was.constEnd() && *found == profile.withoutTheStamp())
+            continue;
+        profile.writtenBy = who;
+        profile.writtenAt = now;
+    }
+}
+
+bool saveProfiles(const QString &verb, QVector<Profile> profiles)
+{
+    stampWhatChanged(&profiles);
     QString error;
     if (!writeProfiles(paths::profilesFile(), profiles, &error)) {
         fail(QStringLiteral("%1: %2").arg(verb, error));
