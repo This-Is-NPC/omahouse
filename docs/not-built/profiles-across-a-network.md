@@ -140,31 +140,53 @@ are the same task.
 
 ## 4. The profile comes from a central omahouse
 
-The profile is not composed on the machine. It is **pulled from a central
-omahouse at login**, and the local file is a cache of the last version that
-machine was told.
+The profile is not composed on the machine. It comes from a central omahouse,
+and the local file is a cache of the last version that machine was told.
 
-**Pulling at login is mandatory.** A machine that cannot reach the central
-omahouse does not let a new person in. The cache serves a session that is
-already running; it does not open a new one.
+### It is a push, because the wire only goes that way
 
-That single rule is what makes the pool safe, and it is worth being explicit
-about why:
+An earlier draft of this page said the machine **pulls** the profile at login.
+That named a direction the wire does not have, and it is corrected here rather
+than quietly removed.
 
-- With the network down, a person can only be spending on **one** machine,
-  because no second machine will let them log in.
-- Therefore the same hour cannot be spent twice, and no ceiling on offline
-  spending is needed to prevent it.
-- A session already running continues on the cached profile, and the spending is
-  recorded locally. When the machine reconnects, `omahouse collect` files the day
-  and the sum is right.
+Omakure's fleet model has three roles and one session direction. The Conductor
+opens the authenticated Noise session towards the Performer. What crosses towards
+the machine is a **Cue** — the name of a local script to run — or a **Baseline**,
+a signed set of script bodies. What comes back is Profile, Pulse and Signal:
+bounded health facts, not an answer to a question. **There is no ask-and-answer
+plane, so a machine cannot interrogate the manager at login.**
+
+So the manager **pushes**. It cues a script on the machine, that script writes
+the profile, and the machine holds it as a cache carrying the written-at stamp of
+§5. A login reads the cache and waits on nothing. No login ever blocks on the
+network, which is the property that matters at eight in the evening.
+
+### The cache has a freshness limit, and it is not the double-spend defence
+
+A cache older than the household's limit does not open a new session. That bounds
+how stale a **policy** may be before a machine stops acting on it.
+
+**It does not bound double spending, and the earlier draft leaned on it as though
+it did.** With the network up, two machines both holding a fresh cache would each
+let the same person in, and each would spend. The login was never the gate.
+
+**The loan is the gate.** Phase C's short borrow, taken when somebody sits down
+and renewed while they use the machine, is the only thing that stops the same
+minutes being spent twice, because it is the only thing that talks to the pool
+while the spending happens.
+
+That gives the honest shape of a machine that cannot reach the manager: the cache
+may still say who the person is and what they may open, and no loan can be taken,
+so there is no time to spend. Whether that reads to the person as *refused at the
+login screen* or as *logged in with nothing left* is a product choice and is not
+made here.
 
 ### What it costs, and the way out
 
-**The central omahouse being down means nobody logs in at a machine they are not
-already sitting at.** This is availability traded for correctness, deliberately,
-and it is the kind of fact that gets discovered at eight in the evening rather
-than read in a document. So it is written here.
+**A machine that has been out of contact past the freshness limit stops opening
+new sessions**, even a second after the network returns, until the next push
+lands. So the push cadence and the freshness limit are one decision and not two,
+and both belong to whoever runs the household.
 
 The way out is the reason omahouse is installed **whole** on every machine and
 not as a thin client: an administrator sits at the machine and creates a profile
@@ -343,9 +365,9 @@ from a pool against a daily clock and against a session clock are different sums
 5. **A profile that names no account.** A fallback applying to any account
    without one of its own, so a machine can carry rules for whoever sits at it.
    *core, cli, studio*
-6. **Pull at login, cache locally.** The central omahouse is the source; the
-   local file is the last version this machine was told; a machine that cannot
-   reach it does not open a new session. *core, sys, cli*
+6. **Push from the manager, cache locally.** A cued script writes the profile;
+   the local file is the last version this machine was told; a cache past the
+   freshness limit opens no new session. *core, sys, cli, omahouse-battery*
 7. **Written-at and written-by on the profile.** The tiebreak needs it and the
    merge screen needs it, and it is one field for both. *core*
 8. **Merge of locally created profiles.** The central omahouse lists what an
@@ -430,5 +452,10 @@ own password while refusing a blanket `auth_self`; and that
 `/etc/sudoers.d/omahouse-node` names the omahouse binary with no verb after it,
 is written by both `machine invite` and `machine prepare`, and is removed by
 `packaging/omahouse.install`.
+
+Also measured, in Omakure on the same day: that the Conductor opens the session
+towards the Performer, that Cue and Baseline are what cross towards a machine,
+that Profile, Pulse and Signal are what come back, and that no plane carries a
+question from a machine to its manager.
 
 **Argued**, and nothing more: everything in §3 through §5. No line of it has run.
