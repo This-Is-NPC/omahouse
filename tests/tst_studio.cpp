@@ -157,6 +157,7 @@ private slots:
     void drawsItself();
     void fleetPanelShowsMissingMachinesAndUsesTheKeyboard();
     void theTodayViewAddsUpTheHouse();
+    void theFilterNarrowsOnlyTheListItWasTypedOn();
     void theSubjectFaceHasNothingToPress();
     void theWindowNeverWritesToTheMachine();
     void writesTheOperatorShots();
@@ -1346,6 +1347,86 @@ void TestStudio::drawsItself()
                  qPrintable(QStringLiteral("%1 is a flat rectangle").arg(frames.at(i))));
     }
     key(Qt::Key_Escape);
+}
+
+/// `/` narrows the list it was typed on, and no other.
+///
+/// The key sheet has said `filter this list` all along and one string was
+/// applied to all five at once. What that cost was not a narrower list: the
+/// profile the window is about follows the cursor of the people list, so a
+/// needle that missed the person emptied the people list -- and then the
+/// programs view had nobody to be about and drew *nobody is under rules yet*
+/// over a household that was right there.
+void TestStudio::theFilterNarrowsOnlyTheListItWasTypedOn()
+{
+    if (!root()->property("operating").toBool()) QSKIP("operator only");
+    seedTheExampleHousehold();
+    if (QTest::currentTestFailed())
+        return;
+
+    // Nothing is asserted about a narrowing until it is known there was
+    // something to narrow. Four programs and one person, or every comparison
+    // below is between two empty lists.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
+    const int programs = root()->property("programRows").toList().size();
+    QVERIFY2(programs > 1, "the fixture has fewer than two programs to tell apart");
+    QCOMPARE(root()->property("peopleRows").toList().size(), 1);
+    QCOMPARE(root()->property("subject").toString(), QStringLiteral("nobody"));
+
+    // A needle that names a program and misses the person. `firefox` is not in
+    // `nobody` and it is not in `Kid`, which is the whole point of choosing it:
+    // this is the needle the old filter could not survive.
+    key('/');
+    typeInto(QStringLiteral("filterField"), QStringLiteral("firefox"));
+    settle();
+
+    const QVariantList narrowed = root()->property("programRows").toList();
+    QCOMPARE(narrowed.size(), 1);
+    QCOMPARE(narrowed.first().toMap().value(QStringLiteral("id")).toString(),
+             QStringLiteral("firefox"));
+
+    // And the people list is untouched, so the window still has somebody to be
+    // about and the view still has rows.
+    QCOMPARE(root()->property("peopleRows").toList().size(), 1);
+    QCOMPARE(root()->property("subject").toString(), QStringLiteral("nobody"));
+    QVERIFY2(!root()->property("todayRows").toList().isEmpty(),
+             "a needle typed on the programs list emptied the day");
+    QVERIFY2(!root()->property("siteRows").toList().isEmpty(),
+             "a needle typed on the programs list emptied the sites");
+
+    key(Qt::Key_Return);
+    settle();
+    QVERIFY(!root()->property("filtering").toBool());
+
+    // Going somewhere else shows that list's own needle, which is none of it.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    QCOMPARE(root()->property("filter").toString(), QString());
+    QCOMPARE(root()->property("peopleRows").toList().size(), 1);
+
+    // And coming back finds the list as it was left. "This list" is not a
+    // thing that lasts until you look away.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
+    QCOMPARE(root()->property("filter").toString(), QStringLiteral("firefox"));
+    QCOMPARE(root()->property("programRows").toList().size(), 1);
+
+    // `Esc` clears the one in front of you, which is what the key sheet says
+    // and the only way back to the whole list without a view change.
+    key(Qt::Key_Escape);
+    settle();
+    QCOMPARE(root()->property("filter").toString(), QString());
+    QCOMPARE(root()->property("programRows").toList().size(), programs);
+
+    // The other direction, and the one the defect was written about: a needle
+    // on the people list narrows the people list, and that is allowed to leave
+    // the window with nobody to be about -- because that is what was asked for.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    key('/');
+    typeInto(QStringLiteral("filterField"), QStringLiteral("zzz"));
+    settle();
+    QCOMPARE(root()->property("peopleRows").toList().size(), 0);
+    key(Qt::Key_Escape);
+    settle();
+    QCOMPARE(root()->property("peopleRows").toList().size(), 1);
 }
 
 void TestStudio::theSubjectFaceHasNothingToPress()
