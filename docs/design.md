@@ -275,6 +275,23 @@ command line or from the window. The model and the arithmetic are here; the rest
 is written down in
 [`not-built/profiles-across-a-network.md`](not-built/profiles-across-a-network.md).
 
+A profile whose `user` is `*` applies to anybody who logs in without one of
+their own — `Profile::anybody`. It is how a machine carries rules for whoever
+sits at it rather than for forty people named one at a time. Four of its rules
+are decided and none shows in the field: a profile of somebody's own wins and
+the whole list is walked before this one is considered; an administrator is
+never covered, and that is a live filter in the cycle rather than a fact about
+the file, so being put in `wheel` takes effect on the next tick; the machine's
+`Kind` does not come into it, because a profile exists by being written and a
+second unwritten condition on it is the failure §8's pages keep making; and each
+person is reported under their own name, so the commands printed beside them can
+be run. A budget that never resets is refused on it where the file is read.
+
+**It runs the other way round from every other profile.** `watch` goes from a
+profile to its user to a uid, and this one has no user to start from, so `Proc`
+answers which accounts have a session — read from the cgroup tree, because the
+question is who is here and not who could be.
+
 The same schema with `default: "allow"` and a `deny` rule per distraction is a
 focus profile for an adult. Nothing in the engine changes.
 

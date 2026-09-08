@@ -46,6 +46,44 @@ profile that counts without biting buys you a day of evidence before the rules
 go on, and a half-written profile that denied everything would lock somebody out
 of their own machine.
 
+## Rules for whoever sits here, without naming them
+
+Twenty machines and forty rotating customers is forty profiles typed by hand,
+and the fortieth is written wrong. So a profile can name **anybody**:
+
+```bash
+sudo omahouse profile add '*' --name "Whoever sits here"
+```
+
+**Quote the `*`.** Bare, it is the shell's wildcard and you will write a profile
+for a file in the current directory. Every line omahouse prints about this
+profile quotes it too, so its own output can be pasted.
+
+It applies to anyone who logs in without a profile of their own. Four things
+about it are decisions and none of them is visible from the field:
+
+- **A profile of their own wins**, and the whole list is looked at before this
+  one is considered — so it works whether it is written above or below them.
+- **An administrator is never covered.** That is checked every cycle and is not
+  written into the file, so somebody put in `wheel` tomorrow falls out of it on
+  the next tick without anybody editing anything. `profile add` already refuses
+  to write a profile for an administrator, and this would otherwise do through
+  the back door what that refuses at the front.
+- **What kind of machine this is does not come into it.** A profile exists
+  because somebody wrote it; making it also depend on the machine's role would
+  be a second, unwritten condition on a written thing.
+- **Each person is reported under their own name**, never under `*`. The
+  commands printed beside them are commands that can be run, and there is no
+  account called `*` to run them against.
+
+A budget that never resets is refused on this profile. A pot is emptied by being
+spent and refilled by somebody handing over more, so on a shared login the first
+person empties it and the second sits down to a spent clock with no midnight
+coming. Use a daily one.
+
+`omahouse status kid` on somebody covered by it says so in as many words, because
+they will not find their own name in `profiles.json` and would go looking.
+
 ## 2. Read it back
 
 ```bash
