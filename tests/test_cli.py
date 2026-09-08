@@ -43,6 +43,15 @@ USER = pwd.getpwuid(os.getuid()).pw_name
 UID = os.getuid()
 TODAY = date.today()
 
+
+def anybody():
+    """The account name a profile uses to mean anybody without one of their own.
+
+    Spelled once here so a case reads as being about the idea rather than about
+    a punctuation mark, and so the day it changes there is one line to change.
+    """
+    return "*"
+
 # What the development machine had open while stage 4 was written, plus the two
 # shapes only the PoC saw. The counts are what makes the table assertions mean
 # something.
@@ -1351,6 +1360,69 @@ def check_a_profile_records_who_changed_it_and_when(box):
         assert signed.returncode == 0, signed.stderr
         wrote = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
         assert wrote["writtenBy"] == "daemon", (door, wrote)
+
+
+def check_the_rules_for_anybody_are_readable_by_whoever_they_bind(box):
+    """`status` is what the fiscalised person runs to see what is left of their
+    own day, and a profile for anybody has no line with their name on it.
+
+    The daemon enforces those rules already. If nothing else knew about them,
+    the rules would bite and the person they bind could not read them -- which
+    is the one thing this verb exists to prevent.
+
+    Two questions and not one, and the split is the point. *Whose profile is
+    this* is asked by `profile add`, to refuse a second one, and by the writing
+    verbs, to know what they are about to change: a fallback must never answer
+    there, or `omahouse allow kid` would edit the rules of everybody who sits at
+    the machine. *What applies to this person* is asked by everything that
+    reports.
+    """
+    box.write_profiles({"schemaVersion": 1, "profiles": [
+        {"user": anybody(), "displayName": "Whoever sits here", "default": "deny",
+         "budgets": [{"id": "session", "match": ["*"], "dailyMinutes": 60,
+                      "onExhausted": "logout"}]},
+        {"user": "daemon", "displayName": "Has their own", "default": "allow"}]})
+
+    # `nobody` and not the account running the suite: that one is usually an
+    # administrator, and an administrator is left out of a fallback -- so the
+    # case would be asserting the absence of rules and calling it their
+    # presence. The first attempt did exactly that and said so.
+    covered = "nobody"
+
+    theirs = box.run("status", covered)
+    assert theirs.returncode == 0, theirs.stderr
+    assert "default deny" in theirs.stdout, theirs.stdout
+    assert "1h00m" in theirs.stdout, theirs.stdout
+    # And they are told whose rules these are, because they will not find their
+    # own name in profiles.json and would otherwise go looking for it.
+    assert "not " + covered + "'s" in theirs.stdout, theirs.stdout
+    # The shared profile's display name is not printed as though it were theirs.
+    assert "Whoever sits here" not in theirs.stdout, theirs.stdout
+
+    # Somebody with their own reads their own, and is told nothing about a
+    # fallback, because none applies to them.
+    own = box.run("status", "daemon")
+    assert "default allow" in own.stdout, own.stdout
+    assert "rules for anybody" not in own.stdout, own.stdout
+
+    # An administrator is not covered by it, here as in the cycle: the two
+    # answers have to match, or the daemon and the report disagree about who is
+    # under rules.
+    admin = box.run("status", "root")
+    assert "rules for anybody" not in admin.stdout, admin.stdout
+    assert "default deny" not in admin.stdout, admin.stdout
+
+    # `profile add` still works for an account a fallback covers: the guard it
+    # keeps is about a profile of their own, and they have none.
+    made = box.run("profile", "add", covered, "--name", "Kid")
+    assert made.returncode == 0, made.stderr
+    written = json.loads((box.config / "profiles.json").read_text())["profiles"]
+    assert sorted(p["user"] for p in written) == sorted([anybody(), "daemon", covered]), written
+
+    # And now that they have one, it is theirs that answers.
+    after = box.run("status", covered)
+    assert "rules for anybody" not in after.stdout, after.stdout
+    assert "default allow" in after.stdout, after.stdout
 
 
 def check_it_refuses_a_profile_for_an_administrator(box):
@@ -3414,6 +3486,7 @@ def main():
         check_allow_warns_about_what_is_really_inside,
         check_one_budget_covers_a_browsers_two_ids,
         check_a_profile_records_who_changed_it_and_when,
+        check_the_rules_for_anybody_are_readable_by_whoever_they_bind,
         check_it_refuses_a_profile_for_an_administrator,
         check_it_refuses_to_write_without_privilege,
         check_create_user_is_built_but_never_run_here,

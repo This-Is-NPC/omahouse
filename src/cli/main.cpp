@@ -415,10 +415,44 @@ bool loadProfiles(Profiles *profiles, int *status)
     return false;
 }
 
+/// The profile that *is* this account's, and nothing else.
+///
+/// Asked where the question is about ownership: whether to refuse `profile add`
+/// because there is already one, and which one a verb is about to change. A
+/// fallback must never answer here -- `profile add kid` on a machine with one
+/// would be refused for a profile that is not kid's, and `omahouse allow kid`
+/// would edit the rules of everybody who sits at that machine.
 const Profile *profileFor(const Profiles &profiles, const QString &user)
 {
     for (const Profile &profile : profiles.all) {
         if (profile.user == user)
+            return &profile;
+    }
+    return nullptr;
+}
+
+/// The rules that apply to this account: their own, or the one for anybody.
+///
+/// Asked where the question is about what happens to somebody. The whole list
+/// is walked for a name first and only then for the fallback, because a
+/// fallback written above a named profile would otherwise answer for an account
+/// that has one of its own -- and the order of a file nobody promised to keep
+/// is not a thing to decide by.
+///
+/// `watch` does this too, in its own way, and has to: it starts from the
+/// machine rather than from a name. What matters is that the two agree, because
+/// a person reading `omahouse status` and the daemon closing their browser have
+/// to be looking at the same rules.
+const Profile *rulesFor(const Profiles &profiles, const QString &user)
+{
+    if (const Profile *own = profileFor(profiles, user))
+        return own;
+    // Not for an administrator, and not for the fallback asked about by name.
+    // Both are the cycle's rules, said here so the two answers match.
+    if (user == anybody() || isAdministrator(user))
+        return nullptr;
+    for (const Profile &profile : profiles.all) {
+        if (profile.isForAnybody())
             return &profile;
     }
     return nullptr;
@@ -1016,7 +1050,7 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
     Profiles profiles;
     if (!loadProfiles(&profiles, &status))
         return status;
-    const Profile *profile = profileFor(profiles, user);
+    const Profile *profile = rulesFor(profiles, user);
 
     const Proc proc;
     const bool session = proc.hasSession(uid);
@@ -1193,9 +1227,20 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
     }
 
     out() << QStringLiteral("omahouse status — %1").arg(user);
-    if (profile && !profile->displayName.isEmpty())
+    // The display name is the profile's, so it is only this person's name when
+    // the profile is theirs. Printing the shared one's here would read as
+    // though this account were called that.
+    if (profile && !profile->isForAnybody() && !profile->displayName.isEmpty())
         out() << QStringLiteral(" (%1)").arg(profile->displayName);
     out() << '\n';
+
+    // Said out loud, because everything below is about rules this account
+    // cannot find its own name beside. Somebody reading their day and then
+    // opening profiles.json to see why would find no entry for themselves.
+    if (profile && profile->isForAnybody()) {
+        out() << QStringLiteral("These are the machine's rules for anybody without their "
+                                "own, and not %1's.\n").arg(user);
+    }
 
     if (profile) {
         out() << QStringLiteral("%1, default %2, %3 · %4\n")
@@ -2611,7 +2656,7 @@ int cmdProfileShow(const Globals &g, const QStringList &positionals)
     Profiles profiles;
     if (!loadProfiles(&profiles, &status))
         return status;
-    const Profile *profile = profileFor(profiles, user);
+    const Profile *profile = rulesFor(profiles, user);
     if (!profile) {
         fail(profiles.missing
                  ? QStringLiteral("profile show: there is no %1 yet, so %2 has no profile")
@@ -4577,7 +4622,7 @@ void printCycle(const Cycle &cycle, const Profiles &profiles)
                                         : (cycle.dryRun ? QStringLiteral("left alone")
                                                         : QStringLiteral("nothing to change")));
 
-        const Profile *profile = profileFor(profiles, watched.user);
+        const Profile *profile = rulesFor(profiles, watched.user);
         const QVector<Balance> balances =
             profile ? balancesOf(*profile, watched.ledger) : QVector<Balance>();
         if (!balances.isEmpty()) {
@@ -4635,7 +4680,7 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
                           one.error.isEmpty() ? QJsonValue() : QJsonValue(one.error));
             done.append(object);
         }
-        const Profile *profile = profileFor(profiles, watched.user);
+        const Profile *profile = rulesFor(profiles, watched.user);
         QJsonObject object {
             {QStringLiteral("user"), watched.user},
             {QStringLiteral("uid"), static_cast<qint64>(watched.uid)},
