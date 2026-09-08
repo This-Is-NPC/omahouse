@@ -257,11 +257,11 @@ private:
         profile.graceSeconds = 20;
         profile.budgets = {
             Budget {QStringLiteral("session"), {QStringLiteral("*")}, Selects::App, 120,
-                    OnExhausted::Logout},
+                    Resets::Daily, OnExhausted::Logout},
             Budget {QStringLiteral("chromium"), {QStringLiteral("chromium")}, Selects::App, 45,
-                    OnExhausted::Close},
+                    Resets::Daily, OnExhausted::Close},
             Budget {QStringLiteral("code"), {QStringLiteral("code")}, Selects::App, 0,
-                    OnExhausted::Warn},
+                    Resets::Daily, OnExhausted::Warn},
         };
         return profile;
     }

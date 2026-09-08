@@ -260,6 +260,24 @@ bool selectsFromName(const QString &name, Selects *out)
     return false;
 }
 
+QString resetsName(Resets resets)
+{
+    return resets == Resets::Session ? QStringLiteral("session") : QStringLiteral("daily");
+}
+
+bool resetsFromName(const QString &name, Resets *out)
+{
+    if (name == QStringLiteral("daily")) {
+        *out = Resets::Daily;
+        return true;
+    }
+    if (name == QStringLiteral("session")) {
+        *out = Resets::Session;
+        return true;
+    }
+    return false;
+}
+
 bool actionFits(Selects selects, OnExhausted action)
 {
     switch (action) {
@@ -355,6 +373,12 @@ QJsonObject Profile::toJson() const
         // said -- the same discipline `presence` and `sites` keep in the ledger.
         if (budget.isSite())
             object.insert(QStringLiteral("kind"), selectsName(budget.selects));
+        // Written only when it is `session`, for the reason `kind` is: absent is
+        // `daily`, which is every budget written before a second anchor existed,
+        // and putting `"resets": "daily"` into all of them would rewrite every
+        // profiles.json there is to say what it already said.
+        if (budget.perSession())
+            object.insert(QStringLiteral("resets"), resetsName(budget.resets));
         // A budget with no limit leaves the field out rather than writing a
         // zero: zero minutes reads like "no time at all", which is the opposite
         // of what it means here.
@@ -511,6 +535,18 @@ bool Profile::fromJson(const QJsonObject &object, Profile *out, QString *error)
             }
             return false;
         }
+        QString resetsText;
+        if (!wantsString(entry, QStringLiteral("resets"), named, &resetsText, false, error))
+            return false;
+        if (!resetsText.isEmpty() && !resetsFromName(resetsText, &budget.resets)) {
+            if (error) {
+                *error = QStringLiteral("%1 has a budget with an unknown resets %2; it is "
+                                        "daily or session")
+                             .arg(named, resetsText);
+            }
+            return false;
+        }
+
         // A site budget's default action is to block, an app's is to warn.
         // Different defaults because they are the honest reading of a budget
         // written without one: an app budget with no action named is the

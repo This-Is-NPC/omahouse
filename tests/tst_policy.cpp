@@ -1093,6 +1093,7 @@ private slots:
         QCOMPARE(blocked, QStringList({QStringLiteral("youtu.be"),
                                        QStringLiteral("youtube.com")}));
     }
+
 };
 
 int runPolicyTests(int argc, char **argv)

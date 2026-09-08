@@ -3265,7 +3265,8 @@ int cmdRule(const Globals &g, const QString &verb, const QStringList &positional
             // that logs the session out is the session's, and it is written by
             // `omahouse limit --session`.
             profile->budgets.append(
-                Budget {id, ids, Selects::App, minutes, OnExhausted::Close});
+                Budget {id, ids, Selects::App, minutes, Resets::Daily,
+                        OnExhausted::Close});
         } else {
             budget->dailyMinutes = minutes;
             // The names too, or `allow kid chromium org.chromium.Chromium
@@ -3678,7 +3679,8 @@ int cmdLimit(const Globals &g, const QStringList &positionals, const Options &op
 
     Budget *budget = budgetFor(profile, id);
     if (!budget) {
-        profile->budgets.append(Budget {id, {match}, selects, minutes, whenGone});
+        profile->budgets.append(
+            Budget {id, {match}, selects, minutes, Resets::Daily, whenGone});
         budget = &profile->budgets.last();
     } else if (budget->selects != selects) {
         // One id, one thing. `org.freedesktop.Platform` is a scope id with dots

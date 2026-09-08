@@ -34,12 +34,30 @@ enum class OnExhausted { Warn, Close, Logout, Block };
 /// profile there is to say what they already said.
 enum class Selects { App, Site };
 
+/// When a budget's clock goes back to zero.
+///
+/// `Daily` is the turn of the local date, which is every budget written before
+/// this existed and is what a household means by "two hours a day".
+///
+/// `Session` is the login. Two hours from the moment somebody sits down is a
+/// different offer from two hours today, and a lan house sells the first: the
+/// customer who arrives at eleven at night does not get twenty minutes because
+/// midnight is coming. It is a second anchor and not a second engine -- the
+/// counting, the warnings, the grace and the action are the same machinery.
+///
+/// Absent from the file is `Daily`, and `daily` is never written into it. That
+/// is docs/design.md §4's discipline for `kind`, `presence` and `sites`:
+/// writing what every file already means would rewrite every profile there is.
+enum class Resets { Daily, Session };
+
 QString verdictName(Verdict verdict);
 bool verdictFromName(const QString &name, Verdict *out);
 QString onExhaustedName(OnExhausted action);
 bool onExhaustedFromName(const QString &name, OnExhausted *out);
 QString selectsName(Selects selects);
 bool selectsFromName(const QString &name, Selects *out);
+QString resetsName(Resets resets);
+bool resetsFromName(const QString &name, Resets *out);
 
 /// Whether `selector` names the app `scopeId`. `*` is every app, which is what
 /// makes the session budget an ordinary budget; anything else is the id itself,
@@ -168,10 +186,20 @@ struct Budget {
     /// having -- an app somebody wants a number for at the end of the day but
     /// no rule about is exactly this.
     int dailyMinutes = 0;
+    /// When this budget's clock goes back to zero. See `Resets`.
+    ///
+    /// `dailyMinutes` keeps its name under either, because what it holds is the
+    /// size of the allowance and not the length of the day: a session budget of
+    /// 120 is two hours per sitting. Renaming the field would rewrite every
+    /// profiles.json on every machine to say what it already says.
+    Resets resets = Resets::Daily;
     OnExhausted onExhausted = OnExhausted::Warn;
 
     bool hasLimit() const { return dailyMinutes > 0; }
     bool isSite() const { return selects == Selects::Site; }
+    /// Whether this budget's clock is anchored at the login rather than at the
+    /// turn of the date.
+    bool perSession() const { return resets == Resets::Session; }
     /// The budget whose selector is everything -- docs/design.md §2's whole
     /// argument for there being no separate idea of "the user's time". A list
     /// containing `*` is that budget whatever else is beside it, because `*`

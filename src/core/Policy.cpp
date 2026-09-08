@@ -3,6 +3,8 @@
 
 #include "Furniture.h"
 
+#include <QSet>
+
 namespace omahouse {
 
 namespace {
@@ -70,7 +72,7 @@ bool anySelectorMatches(const QStringList &selectors, const AppScope &scope)
 
 Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const Ledger &ledger,
                  const QDateTime &now, int tickSeconds, const QString &siteInFront,
-                 const QStringList &alsoFurniture)
+                 const QStringList &alsoFurniture, const QString &sessionAnchor)
 {
     Outcome outcome;
     outcome.ledger = ledger;
@@ -85,10 +87,42 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
         Ledger fresh;
         fresh.user = outcome.ledger.user.isEmpty() ? profile.user : outcome.ledger.user;
         fresh.date = today;
+        // The sitting crosses midnight with the person sitting in it. This is
+        // the whole of what a second anchor is: the daily budgets start over
+        // here and the session ones do not, and a customer who arrived at
+        // eleven does not lose an hour to the clock striking twelve.
+        fresh.sessionAnchor = outcome.ledger.sessionAnchor;
+        fresh.sessionSeconds = outcome.ledger.sessionSeconds;
         outcome.ledger = fresh;
     }
     if (outcome.ledger.user.isEmpty())
         outcome.ledger.user = profile.user;
+
+    // A new sitting, and everything the old one remembered goes with it: the
+    // seconds, and the marks that say a budget already warned. Without the
+    // second half a session budget that ran out at ten would never warn the
+    // person who logs in at eleven -- it would have nothing left to say and
+    // would act without saying it.
+    //
+    // An empty anchor is a caller that was not asked, and it changes nothing.
+    // Only a name that is there and different is a new sitting.
+    if (!sessionAnchor.isEmpty() && sessionAnchor != outcome.ledger.sessionAnchor) {
+        QSet<QString> perSitting;
+        for (const Budget &budget : profile.budgets) {
+            if (budget.perSession())
+                perSitting.insert(budget.id);
+        }
+        outcome.ledger.sessionAnchor = sessionAnchor;
+        outcome.ledger.sessionSeconds.clear();
+        QVector<Event> kept;
+        for (const Event &event : outcome.ledger.events) {
+            // A `Denied` names a scope and no budget, so it is the day's and
+            // stays. `perSitting` never holds an empty id.
+            if (!perSitting.contains(event.budget))
+                kept.append(event);
+        }
+        outcome.ledger.events = kept;
+    }
 
     // A disabled profile still gets a ledger dated today, so the caller writes
     // the file it expects to write, and gets nothing else: no seconds counted
@@ -190,8 +224,17 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
             ? (!siteInFront.isEmpty() && anySelectorMatches(budget.match, siteInFront))
             : anyLiveScopeMatches(billable, budget.match)
                 || (!budget.isSession() && anyLiveScopeMatches(furniture, budget.match));
-        if (spending)
-            outcome.ledger.addSeconds(budget.id, tick);
+        if (spending) {
+            // Which of the two counters, decided by the profile and never by
+            // the shape of anything here. They are separate maps because
+            // everything that adds days or machines together reads the daily
+            // one, and a sitting's running total is carried into every day it
+            // touches -- summed, it would be counted once per midnight.
+            if (budget.perSession())
+                outcome.ledger.addSessionSeconds(budget.id, tick);
+            else
+                outcome.ledger.addSeconds(budget.id, tick);
+        }
     }
 
     // 3. The balance, per budget.
@@ -202,7 +245,9 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
             continue;
 
         const int limit = allowanceSeconds(profile, budget, outcome.ledger, now.date());
-        const int left = limit - outcome.ledger.secondsFor(budget.id);
+        const int spent = budget.perSession() ? outcome.ledger.sessionSecondsFor(budget.id)
+                                              : outcome.ledger.secondsFor(budget.id);
+        const int left = limit - spent;
 
         if (left > 0) {
             // Every mark this tick crossed is written down, so a tick long

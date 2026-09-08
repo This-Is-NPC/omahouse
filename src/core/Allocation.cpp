@@ -47,8 +47,16 @@ bool validAllocation(const QJsonObject &a, QString *error)
 int allowanceSeconds(const Profile &profile, const Budget &budget,
                      const Ledger &ledger, const QDate &date)
 {
-    if (profile.allocation.isEmpty())
-        return budget.dailyMinutes * 60 + ledger.grantedSeconds(budget.id);
+    if (profile.allocation.isEmpty()) {
+        // A session-anchored budget counts only what was handed over in the
+        // sitting it is in. The grants live in the day's file and the day
+        // outlasts the sitting, so counting all of them would give the next
+        // person to log in the ten minutes somebody else was given.
+        const int granted = budget.perSession()
+            ? ledger.grantedSeconds(budget.id, ledger.sessionAnchor)
+            : ledger.grantedSeconds(budget.id);
+        return budget.dailyMinutes * 60 + granted;
+    }
     if (profile.allocation.value(QStringLiteral("date")).toString() != date.toString(Qt::ISODate))
         return 0;
     return profile.allocation.value(QStringLiteral("limits")).toObject().value(budget.id).toInt(0);
