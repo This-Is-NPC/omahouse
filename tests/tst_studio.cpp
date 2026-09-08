@@ -1519,6 +1519,39 @@ void TestStudio::shoot(const QString &name)
     // no inventory: the blank ones look like screens that exist.
     QVERIFY2(moreThanOneColour(frame),
              qPrintable(QStringLiteral("%1 is a flat rectangle").arg(name)));
+
+    // And the two questions a flat rectangle does not ask, because the picture
+    // that got past this was neither blank nor flat.
+    //
+    // `shots-check.sh` compares bytes, so it knows how to notice a picture that
+    // is *stale* and has no way at all to notice one that is *wrong*: regenerate
+    // and it agrees with whatever came out. A fixture writing a document in a
+    // shape the reader had stopped accepting made profiles.json fail to parse,
+    // the whole household vanished, and `31-operator-machines.png` became a
+    // colourful picture of the words `nobody is under rules yet` -- with the
+    // gate green, because the file on disk matched the file just written.
+    //
+    // So the refusal is here, where the window can still be asked what it
+    // thinks. `House.error` is the red line for a file that would not read; a
+    // refusal from a *verb* is `Admin.message` and is a thing some pictures are
+    // deliberately of, so this never touches those.
+    QVERIFY2(m_house->error().isEmpty(),
+             qPrintable(QStringLiteral("%1 was taken of a window that could not read the "
+                                       "machine: %2").arg(name, m_house->error())));
+
+    // And the quieter half: a household that is on disk and not on screen. The
+    // failure above showed up as an empty list, which is a legitimate picture
+    // for the *empty* screens and a broken one for every other, and only the
+    // file can tell the two apart.
+    QVector<Profile> onDisk;
+    QString why;
+    bool absent = false;
+    if (readProfiles(paths::profilesFile(), &onDisk, &why, &absent) && !absent
+        && !onDisk.isEmpty()) {
+        QVERIFY2(!people().isEmpty(),
+                 qPrintable(QStringLiteral("%1 was taken with %2 profiles on disk and none "
+                                           "on screen").arg(name).arg(onDisk.size())));
+    }
     QVERIFY2(frame.save(directory + QLatin1Char('/') + name + QStringLiteral(".png")),
              qPrintable(name));
 }
