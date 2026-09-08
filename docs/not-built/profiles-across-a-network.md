@@ -94,11 +94,25 @@ answered `Mon 2026-09-07 19:16:16 UTC`. That was read as a defect at the time. I
 is the correct behaviour for the model this page now takes, and reading it as a
 defect is what exposed the model as wrong.
 
-**What has to be undone.** `resets: "daily" | "session"` shipped on 2026-09-08,
-with the sitting in the ledger, grants stamped with a sitting, and warning marks
-cleared at a new one. All of it serves an anchor this page no longer asks for.
-None of it reaches a verb or a screen, so nothing on any machine behaves
-differently yet.
+**What has to be undone, and what must not be.** `resets: "daily" | "session"`
+shipped on 2026-09-08, with the sitting in the ledger, grants stamped with a
+sitting, and warning marks cleared at a new one. Three of those four serve an
+anchor this page no longer asks for and come out. None of them reaches a verb or
+a screen, so nothing on any machine behaves differently yet.
+
+**The fourth stays, and it stays for a stronger reason than it arrived with.**
+The seconds of a budget that does not reset live in a map of their own, beside
+the daily one and never inside it. The ledger is one file per day, and
+`consolidate` in `src/core/Fleet.cpp` adds `secondsFor` over every day and every
+machine. A running total carried into the file of each day it crosses would be
+**counted once per day** by everything that sums: `report`, `house`, `consolidate`
+and `collect`.
+
+That is not a consequence of sittings. It is a consequence of any counter that
+outlives the day, and `never` outlives every one of them rather than a few. So
+the separate map went from convenient to load-bearing, and pulling it out while
+removing the sitting would reintroduce a double count that no test fails on until
+somebody adds two days together.
 
 
 ### What "not an administrator" is, and what it is not
@@ -129,6 +143,14 @@ is what "administered on the machine rather than on the person" means in
 concrete terms: the machine carries rules for whoever sits at it.
 
 This has a consequence downstream that is easy to miss and is written in §6.
+
+**A fallback profile and a budget that never resets must not be used together.**
+The pool belongs to the person and the fallback belongs to nobody in particular,
+so on a shared account the two compose into one pool that empties and never
+fills: the first person of the day spends the two hours and the second sits down
+at a clock reading zero, with no midnight left to rescue them, because `never`
+removed it. A fallback profile takes `daily` budgets. This belongs here rather
+than in the head of whoever implements it.
 
 ---
 
@@ -387,9 +409,10 @@ from a pool against a daily clock and against a session clock are different sums
 
 ### Phase A — the profile can say the three shapes
 
-1. **Undo the sitting.** The anchor, its map in the ledger, the stamp on a grant
-   and the clearing of warning marks all serve a model §1 no longer takes. Remove
-   them before anything is built on top. *core, tests*
+1. **Swap the sitting for no reset.** Three pieces go: the anchor, the sitting
+   stamped on a grant, and the clearing of warning marks. **The separate map
+   stays** — see below, because removing it reintroduces double counting that no
+   test would catch. *core, tests*
 2. **Give `Budget` an explicit reset.** `resets: "daily" | "never"`, absent
    meaning daily, so every file on disk keeps its current meaning. The reader
    already holds this discipline: `wantsNames` in `src/core/Profile.cpp` reads
