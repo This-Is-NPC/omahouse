@@ -1095,204 +1095,135 @@ private slots:
     }
 
 
-    // -- the second anchor --------------------------------------------------
+    // -- a pot, rather than an allowance ------------------------------------
     //
-    // `resets: session` is two hours from the moment somebody sits down, which
-    // is a different offer from two hours today. The lan house sells the first:
-    // the customer who arrives at eleven at night does not get twenty minutes
-    // because midnight is coming.
+    // `resets: never` is two hours until somebody hands over more. Logging out
+    // does not give them back and the turn of the date does not either, which
+    // is the only shape that is a limit on a person: a clock that starts over
+    // at the login hands two free hours to anybody who logs out and back in.
 
-    void midnightTurnsTheDailyClockAndNotTheSitting()
+    void midnightTurnsTheDailyClockAndLeavesThePot()
     {
         Profile profile = profileOf();
         profile.budgets.append(budget(QStringLiteral("session"), QStringLiteral("*"), 0,
                                       OnExhausted::Warn));
-        Budget sitting = budget(QStringLiteral("visit"), QStringLiteral("chromium"), 0,
-                                OnExhausted::Warn);
-        sitting.resets = Resets::Session;
-        profile.budgets.append(sitting);
-
-        const QString anchor = QStringLiteral("Sat 2026-09-02 23:40:00 -03");
+        Budget pot = budget(QStringLiteral("pot"), QStringLiteral("chromium"), 0,
+                            OnExhausted::Warn);
+        pot.resets = Resets::Never;
+        profile.budgets.append(pot);
         const AppScope browser = scope(QStringLiteral("chromium"));
 
-        // Twenty minutes before midnight, and one tick spends both clocks.
-        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(23, 40), 1200,
-                                   QString(), {}, anchor);
+        // Twenty minutes before midnight, and one tick spends both counters.
+        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(23, 40), 1200);
         QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("session")), 1200);
-        QCOMPARE(outcome.ledger.sessionSecondsFor(QStringLiteral("visit")), 1200);
+        QCOMPARE(outcome.ledger.keptSecondsFor(QStringLiteral("pot")), 1200);
         // And they are in different places, which is what keeps every reader
         // that sums days right about the first and silent about the second.
-        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("visit")), 0);
-        QCOMPARE(outcome.ledger.sessionSecondsFor(QStringLiteral("session")), 0);
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("pot")), 0);
+        QCOMPARE(outcome.ledger.keptSecondsFor(QStringLiteral("session")), 0);
 
-        // Twenty past midnight, same sitting. A new day's file, and the sitting
-        // walks into it.
+        // Twenty past midnight. A new day's file, and the pot walks into it.
         const QDateTime after = QDateTime(QDate(2026, 9, 4), QTime(0, 20));
-        outcome = evaluate(profile, {browser}, outcome.ledger, after, 1200,
-                           QString(), {}, anchor);
+        outcome = evaluate(profile, {browser}, outcome.ledger, after, 1200);
 
         QCOMPARE(outcome.ledger.date, QDate(2026, 9, 4));
         QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("session")), 1200);
-        QCOMPARE(outcome.ledger.sessionSecondsFor(QStringLiteral("visit")), 2400);
-        QCOMPARE(outcome.ledger.sessionAnchor, anchor);
+        QCOMPARE(outcome.ledger.keptSecondsFor(QStringLiteral("pot")), 2400);
     }
 
-    void aNewSittingStartsTheSessionClockOver()
+    // The turn of the date is not somebody handing over more. A pot that ran
+    // out yesterday is still out this morning, and the day it crossed bought
+    // nobody anything.
+    void aPotThatRanOutIsStillOutTomorrow()
     {
         Profile profile = profileOf();
-        Budget sitting = budget(QStringLiteral("visit"), QStringLiteral("chromium"), 30,
-                                OnExhausted::Close);
-        sitting.resets = Resets::Session;
-        profile.budgets.append(sitting);
-        profile.warnAt = {5};
+        Budget pot = budget(QStringLiteral("pot"), QStringLiteral("chromium"), 30,
+                            OnExhausted::Close);
+        pot.resets = Resets::Never;
+        profile.budgets.append(pot);
         const AppScope browser = scope(QStringLiteral("chromium"));
 
-        const QString first = QStringLiteral("first sitting");
-        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(9, 0), 30 * 60,
-                                   QString(), {}, first);
-        QCOMPARE(outcome.ledger.sessionSecondsFor(QStringLiteral("visit")), 30 * 60);
+        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(23, 40), 30 * 60);
         QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
-        // It said so before it acted, and it wrote down that it had.
-        QVERIFY(outcome.ledger.hasWarned(QStringLiteral("visit"), 0));
 
-        // Somebody else sits down. The clock, and everything it remembered
-        // about having spoken, belongs to the sitting that ended.
-        const QString second = QStringLiteral("second sitting");
-        outcome = evaluate(profile, {browser}, outcome.ledger, at(9, 1), 60,
-                           QString(), {}, second);
+        const QDateTime after = QDateTime(QDate(2026, 9, 4), QTime(9, 0));
+        outcome = evaluate(profile, {browser}, outcome.ledger, after, 2);
 
-        QCOMPARE(outcome.ledger.sessionAnchor, second);
-        QCOMPARE(outcome.ledger.sessionSecondsFor(QStringLiteral("visit")), 60);
+        QCOMPARE(outcome.ledger.keptSecondsFor(QStringLiteral("pot")), 30 * 60 + 2);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
+    }
+
+    // And it says so again before it acts. The events are the day's and do not
+    // walk into the new one, which is deliberate: docs/design.md §6 asks that
+    // nobody be cut off cold, and somebody meeting a spent pot at nine in the
+    // morning has been told why before their window closes.
+    void aPotThatIsAlreadySpentStillSaysSoInTheMorning()
+    {
+        Profile profile = profileOf();
+        profile.graceSeconds = 20;
+        Budget pot = budget(QStringLiteral("pot"), QStringLiteral("chromium"), 30,
+                            OnExhausted::Close);
+        pot.resets = Resets::Never;
+        profile.budgets.append(pot);
+        const AppScope browser = scope(QStringLiteral("chromium"));
+
+        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(23, 40), 30 * 60);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Warn), 1);
+        QVERIFY(outcome.ledger.hasWarned(QStringLiteral("pot"), 0));
+
+        const QDateTime morning = QDateTime(QDate(2026, 9, 4), QTime(9, 0));
+        outcome = evaluate(profile, {browser}, outcome.ledger, morning, 2);
+
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Warn), 1);
+        QCOMPARE(outcome.decisions.constFirst().reason, Decision::Reason::GraceStarted);
         QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 0);
-        QVERIFY2(!outcome.ledger.hasWarned(QStringLiteral("visit"), 0),
-                 "the new sitting inherited the last one's last word, so it will act "
-                 "without ever speaking");
-        QVERIFY2(!outcome.ledger.exhaustedAt(QStringLiteral("visit")).isValid(),
-                 "the new sitting inherited the moment the last one ran out, so its "
-                 "grace window is already over");
     }
 
-    // The day's own record is not the sitting's. A refusal is about a scope and
-    // a moment, and it stays in the day it happened in.
-    void aNewSittingKeepsTheDaysOwnRecord()
+    // What does refill a pot, and the only thing that does.
+    void onlyAGrantPutsAnythingBackInThePot()
     {
         Profile profile = profileOf();
-        profile.defaultVerdict = Verdict::Deny;
-        Budget sitting = budget(QStringLiteral("visit"), QStringLiteral("chromium"), 30,
-                                OnExhausted::Close);
-        sitting.resets = Resets::Session;
-        profile.budgets.append(sitting);
-        profile.budgets.append(budget(QStringLiteral("day"), QStringLiteral("*"), 0,
-                                      OnExhausted::Warn));
-
-        const AppScope steam = scope(QStringLiteral("steam"));
-        Outcome outcome = evaluate(profile, {steam}, startOfDay(), at(9, 0), 60,
-                                   QString(), {}, QStringLiteral("one"));
-        QVERIFY(outcome.ledger.hasDenied(steam.unit));
-        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("day")), 60);
-
-        outcome = evaluate(profile, {steam}, outcome.ledger, at(9, 1), 60,
-                           QString(), {}, QStringLiteral("two"));
-        QVERIFY2(outcome.ledger.hasDenied(steam.unit),
-                 "a new sitting threw away the day's refusals, so every one of them is "
-                 "announced a second time");
-        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("day")), 120);
-    }
-
-    // The guard the three above need. A caller that says nothing about sittings
-    // is every caller that existed before this, and it must get exactly what it
-    // always got -- otherwise the tests above are passing on a machine where
-    // the feature is simply always on.
-    void aCallerThatWasNotAskedAboutSittingsIsUnchanged()
-    {
-        Profile profile = profileOf();
-        Budget sitting = budget(QStringLiteral("visit"), QStringLiteral("chromium"), 30,
-                                OnExhausted::Close);
-        sitting.resets = Resets::Session;
-        profile.budgets.append(sitting);
+        Budget pot = budget(QStringLiteral("pot"), QStringLiteral("chromium"), 30,
+                            OnExhausted::Close);
+        pot.resets = Resets::Never;
+        profile.budgets.append(pot);
         const AppScope browser = scope(QStringLiteral("chromium"));
 
-        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(9, 0), 60);
+        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(9, 0), 30 * 60);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
 
-        QVERIFY2(outcome.ledger.sessionAnchor.isEmpty(),
-                 "an anchor appeared out of a tick that was given none");
-        QCOMPARE(outcome.ledger.sessionSecondsFor(QStringLiteral("visit")), 60);
-        // The clock still runs -- what is missing is only the knowledge of when
-        // the sitting began, so it behaves as the daily one it cannot tell
-        // itself apart from.
-        outcome = evaluate(profile, {browser}, outcome.ledger, at(9, 1), 60);
-        QCOMPARE(outcome.ledger.sessionSecondsFor(QStringLiteral("visit")), 120);
-    }
-
-// A tick that could not ask logind is not the end of a sitting.
-    //
-    // The reading forks a process, and a fork can fail: a slow machine, a
-    // `loginctl` that timed out, a cycle that ran while the session was being
-    // set up. Any of those hands this function an empty anchor, and an empty
-    // anchor must mean "I was not told" and never "nobody is sitting here" --
-    // or one unlucky cycle gives the customer their two hours back.
-    //
-    // This case exists because the guard it pins was the one mutation the rest
-    // of this suite survived: every other test here starts from a ledger with
-    // no anchor, where saying nothing and having nothing are the same state.
-    void aTickThatCouldNotAskLogindKeepsTheSitting()
-    {
-        Profile profile = profileOf();
-        Budget sitting = budget(QStringLiteral("visit"), QStringLiteral("chromium"), 30,
-                                OnExhausted::Close);
-        sitting.resets = Resets::Session;
-        profile.budgets.append(sitting);
-        const AppScope browser = scope(QStringLiteral("chromium"));
-        const QString anchor = QStringLiteral("the sitting that is happening");
-
-        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(9, 0), 600,
-                                   QString(), {}, anchor);
-        QCOMPARE(outcome.ledger.sessionSecondsFor(QStringLiteral("visit")), 600);
-
-        // The cycle that could not read it.
-        outcome = evaluate(profile, {browser}, outcome.ledger, at(9, 10), 600);
-
-        QCOMPARE(outcome.ledger.sessionAnchor, anchor);
-        QCOMPARE(outcome.ledger.sessionSecondsFor(QStringLiteral("visit")), 1200);
-
-        // And the sitting is still the one it was, so the next cycle that can
-        // read logind does not see a change either.
-        outcome = evaluate(profile, {browser}, outcome.ledger, at(9, 20), 600,
-                           QString(), {}, anchor);
-        QCOMPARE(outcome.ledger.sessionSecondsFor(QStringLiteral("visit")), 1800);
-    }
-
-    void aGrantBelongsToTheSittingItWasMadeIn()
-    {
-        Profile profile = profileOf();
-        Budget sitting = budget(QStringLiteral("visit"), QStringLiteral("chromium"), 30,
-                                OnExhausted::Close);
-        sitting.resets = Resets::Session;
-        profile.budgets.append(sitting);
-        const AppScope browser = scope(QStringLiteral("chromium"));
-
-        Ledger ledger = startOfDay();
+        Ledger topped = outcome.ledger;
         Grant handed;
-        handed.at = at(9, 0);
+        handed.at = at(9, 30);
         handed.by = QStringLiteral("howl");
-        handed.budget = QStringLiteral("visit");
+        handed.budget = QStringLiteral("pot");
         handed.minutes = 10;
-        handed.anchor = QStringLiteral("first sitting");
-        ledger.grants.append(handed);
+        topped.grants.append(handed);
 
-        // Thirty five minutes: inside the forty this sitting was given, and
-        // outside the thirty it would have without the grant. One number,
-        // spent twice, and the only thing that differs is which sitting it is.
-        Outcome outcome = evaluate(profile, {browser}, ledger, at(9, 5), 35 * 60,
-                                   QString(), {}, QStringLiteral("first sitting"));
+        outcome = evaluate(profile, {browser}, topped, at(9, 31), 2);
         QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 0);
+    }
 
-        // In the next one it is gone, and thirty is the whole of it. The grant
-        // line stays in the file -- it is the day's log and it did happen.
-        outcome = evaluate(profile, {browser}, ledger, at(9, 5), 35 * 60,
-                           QString(), {}, QStringLiteral("second sitting"));
-        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
-        QCOMPARE(outcome.ledger.grants.size(), 1);
+    // The guard the four above need: a budget that says nothing about resetting
+    // is every budget on every machine today, and it must go on turning at
+    // midnight. Without this they would all pass on an engine that had simply
+    // stopped resetting anything.
+    void aBudgetThatSaysNothingStillTurnsAtMidnight()
+    {
+        Profile profile = profileOf();
+        profile.budgets.append(budget(QStringLiteral("day"), QStringLiteral("chromium"), 0,
+                                      OnExhausted::Warn));
+        const AppScope browser = scope(QStringLiteral("chromium"));
+
+        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(23, 40), 1200);
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("day")), 1200);
+
+        const QDateTime after = QDateTime(QDate(2026, 9, 4), QTime(0, 20));
+        outcome = evaluate(profile, {browser}, outcome.ledger, after, 1200);
+
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("day")), 1200);
+        QVERIFY2(outcome.ledger.keptSeconds.isEmpty(),
+                 "a budget that never asked to outlive the day was given a counter that does");
     }
 };
 

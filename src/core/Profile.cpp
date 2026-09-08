@@ -262,7 +262,7 @@ bool selectsFromName(const QString &name, Selects *out)
 
 QString resetsName(Resets resets)
 {
-    return resets == Resets::Session ? QStringLiteral("session") : QStringLiteral("daily");
+    return resets == Resets::Never ? QStringLiteral("never") : QStringLiteral("daily");
 }
 
 bool resetsFromName(const QString &name, Resets *out)
@@ -271,8 +271,8 @@ bool resetsFromName(const QString &name, Resets *out)
         *out = Resets::Daily;
         return true;
     }
-    if (name == QStringLiteral("session")) {
-        *out = Resets::Session;
+    if (name == QStringLiteral("never")) {
+        *out = Resets::Never;
         return true;
     }
     return false;
@@ -373,11 +373,11 @@ QJsonObject Profile::toJson() const
         // said -- the same discipline `presence` and `sites` keep in the ledger.
         if (budget.isSite())
             object.insert(QStringLiteral("kind"), selectsName(budget.selects));
-        // Written only when it is `session`, for the reason `kind` is: absent is
-        // `daily`, which is every budget written before a second anchor existed,
-        // and putting `"resets": "daily"` into all of them would rewrite every
+        // Written only when it is `never`, for the reason `kind` is: absent is
+        // `daily`, which is every budget written before a pot could be one, and
+        // putting `"resets": "daily"` into all of them would rewrite every
         // profiles.json there is to say what it already said.
-        if (budget.perSession())
+        if (budget.carriesOver())
             object.insert(QStringLiteral("resets"), resetsName(budget.resets));
         // A budget with no limit leaves the field out rather than writing a
         // zero: zero minutes reads like "no time at all", which is the opposite
@@ -541,7 +541,7 @@ bool Profile::fromJson(const QJsonObject &object, Profile *out, QString *error)
         if (!resetsText.isEmpty() && !resetsFromName(resetsText, &budget.resets)) {
             if (error) {
                 *error = QStringLiteral("%1 has a budget with an unknown resets %2; it is "
-                                        "daily or session")
+                                        "daily or never")
                              .arg(named, resetsText);
             }
             return false;

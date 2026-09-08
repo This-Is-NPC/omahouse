@@ -105,16 +105,16 @@ void Ledger::addSeconds(const QString &budgetId, int amount)
     seconds[budgetId] = secondsFor(budgetId) + amount;
 }
 
-int Ledger::sessionSecondsFor(const QString &budgetId) const
+int Ledger::keptSecondsFor(const QString &budgetId) const
 {
-    return sessionSeconds.value(budgetId, 0);
+    return keptSeconds.value(budgetId, 0);
 }
 
-void Ledger::addSessionSeconds(const QString &budgetId, int amount)
+void Ledger::addKeptSeconds(const QString &budgetId, int amount)
 {
     if (budgetId.isEmpty() || amount == 0)
         return;
-    sessionSeconds[budgetId] = sessionSecondsFor(budgetId) + amount;
+    keptSeconds[budgetId] = keptSecondsFor(budgetId) + amount;
 }
 
 int Ledger::presenceSecondsFor(const QString &reason) const
@@ -146,16 +146,6 @@ int Ledger::grantedSeconds(const QString &budgetId) const
     int total = 0;
     for (const Grant &grant : grants) {
         if (grant.budget == budgetId && grant.minutes != 0)
-            total += grant.minutes * 60;
-    }
-    return total;
-}
-
-int Ledger::grantedSeconds(const QString &budgetId, const QString &anchor) const
-{
-    int total = 0;
-    for (const Grant &grant : grants) {
-        if (grant.budget == budgetId && grant.minutes != 0 && grant.anchor == anchor)
             total += grant.minutes * 60;
     }
     return total;
@@ -214,11 +204,6 @@ QJsonObject Ledger::toJson() const
         };
         if (grant.adjustment)
             entry.insert(QStringLiteral("kind"), QStringLiteral("adjustment"));
-        // Written only when there is one, which is only for a budget anchored
-        // at the login. Every grant already on disk is a daily budget's and
-        // says nothing new.
-        if (!grant.anchor.isEmpty())
-            entry.insert(QStringLiteral("anchor"), grant.anchor);
         grantArray.append(entry);
     }
 
@@ -267,19 +252,13 @@ QJsonObject Ledger::toJson() const
             siteObject.insert(it.key(), it.value());
         document.insert(QStringLiteral("sites"), siteObject);
     }
-    // The same discipline a third time. A machine whose profiles have no
-    // session-anchored budget writes exactly the file it always wrote, and the
-    // two halves are written together or not at all: seconds without the anchor
-    // they belong to would be a total nobody can say the sitting of.
-    if (!sessionAnchor.isEmpty()) {
-        QJsonObject sitting{{QStringLiteral("anchor"), sessionAnchor}};
-        if (!sessionSeconds.isEmpty()) {
-            QJsonObject spent;
-            for (auto it = sessionSeconds.constBegin(); it != sessionSeconds.constEnd(); ++it)
-                spent.insert(it.key(), it.value());
-            sitting.insert(QStringLiteral("seconds"), spent);
-        }
-        document.insert(QStringLiteral("session"), sitting);
+    // The same discipline a third time. A machine whose profiles have no budget
+    // that outlives the day writes exactly the file it always wrote.
+    if (!keptSeconds.isEmpty()) {
+        QJsonObject kept;
+        for (auto it = keptSeconds.constBegin(); it != keptSeconds.constEnd(); ++it)
+            kept.insert(it.key(), it.value());
+        document.insert(QStringLiteral("kept"), kept);
     }
     if (!allocation.isEmpty()) document.insert(QStringLiteral("allocation"), allocation);
     if (observedAt.isValid()) document.insert(QStringLiteral("observedAt"), isoWithOffset(observedAt));
@@ -379,44 +358,24 @@ bool Ledger::fromJson(const QJsonObject &object, Ledger *out, QString *error)
         ledger.sites.insert(it.key(), it.value().toInt());
     }
 
-    // Absent in every ledger written before a budget could be anchored at the
-    // login, which is every ledger on the machines this ships to.
-    const QJsonValue sittingValue = object.value(QStringLiteral("session"));
-    if (!sittingValue.isUndefined() && !sittingValue.isObject()) {
+    // Absent in every ledger written before a budget could outlive the day,
+    // which is every ledger on the machines this ships to.
+    const QJsonValue keptValue = object.value(QStringLiteral("kept"));
+    if (!keptValue.isUndefined() && !keptValue.isObject()) {
         if (error)
-            *error = QStringLiteral("a ledger has a session field that is not an object");
+            *error = QStringLiteral("a ledger has a kept field that is not an object");
         return false;
     }
-    if (sittingValue.isObject()) {
-        const QJsonObject sitting = sittingValue.toObject();
-        const QJsonValue anchor = sitting.value(QStringLiteral("anchor"));
-        if (!anchor.isString()) {
+    const QJsonObject kept = keptValue.toObject();
+    for (auto it = kept.constBegin(); it != kept.constEnd(); ++it) {
+        if (!it.value().isDouble()) {
             if (error) {
-                *error = QStringLiteral("the ledger of %1 has a session with no anchor")
-                             .arg(ledger.user);
+                *error = QStringLiteral("the ledger of %1 has a non-numeric kept count for %2")
+                             .arg(ledger.user, it.key());
             }
             return false;
         }
-        ledger.sessionAnchor = anchor.toString();
-        const QJsonValue spentValue = sitting.value(QStringLiteral("seconds"));
-        if (!spentValue.isUndefined() && !spentValue.isObject()) {
-            if (error) {
-                *error = QStringLiteral("the ledger of %1 has session seconds that are not "
-                                        "an object").arg(ledger.user);
-            }
-            return false;
-        }
-        const QJsonObject spent = spentValue.toObject();
-        for (auto it = spent.constBegin(); it != spent.constEnd(); ++it) {
-            if (!it.value().isDouble()) {
-                if (error) {
-                    *error = QStringLiteral("the ledger of %1 has a non-numeric session count "
-                                            "for %2").arg(ledger.user, it.key());
-                }
-                return false;
-            }
-            ledger.sessionSeconds.insert(it.key(), it.value().toInt());
-        }
+        ledger.keptSeconds.insert(it.key(), it.value().toInt());
     }
 
     const QJsonValue grantsValue = object.value(QStringLiteral("grants"));
@@ -456,12 +415,6 @@ bool Ledger::fromJson(const QJsonObject &object, Ledger *out, QString *error)
             }
             grant.adjustment = true;
         }
-        const QJsonValue anchor = entry.value(QStringLiteral("anchor"));
-        if (!anchor.isUndefined() && !anchor.isString()) {
-            if (error) *error = QStringLiteral("a grant has a non-string anchor");
-            return false;
-        }
-        grant.anchor = anchor.toString();
         ledger.grants.append(grant);
     }
 

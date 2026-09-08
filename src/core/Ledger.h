@@ -39,16 +39,6 @@ struct Grant {
     int minutes = 0;
     /// Local balance adjustment, excluded from household credit.
     bool adjustment = false;
-    /// The sitting this was handed over in, for a budget anchored at the login,
-    /// and empty for every other grant.
-    ///
-    /// Ten minutes given to somebody at their machine is ten minutes of *this*
-    /// sitting. Without the stamp the same ten minutes would be added again to
-    /// the next person who logs in, because the grants live in the day's file
-    /// and the day outlasts the sitting. The line stays in the file either way
-    /// -- it is the day's log and it did happen -- and what the stamp decides is
-    /// only whether it still counts.
-    QString anchor;
 };
 
 struct Event {
@@ -102,34 +92,21 @@ struct Ledger {
     /// A QMap for the same reason `seconds` is one: the file is written every
     /// couple of seconds and read by people.
     QMap<QString, int> sites;
-    /// Which login the seconds below belong to, as an opaque word.
+    /// Seconds spent against budgets that do not reset, by budget id.
     ///
-    /// Never parsed and never compared for order -- only for sameness. What the
-    /// engine has to know about a session budget is whether this is still the
-    /// same sitting, and that is an identity and not an instant. logind's
-    /// `Timestamp` for the user is what fills it, as the string logind printed:
-    /// asking it to be a date would mean parsing a locale-formatted day name to
-    /// answer a question that never needed the answer, and `TimestampMonotonic`
-    /// is measured from a boot this file outlives.
+    /// **Beside `seconds` and never inside it**, and this second map is the
+    /// load-bearing part of a counter that outlives the day. Everything that
+    /// adds days or machines together -- `report`, `omahouse house`,
+    /// `consolidate`, `collect` -- reads `seconds`. A counter that survives the
+    /// turn of the date is carried into the file of every day it touches, so in
+    /// `seconds` it would be counted once per day it crossed, and the report of
+    /// a fortnight would show a pot spent fourteen times. Kept apart, every one
+    /// of those readers goes on being right without knowing this exists.
     ///
-    /// Empty is a machine that has not been asked, and then a session budget
-    /// behaves exactly as a daily one -- the honest reading of "nobody told me
-    /// when this sitting began".
-    QString sessionAnchor;
-    /// Seconds spent against session-anchored budgets, by budget id.
-    ///
-    /// **Beside `seconds` and never inside it**, and that is the whole of why
-    /// this is a second map. Everything that adds days or machines together --
-    /// `report`, `omahouse house`, `consolidate`, `collect` -- reads `seconds`,
-    /// and a session that spans three midnights carries its running total into
-    /// each of those days' files. Summed, that total would be counted once per
-    /// day it touched. Kept apart, every one of those readers goes on being
-    /// right without knowing this exists.
-    ///
-    /// Carried across the turn of the date while `sessionAnchor` holds, and
-    /// dropped the moment it changes. That is the second clock: the daily
-    /// budgets start over at midnight and these do not.
-    QMap<QString, int> sessionSeconds;
+    /// Nothing here ever goes back to zero on its own. A pot is emptied by
+    /// being spent and refilled by somebody handing over more, which is the
+    /// whole of what `Resets::Never` means.
+    QMap<QString, int> keptSeconds;
     QJsonObject allocation;
     QDateTime observedAt;
     QVector<Grant> grants;
@@ -138,11 +115,11 @@ struct Ledger {
     int secondsFor(const QString &budgetId) const;
     void addSeconds(const QString &budgetId, int amount);
 
-    /// The same two, for a budget whose clock is anchored at the login. Which
-    /// pair a budget uses is `Budget::perSession()`, decided by the profile and
-    /// never by the shape of anything here.
-    int sessionSecondsFor(const QString &budgetId) const;
-    void addSessionSeconds(const QString &budgetId, int amount);
+    /// The same two, for a budget whose counter survives the turn of the date.
+    /// Which pair a budget uses is `Budget::carriesOver()`, decided by the
+    /// profile and never by the shape of anything here.
+    int keptSecondsFor(const QString &budgetId) const;
+    void addKeptSeconds(const QString &budgetId, int amount);
 
     int presenceSecondsFor(const QString &reason) const;
     void addPresenceSeconds(const QString &reason, int amount);
@@ -153,10 +130,6 @@ struct Ledger {
     /// Minutes an operator added today, as seconds, for one budget. Grants are
     /// in the day's own file, so they expire by the file expiring.
     int grantedSeconds(const QString &budgetId) const;
-    /// The same, counting only what was handed over in one sitting. Used for a
-    /// budget anchored at the login, where a grant from the sitting before is a
-    /// grant that has been and gone.
-    int grantedSeconds(const QString &budgetId, const QString &anchor) const;
     int creditedSeconds(const QString &budgetId) const;
 
     bool hasWarned(const QString &budgetId, int minutes) const;

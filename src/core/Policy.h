@@ -100,24 +100,9 @@ struct Outcome {
 /// exactly as it always did. A caller with nothing to say about the browser is
 /// not a caller that has forgotten to answer -- it is a machine with no
 /// extension on it, which is most of them.
-/// `sessionAnchor` is the third observation, beside `scopes` and `siteInFront`:
-/// which login this tick belongs to, as an opaque word the caller got from
-/// logind. It is compared for sameness and never for order, because what a
-/// budget anchored at the login needs to know is whether this is still the same
-/// sitting -- an identity, not an instant. Ticks are what count the time, and
-/// they always were.
-///
-/// Empty is a caller with nothing to say about sittings, which is a machine
-/// nobody asked and every caller that existed before this. Then a
-/// session-anchored budget behaves exactly as a daily one, which is the honest
-/// reading of "nobody told me when this began" -- and it is why every existing
-/// caller keeps its behaviour to the second.
-///
-/// Last, and defaulted, for the same reason `siteInFront` is.
 Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const Ledger &ledger,
                  const QDateTime &now, int tickSeconds,
                  const QString &siteInFront = QString(),
-                 const QStringList &alsoFurniture = QStringList(),
-                 const QString &sessionAnchor = QString());
+                 const QStringList &alsoFurniture = QStringList());
 
 } // namespace omahouse

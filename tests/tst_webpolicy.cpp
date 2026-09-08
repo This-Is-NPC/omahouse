@@ -510,41 +510,41 @@ private slots:
         QVERIFY2(error.contains(QStringLiteral("no match")), qPrintable(error));
     }
 
-// `resets` survives the file, and is written only when it is `session`.
-    void aBudgetAnchoredAtTheLoginSurvivesTheFile()
+// `resets` survives the file, and is written only when it is `never`.
+    void aBudgetThatOutlivesTheDaySurvivesTheFile()
     {
         Profile julia = person(QStringLiteral("julia"));
-        Budget sitting;
-        sitting.id = QStringLiteral("visit");
-        sitting.match = {QStringLiteral("chromium")};
-        sitting.resets = Resets::Session;
-        sitting.dailyMinutes = 120;
-        sitting.onExhausted = OnExhausted::Close;
+        Budget pot;
+        pot.id = QStringLiteral("pot");
+        pot.match = {QStringLiteral("chromium")};
+        pot.resets = Resets::Never;
+        pot.dailyMinutes = 120;
+        pot.onExhausted = OnExhausted::Close;
         Budget day;
         day.id = QStringLiteral("session");
         day.match = {QStringLiteral("*")};
         day.dailyMinutes = 120;
-        julia.budgets = {sitting, day};
+        julia.budgets = {pot, day};
 
         const QJsonArray budgets = julia.toJson().value(QStringLiteral("budgets")).toArray();
         QCOMPARE(budgets.at(0).toObject().value(QStringLiteral("resets")).toString(),
-                 QStringLiteral("session"));
+                 QStringLiteral("never"));
         QVERIFY2(!budgets.at(1).toObject().contains(QStringLiteral("resets")),
                  "a daily budget wrote a resets, which rewrites every file on every machine");
 
         Profile read;
         QString error;
         QVERIFY2(Profile::fromJson(julia.toJson(), &read, &error), qPrintable(error));
-        QVERIFY(read.budgets.at(0).perSession());
-        QVERIFY(!read.budgets.at(1).perSession());
+        QVERIFY(read.budgets.at(0).carriesOver());
+        QVERIFY(!read.budgets.at(1).carriesOver());
 
         // And an unknown one is said rather than guessed at, because a budget
-        // whose anchor was misread is a clock that resets at the wrong moment
-        // and reads back out of `profile show` looking correct.
+        // whose reset was misread is a clock that starts over at the wrong
+        // moment and reads back out of `profile show` looking correct.
         const QJsonObject wrong {
             {QStringLiteral("user"), QStringLiteral("julia")},
             {QStringLiteral("budgets"),
-             QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("visit")},
+             QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("pot")},
                                       {QStringLiteral("match"), QStringLiteral("chromium")},
                                       {QStringLiteral("resets"), QStringLiteral("weekly")}}}}};
         QVERIFY(!Profile::fromJson(wrong, &read, &error));

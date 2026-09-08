@@ -39,16 +39,21 @@ enum class Selects { App, Site };
 /// `Daily` is the turn of the local date, which is every budget written before
 /// this existed and is what a household means by "two hours a day".
 ///
-/// `Session` is the login. Two hours from the moment somebody sits down is a
-/// different offer from two hours today, and a lan house sells the first: the
-/// customer who arrives at eleven at night does not get twenty minutes because
-/// midnight is coming. It is a second anchor and not a second engine -- the
-/// counting, the warnings, the grace and the action are the same machinery.
+/// `Never` is a pot rather than an allowance. Two hours are two hours until
+/// somebody hands over more: logging out does not give them back, the turn of
+/// the date does not, and neither does walking to another computer. It is the
+/// shape a lan house sells, and it is the only shape that is a limit on a
+/// *person* -- a clock that starts over at the login hands two free hours to
+/// anybody who logs out and back in, which is the opposite of a limit.
+///
+/// It is not a second engine. The counting, the `warnAt` marks, the `grace`
+/// window and the action are the machinery that was already there, and the one
+/// thing that differs is that the turn of the date leaves the counter alone.
 ///
 /// Absent from the file is `Daily`, and `daily` is never written into it. That
 /// is docs/design.md §4's discipline for `kind`, `presence` and `sites`:
 /// writing what every file already means would rewrite every profile there is.
-enum class Resets { Daily, Session };
+enum class Resets { Daily, Never };
 
 QString verdictName(Verdict verdict);
 bool verdictFromName(const QString &name, Verdict *out);
@@ -189,17 +194,20 @@ struct Budget {
     /// When this budget's clock goes back to zero. See `Resets`.
     ///
     /// `dailyMinutes` keeps its name under either, because what it holds is the
-    /// size of the allowance and not the length of the day: a session budget of
-    /// 120 is two hours per sitting. Renaming the field would rewrite every
-    /// profiles.json on every machine to say what it already says.
+    /// size of the allowance and not the length of the day: a budget of 120
+    /// that never resets is two hours, full stop. Renaming the field would
+    /// rewrite every profiles.json on every machine to say what it already says.
     Resets resets = Resets::Daily;
     OnExhausted onExhausted = OnExhausted::Warn;
 
     bool hasLimit() const { return dailyMinutes > 0; }
     bool isSite() const { return selects == Selects::Site; }
-    /// Whether this budget's clock is anchored at the login rather than at the
-    /// turn of the date.
-    bool perSession() const { return resets == Resets::Session; }
+    /// Whether this budget's counter survives the turn of the date.
+    ///
+    /// The name is about what happens to the number and not about what the
+    /// operator asked for, because that is what every caller of it needs to
+    /// decide: which of the ledger's two maps the seconds go in.
+    bool carriesOver() const { return resets == Resets::Never; }
     /// The budget whose selector is everything -- docs/design.md §2's whole
     /// argument for there being no separate idea of "the user's time". A list
     /// containing `*` is that budget whatever else is beside it, because `*`
