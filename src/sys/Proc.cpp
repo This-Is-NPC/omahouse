@@ -191,6 +191,31 @@ QString Proc::appSlicePath(uid_t uid) const
         .arg(static_cast<qulonglong>(uid));
 }
 
+QVector<uid_t> Proc::accountsWithSessions() const
+{
+    QVector<uid_t> found;
+    QDir slice(m_cgroupRoot + QStringLiteral("/user.slice"));
+    const QStringList entries =
+        slice.entryList({QStringLiteral("user-*.slice")}, QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &name : entries) {
+        // `user-1000.slice` -> 1000. Anything that is not that shape is not
+        // logind's and is stepped over rather than guessed at.
+        const QString digits = name.mid(5, name.size() - 5 - 6);
+        bool ok = false;
+        const uint uid = digits.toUInt(&ok);
+        if (!ok)
+            continue;
+        // The directory existing is not a session. `user-<uid>.slice` outlives
+        // a logout for a moment, and lingering leaves it standing for good --
+        // `hasSession` is the same question `watch` already asks of a named
+        // profile, and asking it here keeps the two answers the same.
+        if (hasSession(static_cast<uid_t>(uid)))
+            found.append(static_cast<uid_t>(uid));
+    }
+    std::sort(found.begin(), found.end());
+    return found;
+}
+
 QString Proc::sessionSlicePath(uid_t uid) const
 {
     return QStringLiteral("%1/user.slice/user-%2.slice/user@%2.service/session.slice")

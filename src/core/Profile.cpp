@@ -437,7 +437,9 @@ bool Profile::fromJson(const QJsonObject &object, Profile *out, QString *error)
             *error = QStringLiteral("a profile has an empty user");
         return false;
     }
-    const QString named = QStringLiteral("the profile of %1").arg(profile.user);
+    const QString named = profile.isForAnybody()
+        ? QStringLiteral("the profile for anybody")
+        : QStringLiteral("the profile of %1").arg(profile.user);
     if (object.contains(QStringLiteral("allocation"))) {
         if (!object.value(QStringLiteral("allocation")).isObject()
                 || !validAllocation(object.value(QStringLiteral("allocation")).toObject(), error))
@@ -607,6 +609,26 @@ bool Profile::fromJson(const QJsonObject &object, Profile *out, QString *error)
                                         "%4, and %4 is not something that can happen to a %3")
                              .arg(named, budget.id, selectsName(budget.selects),
                                   onExhaustedName(budget.onExhausted));
+            }
+            return false;
+        }
+        // The one rule that is about *whose* profile this is, refused where the
+        // file is read for the reason every refusal here is: a budget that reads
+        // back out of `profile show` and never does what it says is worse than
+        // one that was turned away.
+        //
+        // A pot is emptied by being spent and refilled by somebody handing over
+        // more. On a login several people share, the first of them empties it
+        // and the second sits down to a spent clock with no midnight coming --
+        // because `never` is what took the midnight away. Whoever wants a
+        // shared machine limited wants `daily`, and that is what this says.
+        if (profile.isForAnybody() && budget.carriesOver()) {
+            if (error) {
+                *error = QStringLiteral("%1 has a budget %2 that never resets, and a profile "
+                                        "for anybody is shared: the first person to sit down "
+                                        "would empty it and nobody would ever refill it. Use "
+                                        "daily.")
+                             .arg(named, budget.id);
             }
             return false;
         }

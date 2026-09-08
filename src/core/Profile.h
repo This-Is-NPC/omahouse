@@ -226,6 +226,26 @@ struct Budget {
 /// the same reason. `warn` fits both: it is the observing stage of either.
 bool actionFits(Selects selects, OnExhausted action);
 
+/// The account name a profile uses to mean **anybody without one of their own**.
+///
+/// `*` and not a new field, because `*` is already this model's word for
+/// everything: it is what a budget's selector says to match every app, and what
+/// `selectorMatches` is built around. A second spelling of "all of them" would
+/// be a second thing to learn.
+///
+/// It can never collide with a real account: `*` is not a name POSIX will give
+/// out, and `uidForUser` fails on it -- which is right, because this profile
+/// names no account by design.
+///
+/// A machine with twenty computers and forty rotating customers is forty
+/// profiles typed by hand, and the fortieth is written wrong. This is the
+/// alternative: the machine carries rules for whoever sits at it.
+inline const QString &anybody()
+{
+    static const QString name = QStringLiteral("*");
+    return name;
+}
+
 struct Profile {
     QString user;
     QString displayName;
@@ -293,6 +313,18 @@ struct Profile {
     /// afternoon somebody spent the moment another computer reported later.
     QString writtenBy;
     QDateTime writtenAt;
+
+    /// Whether this profile is the one for anybody without one of their own.
+    ///
+    /// Two rules apply to it and they live in two different places, which is
+    /// worth knowing before looking for either. **A budget that never resets is
+    /// refused where the file is read**: on a shared login a pot empties once
+    /// and is never refilled, so the second person to sit down gets a spent
+    /// clock and no midnight to rescue them. **Administrators are left out
+    /// where the cycle runs**, and not here, because that cannot be a fact
+    /// about the file: somebody put in wheel tomorrow must fall out of a
+    /// fallback that was already written and is still correct.
+    bool isForAnybody() const { return user == anybody(); }
 
     /// The first rule that names `scopeId` wins; with none, the profile default
     /// decides. First and not last because the rules are read in the order the

@@ -304,7 +304,47 @@ Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now,
     if (m_presence)
         cycle.seat = m_presence->readSeat();
 
+    // Who this cycle is about: everybody a profile names, and then everybody
+    // sitting at the machine that no profile names, if there is a profile for
+    // anybody.
+    //
+    // The second half is the whole cost of a fallback and it runs the other way
+    // round from the first. A named profile is a user and then a uid; a
+    // fallback has no user to start from, so the machine is asked who is here.
+    QVector<Profile> forEverybody = profiles;
+    const Profile *anybodys = nullptr;
     for (const Profile &profile : profiles) {
+        if (profile.isForAnybody())
+            anybodys = &profile;
+    }
+    if (anybodys) {
+        QSet<QString> named;
+        for (const Profile &profile : profiles)
+            named.insert(profile.user);
+        for (uid_t uid : m_proc->accountsWithSessions()) {
+            const QString who = userForUid(uid);
+            if (who.isEmpty() || named.contains(who))
+                continue;
+            // Left out where the cycle runs and not where the file is read,
+            // because it cannot be a fact about the file: somebody put in wheel
+            // tomorrow has to fall out of a fallback that was written before
+            // and is still correct. docs/design.md §1 -- and `profile add`
+            // already refuses to write a profile for an administrator, so a
+            // fallback that caught one would do through the back door what the
+            // verb turns away at the front.
+            if (isAdministrator(who))
+                continue;
+            Profile mine = *anybodys;
+            mine.user = who;
+            forEverybody.append(mine);
+        }
+    }
+
+    for (const Profile &profile : forEverybody) {
+        // The profile for anybody is not itself watched: it names no account,
+        // and the people it is about were added above under their own names.
+        if (profile.isForAnybody())
+            continue;
         Watched watched;
         watched.user = profile.user;
         watched.displayName = profile.displayName;
@@ -335,7 +375,7 @@ Cycle Watch::tick(const QVector<Profile> &profiles, const QDateTime &now,
     // cycle, never a change to it. It is done for every cycle and not only for
     // one that decided something, because a site coming back at midnight is a
     // cycle that decided nothing and has to write the file anyway.
-    reconcileWebPolicy(profiles, &cycle);
+    reconcileWebPolicy(forEverybody, &cycle);
     endSessions(&cycle);
 
     for (Watched &watched : cycle.users)
