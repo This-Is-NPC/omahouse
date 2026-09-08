@@ -175,6 +175,19 @@ back, and mergeable there. This is the model a phone address book has used for
 twenty years, and it works for the same reason: **every record knows where it came
 from.**
 
+### One question this raises and does not answer
+
+Every write to `profiles.json` today happens with a person at the keyboard, and
+polkit is the gate: `packaging/org.omarchy.omahouse.rules` asks a named
+administrator for their own password, and the file's own comment says that
+action is the only gate in front of the CLI running as root.
+
+**A profile pushed from the centre is a write with nobody at the keyboard.** No
+polkit prompt stands in front of it, so what authorises it is the wire, and the
+wire is Omakure's. Whether that is enough, and what the machine may refuse from a
+manager it no longer recognises, is not decided here. It has to be answered
+before step 6 is written.
+
 ---
 
 ## 5. Two people wrote the same profile
@@ -262,7 +275,9 @@ from a pool against a daily clock and against a session clock are different sums
 ### Phase A — the profile can say the three shapes
 
 1. **Give `Budget` an explicit reset.** `resets: "daily" | "session"`, absent
-   meaning daily, so every file on disk keeps its current meaning. *core*
+   meaning daily, so every file on disk keeps its current meaning. The reader
+   already holds this discipline: `wantsNames` in `src/core/Profile.cpp` reads
+   `match` written either way and a case pins it. *core*
 2. **Record the session anchor in the ledger.** The login instant and the seconds
    since it, written, so a restarted daemon resumes a session instead of
    reopening it. *core*
@@ -336,15 +351,27 @@ a company: it is a laptop whose user administers it, and a lan house is the
 has no root. Where an administrator is genuinely local and trusted, §5's tiebreak
 is the answer and it is simpler.
 
+There is a second argument for the refusal, and it is measured rather than
+argued. **The gate that decides who may change a rule already exists and is
+per-person, not per-file.** `packaging/org.omarchy.omahouse.rules` makes polkit
+ask a given administrator for *their own* password, and deliberately refuses a
+blanket `auth_self` — its own comment says why: that action is the only gate in
+front of the CLI running as root, because omahouse does not refuse a write from
+an account under rules once it is already root. A flag in the policy file would
+be a second gate, weaker than the one there, in front of the same door.
+
 ---
 
 ## What on this page is measured, and what is argued
 
 **Measured**, by reading the source and the pages on 2026-09-08: that the profile
-lookup is an exact string match; that a budget of zero counts without running out;
+lookup is an exact string match — `profile.user == user`, which is a different
+question from the rule matching of `selectorMatches`, and only the first is
+what §2 changes; that a budget of zero counts without running out;
 that the ledger is keyed by date with no session anchor; that the household
 divides equally, caps absolutely, and does not transfer during the day; that
 `collect` sums rather than replaces; that omastore reimplements the verdict and
-reads the same file.
+reads the same file; and that the polkit rule asks a named administrator for
+their own password while refusing a blanket `auth_self`.
 
 **Argued**, and nothing more: everything in §3 through §5. No line of it has run.
