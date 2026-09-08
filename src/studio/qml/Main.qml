@@ -1787,6 +1787,22 @@ Window {
                                        + " · " + win.person.incognito
                                      : win.person.name + " · " + win.person.policy
                 blind: win.person === null ? 0 : win.person.blindProcesses
+                // Two sources, one line, and they must stay two.
+                //
+                // `House.error` is a file the window could not read;
+                // `Admin.message` is what a verb said back, refusal included.
+                // They land in the same place and read alike, which is exactly
+                // why somebody will one day want to fold them into one string
+                // in `House` and save a branch here.
+                //
+                // What that would break is not here. `shoot()` in
+                // tests/tst_studio.cpp refuses to save a picture taken while
+                // `House.error` is set -- that is the guard that catches a
+                // fixture breaking and the household vanishing out of a
+                // screenshot -- while `19-operator-refusal.png` is deliberately
+                // a picture of an `Admin.message`. One channel would force a
+                // choice between the guard and that picture, and both are
+                // right. They are separate upstream; keep them separate.
                 message: House.error !== "" ? House.error : Admin.message
                 alarm: House.error !== "" || Admin.failed
                 hints: win.hints
