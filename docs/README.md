@@ -35,8 +35,8 @@ A second computer is its own step, and needs 1 to 4 done on this one first:
    this one cannot be reached.
 
 [Share a daily allowance with a Battery schedule](how-to-schedule-household.md)
-comes after pairing: explicit enrollment and scheduling, exclusive portions,
-offline behavior and the machines view in Studio.
+comes after pairing: explicit enrollment and scheduling, one balance every
+computer is told, offline behavior and the machines view in Studio.
 
 The browser is its own half, and needs nothing above it except a profile:
 

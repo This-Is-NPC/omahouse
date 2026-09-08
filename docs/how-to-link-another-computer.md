@@ -183,8 +183,15 @@ afternoon, and only one of those is a fact.
 
 Collection alone does not prevent both machines spending the same daily limit.
 For automatic sharing, follow [the Battery schedule setup](how-to-schedule-household.md).
-It enrolls each computer, reserves exclusive portions and delivers absolute daily
-caps. Omakure runs the schedule; omahouse decides and enforces the credit.
+It enrolls each computer and tells each of them the household's credit and what
+the others have spent of it, so all of them work out the same balance and an
+hour is an hour wherever the person sits. Omakure runs the schedule; omahouse
+decides and enforces the credit.
+
+It does **not** make the balance exclusive. Two computers told there are thirty
+minutes left can both start spending them, and the overspend is bounded by how
+often the household reports — which is why that interval is the setting that
+matters on that page.
 
 `leave` remains a standalone local adjustment. It must not be repeated as a
 synchronization loop: consumption between calls would be refilled. New local
@@ -198,11 +205,13 @@ adjustments are excluded from household credit, and enrolled profiles refuse
 Everything above is typed, and there is a screen for it. Open the studio, pick
 the account on **people**, and press **f**:
 
-![The machines view: `MACHINE / BUDGET` beside `USED / PORTION / LEFT`; `here / session` at 1h10m / 1h15m / 5m, marked `portion received` and `Last report: local`; and `station-02 / session` at 40m / 45m / 5m, marked `stale report; portion reserved` and `Last report: 2026-09-01T09:30:00`.](img/31-operator-machines.png)
+![The machines view: `MACHINE / BUDGET` beside `USED / CREDIT / LEFT`; `here / session` at 1h10m / 2h10m / 20m, marked `statement received` and `Last report: local`; and `station-02 / session` at 40m / 2h10m / 20m, marked `stale report; the balance below is behind` and `Last report: 2026-09-01T09:30:00`.](img/31-operator-machines.png)
 
-One row is one budget on one computer. What that computer last reported
-spending, the daily portion it was given, what is left of it, and when the
-report came in.
+One row is one budget on one computer: what that computer last reported
+spending, the household's credit, what is left of it, and when the report came
+in. **`CREDIT` and `LEFT` are the same down the whole column**, because there is
+one pot and no quota per machine. What differs is `USED`, which is that
+computer's share of having spent it.
 
 The **today** view (`3`) adds the same days up in place. On a manager, each
 budget carries a line reading `the house: 1h40m spent · 30m left · here 1h10m ·
@@ -214,15 +223,16 @@ exactly like a total of a quiet afternoon.
 
 `here` reports `local` and can never go stale. Every other row carries the
 instant its report came in, and **that line is the one to read first.** A
-portion stays reserved whether or not the computer is reporting, so `5m left`
-beside a week-old observation is five minutes that may already have been spent
-over there. The row says `stale report; portion reserved` in those words rather
-than leaving somebody to work it out from the date.
+computer that has not reported is a computer whose spending is not yet in the
+balance, so `20m left` beside a week-old observation is twenty minutes that may
+already have been spent over there. The row says `stale report; the balance
+below is behind` in those words rather than leaving somebody to work it out from
+the date.
 
 **+** records household credit, through the same privileged CLI a terminal
-would use. It does not deliver it: the next successful Battery cycle divides it
-among the portions. Nothing in this window runs a scheduler, and nothing in it
-reaches the other computer — it reads what was collected here.
+would use. It does not deliver it: the next successful Battery cycle puts it in
+the credit every machine is told. Nothing in this window runs a scheduler, and
+nothing in it reaches the other computer — it reads what was collected here.
 
 The fiscalised person's own face cannot open this view.
 

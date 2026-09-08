@@ -1321,12 +1321,32 @@ a structural change when the time comes.
 - **Credit that crosses days**, a time bank, time bought with a chore.
 
 
-## 12. Exclusive household credit and scheduled coordination
+## 12. One household balance and scheduled coordination
 
 The contract and operator setup are in
 [the household scheduling guide](how-to-schedule-household.md). `Allocation` in
-core plans and validates absolute daily portions. Profile allocation metadata
-changes enforcement and local balances; it does not create ledger grants.
+core plans and validates a **statement** per machine: two numbers per budget,
+the household's `credit` and the seconds spent `elsewhere`. Each machine's
+allowance is the difference, so what is left over there is the household's
+balance and an hour is an hour wherever the person sits.
+
+They are two numbers and not one cap because they are different kinds of fact
+and go stale differently — the same split §11's page draws between policy and
+observation. `credit` is a decision with a correct current version and may be
+lowered mid-day; `elsewhere` is consumption, only ever grows, and a statement
+reporting less than the last one is refused for the reason `collect` refuses
+it. A late report under-states `elsewhere`, so a machine allows a little too
+much rather than too little.
+
+**This is not exclusive.** Two computers told there are thirty minutes left can
+both spend them, bounded by the reporting interval and nothing else. The
+division into per-machine portions that came before did guarantee exclusivity
+and paid for it with the thing the product is for: time reserved on one computer
+was time another could not spend. The interval is therefore not a tuning knob;
+it is what holds the sum together.
+
+Profile allocation metadata changes enforcement and local balances; it does not
+create ledger grants.
 A `kind: adjustment` grant from `leave` affects standalone local balance, while
 only genuine grants contribute to household credit. Untagged historical grants
 remain credit because their original intent cannot be recovered.
@@ -1334,24 +1354,23 @@ remain credit because their original intent cannot be recovered.
 The Battery calls `day`, `collect`, `allocation plan` and `allocation apply`.
 Its optional manager-owned wrapper supplies Omakure's `Schedule`; there is no
 new omahouse scheduler or network daemon. Console API results remain outside
-the Health Plane. Partial delivery retains all reservations, and readback must
-match the issued document. All enrolled observations must be fresh before a
-new plan can divide credit, including newly granted time.
+the Health Plane. Readback must match the issued document. All enrolled
+observations must be fresh before a new plan, including newly granted time.
 
-Reservations are fsynced and atomically replaced before delivery. Revision,
-authority, date, account, budget IDs and frozen membership guard replay. Missing
-or rolled-back manager state is refused when a machine reports issued credit.
+Statements are fsynced and atomically replaced before delivery. Revision,
+authority, date, account, budget IDs and frozen membership guard replay. A
+machine holding a revision the manager has no record of is refused.
 CLI profile mutations share a lock across their read/modify/write cycles;
 `grant`, `leave` and the watcher share a per-day ledger lock. The Battery also
 holds a workspace lock to exclude simultaneous manual and scheduled runs.
 
 Studio reads the same files through core/sys and writes through the existing
-privileged CLI boundary. The machines view shows observations, received portions
-and their age. It never turns an HTTP launch into proof of applied credit.
+privileged CLI boundary. The machines view shows observations, the household
+credit and balance, and their age. It never turns an HTTP launch into proof of applied credit.
 
 The host gate exercises arithmetic, refusals and keyboard/mouse interaction.
 The Battery's `.scripts/test-sync.py` uses real CLI processes with disposable
 file roots for retries, partial delivery, readback, offline peers and overlap.
 The VM case `a_battery_schedule_reserves_household_credit` exercises actual
-Omakure scheduled history, paired HTTP transport, repeated runs, restart,
-offline reservation and a subsequent grant in two disposable guests.
+Omakure scheduled history, paired HTTP transport, repeated runs, restart, an
+offline machine and a subsequent grant in two disposable guests.

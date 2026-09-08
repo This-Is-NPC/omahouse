@@ -16,16 +16,22 @@ build with `omahouse allocation`, have the account and matching limited budget
 IDs, and have its local `omahouse watch` service running. Keep their local date
 and clocks aligned. The manager's profile supplies the household's daily limit.
 
-This first policy includes **the manager (`here`) and every registered
-machine**. All must have that account. It divides the unspent credit equally,
-reserving already recorded consumption first. For example, with 120 minutes
-and two idle machines, each gets 60 minutes. The manager is one of those two.
-A separate management-only computer currently still reserves a share; there is
-no selectable participant group or transfer between machines during the day.
+This policy includes **the manager (`here`) and every registered machine**. All
+must have that account. It does not divide anything. Each machine is told two
+numbers per budget — the household's **credit** for the day, and how much of it
+the **other** computers have already spent — and works out the same balance from
+them. With 120 minutes and two machines, both see 120 minutes; when one has
+spent 40, both see 80. An hour is an hour wherever the person sits.
+
+**What that gives up is exclusivity.** Two computers both told there are thirty
+minutes left can both start spending them, and the overspend is bounded by how
+often the household reports and by nothing else. The reporting cadence is
+therefore not a tuning knob: it is the thing that holds the sum together. Set it
+as fast as the household can bear.
 
 Enrollment is an explicit change: it turns enforcement on, sets grace to zero,
-and refuses limited budgets that only warn. An enrolled account with no portion
-for the current date has zero available time. Do this outside an active session:
+and refuses limited budgets that only warn. An enrolled account with no
+statement for the current date has zero available time. Do this outside an active session:
 enrollment can end that session before the first synchronization finishes.
 An administrator can still change or remove a profile; these are trusted
 administrative overrides, not operations that preserve exclusive credit.
@@ -70,7 +76,7 @@ python3 /var/lib/omakure-workspace/omahouse-sync.py \
 ```
 
 This initializes a manager authority, binds participants to it, collects their
-days, persists exclusive reservations, delivers portions and reads them back.
+days, persists the issued statements, delivers them and reads them back.
 Require `ok: true`. If any part fails, fix the named machine and repeat the same
 command. Enrollment and delivery are idempotent; failure does not reset time.
 
@@ -94,9 +100,10 @@ python3 .scripts/configure-sync.py \
     --workspace /var/lib/omakure-workspace --users 'kid' --disable
 ```
 
-An already running job may finish. Existing portions remain in force until the
-local date changes; disabling a schedule neither removes profiles nor restores
-standalone limits.
+An already running job may finish. The last statement each machine received
+remains in force until the local date changes — which means a household that
+stops reporting goes on spending a balance nobody is updating. Disabling a
+schedule neither removes profiles nor restores standalone limits.
 
 ## Operate and inspect
 
@@ -111,40 +118,48 @@ sudo omahouse grant kid --session 10m
 A scheduled success has `trigger: Scheduled`, `state: completed` and exit 0.
 The run output identifies the account, stage and revision; inspect a failed row
 instead of treating missing reports as zero consumption. `house` shows a total
-of observations, not an authorization to spend the same remainder everywhere.
+of observations, and the balance under it is what every computer is told it may
+spend — the same remainder in each of them, which is the point and also the
+reason two of them can spend it at once.
 
-New grants are household credit. The next successful synchronization divides
-them among the existing portions. The CLI and window do not promise that a
+New grants are household credit. The next successful synchronization puts them
+in the credit every machine is told. The CLI and window do not promise that a
 remote computer received time merely because the grant was recorded. Do not
 schedule `leave`: it is a local adjustment, and repeating it after consumption
 refills a remainder. Enrolled profiles refuse it.
 
 In the operator's Studio, select an account and press **f** for machines. Each
-budget shows the machine's last reported consumption, its received portion,
-remaining time and observation timestamp. **+** records household credit through
+budget shows the machine's last reported consumption, the household's credit,
+what is left of it and the observation timestamp. **+** records household credit through
 the same CLI. A recent report is not a live connection indicator. Pairing,
 enrollment and schedule configuration remain explicit CLI/setup operations.
 
-![The machines view: `MACHINE / BUDGET` beside `USED / PORTION / LEFT`; `here / session` at 1h10m / 1h15m / 5m, marked `portion received` and `Last report: local`; and `station-02 / session` at 40m / 45m / 5m, marked `stale report; portion reserved` and `Last report: 2026-09-01T09:30:00`.](img/31-operator-machines.png)
+![The machines view: `MACHINE / BUDGET` beside `USED / CREDIT / LEFT`; `here / session` at 1h10m / 2h10m / 20m, marked `statement received` and `Last report: local`; and `station-02 / session` at 40m / 2h10m / 20m, marked `stale report; the balance below is behind` and `Last report: 2026-09-01T09:30:00`.](img/31-operator-machines.png)
 
-## Failures preserve reservations
+## What a failure does to the balance
 
 - Every plan requires enrolled observations at most 120 seconds old. A missing,
   stale or unreachable participant prevents a new plan; successful observations
   are still saved for the panel.
-- Portions are absolute daily caps. Repetition, process restart and uncertain
-  delivery cannot top them up. Applied documents must match on readback.
-- An offline machine keeps its portion and can use it locally. Other machines
-  cannot borrow it. New grants wait for a complete collection.
+- **A statement is not a top-up.** Repetition, process restart and uncertain
+  delivery change nothing: `credit` is whatever the household's number is now,
+  and applying the same document twice is the same number twice.
+- **What other computers spent only ever goes up.** A statement reporting less
+  than the last one is refused, because consumption adds up and honouring it
+  would hand the machine the same minutes twice.
+- **An offline machine goes on spending the balance it last heard.** Nothing is
+  reserved for it and nothing is held back from anybody else, so the house can
+  overspend by roughly the reporting interval times the number of machines. That
+  is the trade the balance makes and the reason the interval matters.
 - Membership is frozen once a plan is issued for the day. Removing or adding a
-  machine then stops planning; it does not reclaim credit. Change membership
-  before the next day's first plan, with the intended profiles enrolled.
-- The manager persists reservations before delivery in
-  `/var/lib/omahouse/allocations/<user>/<date>.json`. Never delete or roll back
-  this state to retry a job. Missing or older reservations with issued portions
-  are refused; restore a consistent backup or wait for a new day.
-- At midnight, yesterday's portions expire. Offline machines receive no new
-  day's credit until a complete synchronization succeeds.
+  machine then stops planning. Change membership before the next day's first
+  plan, with the intended profiles enrolled.
+- The manager keeps the issued statements in
+  `/var/lib/omahouse/allocations/<user>/<date>.json`. A machine holding a
+  revision the manager has no record of is refused; restore a consistent backup
+  or wait for a new day.
+- At midnight, yesterday's statement expires. Offline machines receive no new
+  day's credit until a synchronization succeeds.
 
 The guarantee concerns issued credit. Enforcement still has the existing
 watch interval, process termination latency and operating-system dependencies;

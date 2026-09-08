@@ -491,17 +491,19 @@ a race the offscreen run does not lose.
 ## Household machines
 
 Select an account as the operator and press **f**. Each row is one limited
-budget on one computer: consumption, received daily portion and remaining time,
-followed by the observation state and timestamp. **/** filters these rows,
-**j/k** moves, **+** records household credit, and **h** returns to people.
-The same commands are clickable; the subject face cannot enter this view.
+budget on one computer: that computer's consumption, the household's credit and
+what is left of it, followed by the observation state and timestamp. **/**
+filters these rows, **j/k** moves, **+** records household credit, and **h**
+returns to people. The same commands are clickable; the subject face cannot
+enter this view.
 
-![Two session portions, with the remote machine explicitly showing a stale report.](img/31-operator-machines.png)
+![One session budget on two machines, both showing the same credit and the same balance, with the remote machine explicitly showing a stale report.](img/31-operator-machines.png)
 
-This generated fixture reserves 75 minutes here and 45 on station-02. After
-70 and 40 minutes of recorded consumption, each has five minutes left. The
-remote observation has a fixed old timestamp: its portion stays reserved, but
-its displayed remaining time may have been spent since that observation.
+The generated fixture has a household credit of 2h10m against 1h10m spent here
+and 40m on station-02, so **both rows read 20m left** — there is one pot and no
+quota per machine, and what differs down the column is `USED`. The remote
+observation has a fixed old timestamp, so that 20m may already have been spent
+over there and the row says so.
 
 Credit added here is delivered by the next successful Battery cycle. The window
 reads local snapshots and uses the existing privileged CLI for writes; it does
