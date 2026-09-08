@@ -63,10 +63,13 @@ denylist.
 exhaustion.
 
 ```
-Budget { id, match, kind, dailyMinutes, onExhausted }
+Budget { id, match, kind, dailyMinutes, resets, onExhausted }
 
   kind:         app      the selector is an app's scope identity (§5)
                 site     the selector is a site's registrable domain (§5.2)
+
+  resets:       daily    the clock goes back to zero at the turn of the date
+                session  it goes back to zero at the login
 
   onExhausted:  close    closes the processes matching the selector   (app)
                 logout   ends the user's session                      (app)
@@ -74,9 +77,25 @@ Budget { id, match, kind, dailyMinutes, onExhausted }
                 warn     says something, and records it               (either)
 ```
 
+`match` is one name or several, and several is one clock between them. One
+program is not always one id: a single Chromium window produces `chromium`,
+holding the child processes, and `org.chromium.Chromium`, holding the one that
+owns the window. Two budgets of forty-five minutes is not a browser limited to
+forty-five minutes — it is two clocks that happen to agree, and half a browser
+with no limit the moment somebody writes only one of them.
+
 The generalisation that makes three nouns enough: **the session is the budget
 whose selector is `*`**. There is no separate concept of user time and app time.
 In the code there is no special case for the session.
+
+`resets` is a second **anchor** and not a second engine. Two hours from the
+moment somebody sits down is a different offer from two hours today, and a lan
+house sells the first: the customer who arrives at eleven at night does not get
+twenty minutes because midnight is coming. The counting, the `warnAt` marks, the
+`grace` window and the action are the machinery that was already there, and what
+differs is only the moment the counter goes back to zero. `dailyMinutes` keeps
+its name under either, because what it holds is the size of the allowance and
+not the length of the day.
 
 `kind` is the one field a site budget added, and it is here rather than in a
 second list because the ambiguity is real: `org.freedesktop.Platform` is a scope
@@ -184,6 +203,35 @@ in the front tab of the browser. Both sit **beside** `budgets` and never inside
 it, and both are written only once there is something to say — a machine with
 neither a screen it can read nor a browser extension on it goes on writing
 exactly the file it has always written.
+
+A `session` object joins them for a budget whose `resets` is `session`: an
+`anchor` naming the sitting, and the seconds spent against those budgets in it.
+It sits beside the daily seconds for a reason the other two do not have. **A
+sitting can span several midnights** — this machine has one three days old — so
+its running total is carried into every day's file it touches. Everything that
+adds days or machines together reads the daily map: `report`, `omahouse house`,
+`consolidate`, `collect`. Summed, a session total would be counted once per
+midnight it crossed. Kept apart, all of them go on being right without knowing
+this exists.
+
+The anchor is an **opaque word and never a date**. What has to be known about a
+sitting is whether it is still the same one, which is an identity and not an
+instant; ticks are what count the time. logind's `Timestamp` for a user is a
+locale-formatted day name and its `TimestampMonotonic` is measured from a boot
+the ledger outlives, and neither needed parsing to answer the question actually
+asked. An **empty anchor means nobody was asked**, never that nobody is sitting
+there: a cycle whose `loginctl` timed out must not hand the customer their two
+hours back.
+
+A grant carries the sitting it was handed over in, for the same reason. The
+grants live in the day's file and the day outlasts the sitting, so counting all
+of them would give the next person to log in the ten minutes somebody else was
+given. The line stays in the file either way — it is the day's log and it did
+happen — and the stamp decides only whether it still counts.
+
+**Nothing reads logind for this yet, and no verb writes `resets`.** The model
+and the arithmetic are here; the wiring is written down in
+[`not-built/profiles-across-a-network.md`](not-built/profiles-across-a-network.md).
 
 The same schema with `default: "allow"` and a `deny` rule per distraction is a
 focus profile for an adult. Nothing in the engine changes.
