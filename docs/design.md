@@ -69,7 +69,7 @@ Budget { id, match, kind, dailyMinutes, resets, onExhausted }
                 site     the selector is a site's registrable domain (§5.2)
 
   resets:       daily    the clock goes back to zero at the turn of the date
-                session  it goes back to zero at the login
+                never    it does not go back to zero at all
 
   onExhausted:  close    closes the processes matching the selector   (app)
                 logout   ends the user's session                      (app)
@@ -88,14 +88,23 @@ The generalisation that makes three nouns enough: **the session is the budget
 whose selector is `*`**. There is no separate concept of user time and app time.
 In the code there is no special case for the session.
 
-`resets` is a second **anchor** and not a second engine. Two hours from the
-moment somebody sits down is a different offer from two hours today, and a lan
-house sells the first: the customer who arrives at eleven at night does not get
-twenty minutes because midnight is coming. The counting, the `warnAt` marks, the
-`grace` window and the action are the machinery that was already there, and what
-differs is only the moment the counter goes back to zero. `dailyMinutes` keeps
+`resets` is the option **not to reset** and not a second engine. `never` is a
+pot rather than an allowance: two hours are two hours until somebody hands over
+more, and logging out does not give them back, the turn of the date does not,
+and walking to another computer does not. It is the shape a lan house sells, and
+it is the only shape that is a limit on a *person* — a clock that started over
+at the login would hand two free hours to anybody who logs out and back in,
+which is the opposite of a limit. The counting, the `warnAt` marks, the `grace`
+window and the action are the machinery that was already there, and what differs
+is only whether the turn of the date empties the counter. `dailyMinutes` keeps
 its name under either, because what it holds is the size of the allowance and
 not the length of the day.
+
+**`never` and a profile that names no account do not go together.** A pot on a
+shared login empties once and is never refilled, so the second person to sit
+down gets a spent clock and no midnight to rescue them — because `never` is what
+took the midnight away. A machine carrying rules for whoever sits at it wants
+`daily`.
 
 `kind` is the one field a site budget added, and it is here rather than in a
 second list because the ambiguity is real: `org.freedesktop.Platform` is a scope
@@ -204,33 +213,24 @@ it, and both are written only once there is something to say — a machine with
 neither a screen it can read nor a browser extension on it goes on writing
 exactly the file it has always written.
 
-A `session` object joins them for a budget whose `resets` is `session`: an
-`anchor` naming the sitting, and the seconds spent against those budgets in it.
-It sits beside the daily seconds for a reason the other two do not have. **A
-sitting can span several midnights** — this machine has one three days old — so
-its running total is carried into every day's file it touches. Everything that
-adds days or machines together reads the daily map: `report`, `omahouse house`,
-`consolidate`, `collect`. Summed, a session total would be counted once per
-midnight it crossed. Kept apart, all of them go on being right without knowing
-this exists.
+A `kept` object joins them for the budgets whose `resets` is `never`: the
+seconds spent against each of them. It sits **beside** the daily seconds, and
+this second map is the load-bearing part of the whole idea. A counter that
+survives the turn of the date is carried into the file of every day it touches,
+and everything that adds days or machines together reads the daily map —
+`report`, `omahouse house`, `consolidate`, `collect`. In `seconds`, a pot would
+be counted once per day it crossed, and a fortnight's report would show it spent
+fourteen times. Kept apart, all of them go on being right without knowing this
+exists.
 
-The anchor is an **opaque word and never a date**. What has to be known about a
-sitting is whether it is still the same one, which is an identity and not an
-instant; ticks are what count the time. logind's `Timestamp` for a user is a
-locale-formatted day name and its `TimestampMonotonic` is measured from a boot
-the ledger outlives, and neither needed parsing to answer the question actually
-asked. An **empty anchor means nobody was asked**, never that nobody is sitting
-there: a cycle whose `loginctl` timed out must not hand the customer their two
-hours back.
+The events do **not** come with it, and that is deliberate. A pot that ran out
+yesterday and is still out says so again this morning before it acts, which is
+§6: nobody is cut off cold, and somebody meeting a spent pot at nine has been
+told why before their window closes.
 
-A grant carries the sitting it was handed over in, for the same reason. The
-grants live in the day's file and the day outlasts the sitting, so counting all
-of them would give the next person to log in the ten minutes somebody else was
-given. The line stays in the file either way — it is the day's log and it did
-happen — and the stamp decides only whether it still counts.
-
-**Nothing reads logind for this yet, and no verb writes `resets`.** The model
-and the arithmetic are here; the wiring is written down in
+**No verb writes `resets` yet**, so a profile cannot ask for a pot from the
+command line or from the window. The model and the arithmetic are here; the rest
+is written down in
 [`not-built/profiles-across-a-network.md`](not-built/profiles-across-a-network.md).
 
 The same schema with `default: "allow"` and a `deny` rule per distraction is a
