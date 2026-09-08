@@ -591,6 +591,46 @@ private slots:
         QVERIFY(!Profile::fromJson(broken, &read, &error));
     }
 
+// A pot on a login several people share is a pot the first of them empties
+    // and nobody ever refills, so it is refused where the file is read.
+    //
+    // Where and not whether is the point. The other rule about this profile --
+    // that administrators are not caught by it -- lives in the cycle, because
+    // somebody put in wheel tomorrow has to fall out of a fallback that was
+    // written before and is still correct. This one is a fact about the file
+    // and belongs with the other things the file cannot mean.
+    void aProfileForAnybodyCannotHoldAPotThatNeverResets()
+    {
+        const auto shared = [](Resets resets) {
+            QJsonObject budget {{QStringLiteral("id"), QStringLiteral("pot")},
+                                {QStringLiteral("match"), QJsonArray{QStringLiteral("*")}},
+                                {QStringLiteral("dailyMinutes"), 120}};
+            if (resets == Resets::Never)
+                budget.insert(QStringLiteral("resets"), QStringLiteral("never"));
+            return QJsonObject {{QStringLiteral("user"), anybody()},
+                                {QStringLiteral("budgets"), QJsonArray {budget}}};
+        };
+
+        Profile read;
+        QString error;
+        QVERIFY(!Profile::fromJson(shared(Resets::Never), &read, &error));
+        QVERIFY2(error.contains(QStringLiteral("never resets")), qPrintable(error));
+        QVERIFY2(error.contains(QStringLiteral("for anybody")), qPrintable(error));
+
+        // And `daily` on the same profile is fine, or the refusal above would
+        // be about profiles for anybody rather than about pots on them.
+        QVERIFY2(Profile::fromJson(shared(Resets::Daily), &read, &error), qPrintable(error));
+        QVERIFY(read.isForAnybody());
+
+        // As is a pot on somebody's own profile, which is the whole point of
+        // pots and must not have been taken away by this.
+        QJsonObject mine = shared(Resets::Never);
+        mine.insert(QStringLiteral("user"), QStringLiteral("julia"));
+        QVERIFY2(Profile::fromJson(mine, &read, &error), qPrintable(error));
+        QVERIFY(read.budgets.at(0).carriesOver());
+        QVERIFY(!read.isForAnybody());
+    }
+
     // A site with no action named blocks, an app with none warns. Different
     // defaults because they are the honest reading of each: the observing stage
     // for apps is `enforce: false`, and for sites it was the whole of §5.2.

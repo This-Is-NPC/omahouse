@@ -337,6 +337,152 @@ private slots:
     // docs/design.md §5 steps 2 to 6, in one turn: the scopes are listed, the budgets
     // with a live app matching them are debited once each, and the day is
     // written.
+// -- the profile for anybody ---------------------------------------------
+    //
+    // Twenty machines and forty rotating customers is forty profiles typed by
+    // hand, and the fortieth is written wrong. A profile whose user is `*`
+    // applies to whoever sits at the machine without one of their own.
+    //
+    // It runs the other way round from every other profile: a named one is a
+    // user and then a uid, and this one has no user to start from, so the cycle
+    // asks the machine who is here. That inversion is the whole cost of it.
+
+    /// A session for some other account, beside the one the fixture makes.
+    void makeSessionFor(uid_t uid)
+    {
+        makeCgroup(QStringLiteral("%1/cgroup/user.slice/user-%2.slice/user@%2.service"
+                                  "/app.slice/app-Hyprland-chromium-1a2b.scope")
+                       .arg(m_box)
+                       .arg(static_cast<qulonglong>(uid)),
+                   3, 5000 + int(uid));
+    }
+
+    void aProfileForAnybodyCoversWhoeverHasNoneOfTheirOwn()
+    {
+        makeSession();
+        // `nobody` and `daemon` exist on every machine and are nobody, so the
+        // case does not depend on who is running it. Root is the administrator,
+        // and it is root rather than a wheel member for the same reason: uid 0
+        // is an administrator on every machine there is, and a case that needed
+        // a wheel group would be a case that skips where there is none.
+        uid_t nobodyUid = 0;
+        uid_t daemonUid = 0;
+        QVERIFY(uidForUser(QStringLiteral("nobody"), &nobodyUid));
+        QVERIFY(uidForUser(QStringLiteral("daemon"), &daemonUid));
+        QVERIFY2(nobodyUid != m_uid && daemonUid != m_uid && m_uid != 0,
+                 "this case needs three different accounts and is being run as one of them");
+        makeSessionFor(nobodyUid);
+        makeSessionFor(daemonUid);
+        makeSessionFor(0);
+        // A slice with nobody in it: logind leaves `user-<uid>.slice` standing
+        // for a moment after a logout and for good where lingering is on, and
+        // the directory existing is not somebody sitting there.
+        QVERIFY(QDir().mkpath(QStringLiteral("%1/cgroup/user.slice/user-4242.slice")
+                                  .arg(m_box)));
+
+        const Proc reader = proc();
+        // The machine is asked who is here, and it can answer. Everything below
+        // is about which of these the cycle takes up, so a reader that found
+        // none of them would make all of it agree about nothing.
+        const QVector<uid_t> here = reader.accountsWithSessions();
+        QVERIFY2(here.contains(m_uid) && here.contains(nobodyUid)
+                     && here.contains(daemonUid) && here.contains(0),
+                 "the four sessions this case made are not all readable");
+        QVERIFY2(!here.contains(4242),
+                 "a slice with no session in it was counted as somebody sitting there");
+
+        Profile shared;
+        shared.user = anybody();
+        shared.enabled = true;
+        shared.defaultVerdict = Verdict::Allow;
+        Budget session;
+        session.id = QStringLiteral("session");
+        session.match = {QStringLiteral("*")};
+        session.dailyMinutes = 120;
+        shared.budgets = {session};
+
+        // `nobody` gets a profile of their own, and it has to be told apart
+        // from the shared one: without somebody in this position the case
+        // cannot notice a cycle that puts them under both. The account that
+        // already had one is the test runner, who is usually an administrator
+        // and so is filtered out of the fallback anyway -- which is exactly how
+        // the gap hid.
+        Profile theirs;
+        theirs.user = QStringLiteral("nobody");
+        theirs.displayName = QStringLiteral("has one of their own");
+        theirs.enabled = true;
+        theirs.defaultVerdict = Verdict::Allow;
+
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
+        const Cycle cycle = watch.tick({profile(), theirs, shared}, now);
+
+        QSet<QString> watched;
+        for (const Watched &one : cycle.users)
+            watched.insert(one.user);
+
+        // The one with a profile of their own keeps it, and is not in twice.
+        QCOMPARE(cycle.users.size(), 3);
+        QVERIFY2(watched.contains(m_user), qPrintable(m_user));
+        // The one sitting at the machine with no profile of their own.
+        QVERIFY(watched.contains(QStringLiteral("daemon")));
+        // And the one who has their own is under it, once, and not under both.
+        QVERIFY(watched.contains(QStringLiteral("nobody")));
+        int timesNobody = 0;
+        for (const Watched &one : cycle.users) {
+            if (one.user == QLatin1String("nobody")) {
+                ++timesNobody;
+                QCOMPARE(one.displayName, QStringLiteral("has one of their own"));
+            }
+        }
+        QCOMPARE(timesNobody, 1);
+        // And the administrator, who is not. `profile add` refuses to write a
+        // profile for one, so a fallback that caught one would do through the
+        // back door what the verb turns away at the front.
+        QVERIFY2(!watched.contains(QStringLiteral("root")),
+                 "an administrator was put under the rules they write for others");
+        // The profile for anybody is not itself a person and is never watched.
+        QVERIFY(!watched.contains(anybody()));
+
+        // And `daemon` really is under the shared profile: a day is written
+        // for them, under their own name, from budgets they never had.
+        bool checked = false;
+        for (const Watched &one : cycle.users) {
+            if (one.user != QLatin1String("daemon"))
+                continue;
+            checked = true;
+            QVERIFY2(one.account, qPrintable(one.user));
+            QVERIFY2(one.session, qPrintable(one.user));
+            QVERIFY2(one.wrote, qPrintable(one.user + QStringLiteral(": ") + one.error));
+        }
+        QVERIFY2(checked, "the account the shared profile is about was never looked at");
+    }
+
+    // Nobody is caught by a fallback that is not there. Without this the case
+    // above passes on a cycle that watches every session it can see.
+    void withNoProfileForAnybodyOnlyTheNamedAreWatched()
+    {
+        makeSession();
+        uid_t nobodyUid = 0;
+        QVERIFY(uidForUser(QStringLiteral("nobody"), &nobodyUid));
+        makeSessionFor(nobodyUid);
+
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const Cycle cycle = watch.tick({profile()}, QDateTime(QDate(2026, 9, 3), QTime(19, 0)));
+
+        QCOMPARE(cycle.users.size(), 1);
+        QCOMPARE(cycle.users.first().user, m_user);
+    }
+
     void countsOneTickAndWritesTheDay()
     {
         makeSession();
