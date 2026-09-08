@@ -131,6 +131,7 @@ class VM:
         other.prove_it_is_the_right_machine()
         other.start()
         self._peers.append(other)
+        other.refuse_if_a_case_was_here_before()
         return other
 
     def shutdown_peers(self):
@@ -567,6 +568,43 @@ class VM:
     def stop_daemon(self):
         self.root("systemctl stop omahouse.service", check=False)
 
+    def refuse_if_a_case_was_here_before(self):
+        """A borrowed machine that a previous run left rules on, said out loud.
+
+        `shutdown_peers` resets a peer on the way out, so a run that finishes
+        leaves it clean. A run that *dies* -- a case that raised, a suite that
+        was interrupted -- does not get there, and the peer stays dirty and
+        running. The next run then fails somewhere far from the cause: the real
+        one said
+
+            FAIL  sudo omahouse profile add julia --name Julia
+            profile add: julia already has a profile
+
+        which sends whoever reads it to look at `profile add`, and `profile add`
+        is right. **A failure that points at the wrong place is worse than a
+        failure**, and this is a whole afternoon of somebody's life.
+
+        Refused rather than cleaned. Resetting here would be this function
+        deciding that whatever is on the machine does not matter, which is a
+        thing `--keep` exists to let somebody disagree with: a peer is left
+        standing on purpose when a person wants to look at it. Failing in the
+        right place solves the whole problem; tidying up is comfort on top, and
+        comfort that deletes is not comfort.
+        """
+        if not self.disposable:
+            return
+        # `|| true` and not `check=False`: an unchecked ssh gives back a tuple
+        # rather than the output, and a missing directory is an ordinary answer
+        # here and not a failure.
+        left = self.root("ls -A /etc/omahouse 2>/dev/null || true").strip()
+        if not left:
+            return
+        raise Blocked(
+            f"{self.domain} still has {' '.join(left.split())} under /etc/omahouse from "
+            "an earlier run that did not finish. Peers are reset on the way out, so a "
+            "dirty one means a suite that died. Run `vm/run.sh` to completion or reset "
+            "it by hand before borrowing it again.")
+
     def reset(self):
         """A machine with no rules on it, nobody shut out, and no fleet identity.
 
@@ -582,8 +620,15 @@ class VM:
             raise Blocked(f"{self.domain} is not disposable, and reset() empties "
                           "/etc/omahouse and /var/lib/omahouse")
         self.stop_daemon()
+        # `machine.json` and `machine-tokens.json` belong on this line and were
+        # missing from it, which the peer guard found the first time it ran: a
+        # machine reset by a run that finished still said what it was in the
+        # household and still held the bearers for reading the others. The
+        # sentence above says "no fleet identity" and those two are exactly
+        # that -- what this machine is (`Kind`), and how to reach the rest.
         self.root("rm -f /etc/omahouse/blocked /etc/omahouse/profiles.json "
-                  "/etc/omahouse/machines.json /etc/omahouse/omakure-token")
+                  "/etc/omahouse/machines.json /etc/omahouse/omakure-token "
+                  "/etc/omahouse/machine.json /etc/omahouse/machine-tokens.json")
         self.root("rm -rf /var/lib/omahouse/*")
         # And no fleet identity either. Pairing is an omahouse verb now, and it
         # leaves a service running, a unit, a trust registry and a 0700 secrets

@@ -82,7 +82,8 @@ def exercise(vm, dad):
     first = wait_rows(2, True)
     if json_cli(dad, 'allocation', 'show', child)['reservation'] != initial:
         raise vm.Failed('repeated scheduled fires changed reserved credit')
-    print(f'      {len(first)} actual scheduled runs completed; portions still total 7200s')
+    print(f'      {len(first)} actual scheduled runs completed; the credit is still 7200s '
+          'on both')
     dad.root('systemctl restart omakure-node.service')
     wait_rows(3, True)
     if json_cli(vm, 'profile', 'show', child)['allocation'] != original_remote:

@@ -17,14 +17,21 @@ a_battery_schedule_shares_one_balance --keep`. **PASS**, 124 seconds for the
 case, 139 including provisioning and cleanup.
 
 The number the case exists for: **300 seconds spent on `poc` reached `dad` in 9
-seconds**, with the credit unchanged on both sides and the manager having spent
-nothing of its own. Under the portions that trip did not exist — time on one
+seconds**, and in 5 on a second run, with the credit unchanged on both sides and
+the manager having spent nothing of its own. Two runs and two numbers, because
+what is being waited for is the next scheduled cycle and the case does not get
+to choose where in that cycle it starts. Under the portions that trip did not exist — time on one
 machine was time the other could not have.
 
 Everything before that assertion passed unchanged from the run above: explicit
 enrollment, collection, two real `Scheduled` history rows, a manager restart, a
 machine that stopped reporting, reconnection, and a ten minute grant arriving as
 exactly 600 seconds of credit on both machines.
+
+A third red came from the guard added afterwards: borrowing a peer now refuses
+if a previous run left rules on it, and the first thing it did was find that
+`reset()` left `/etc/omahouse/machine.json` and `machine-tokens.json` behind
+while promising "no fleet identity". Both are on its list now.
 
 **Two red runs came first, and both were the case being wrong rather than the
 code.** The first failed at setup — `profile add: julia already has a profile` —
