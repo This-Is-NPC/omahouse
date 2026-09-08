@@ -1,12 +1,13 @@
 # Profiles across a network — designed, and mostly not built
 
-> **Phase A and most of phase B shipped on 2026-09-08. Phase C did not, and
-> §7 marks each step.** A budget can be `daily` or `never`, a profile can name
-> no account and rule whoever sits at the machine, and every profile records who
-> wrote it and when. What no verb reaches yet is the writing of a profile for
-> anybody, so the rules for it are read and honoured and cannot be created from
-> the command line. Phase C — one pool, reported and read back — is designed here
-> and not built.
+> **Phases A and B shipped on 2026-09-08. Phase C did not, and §7 marks each
+> step.** A budget can be `daily` or `never`; a profile can name no account and
+> rule whoever sits at the machine; every profile records who wrote it and when;
+> a manager pushes one through a staging file and stands off a human edit it did
+> not make; a machine sends its own back in the same shape; and a merge answers
+> four things about the two copies. What is open in phase B is the manager's own
+> script, which lives in `omahouse-battery`. Phase C — one pool, reported and
+> read back — is designed here and not built.
 >
 > The page also records a model that was built **wrong** and replaced the same
 > day: a budget anchored at the *login*, with a sitting in the ledger. §1 keeps
@@ -487,14 +488,14 @@ different sums to report and to read back.
 
 ### Phase B — the profile arrives from somewhere else
 
-5. **Read and honoured; the verb and the screens are not written.** **A profile
+5. **Done.** **A profile
    that names no account**, marked `*`, applying to any account without one of
    its own. `sys` is in this step and the page first missed it: the watch walks
    profiles and asks which account each names, and a profile that names none has
    no way into that loop, so the cycle must also walk **accounts with a live
    session** and ask which have no profile of their own — a capability `Proc` did
    not have. *core, sys, cli, studio*
-6. **Push from the manager, cache locally.** A cued script writes the profile;
+6. **Done.** **Push from the manager, cache locally.** A cued script writes the profile;
    the local file is the last version this machine was told; a cache past the
    freshness limit opens no new session. *core, sys, cli, omahouse-battery*
 7. **Done.** **Written-at and written-by on the profile.** The tiebreak needs it
@@ -502,8 +503,16 @@ different sums to report and to read back.
    `saveProfiles` and only on the profiles that actually differ, because a stamp
    each verb has to remember is a stamp the next verb will not, and stamping all
    of them turns *who changed a rule* into *who ran a command last*. *core*
-8. **Merge of locally created profiles.** The central omahouse lists what an
-   administrator created on a machine and offers to take it in. *core, cli, studio*
+8. **Done on the machine's side; the manager's script is open.** **Merge of
+   locally created profiles.** The manager lists what a machine has and offers to
+   take it in, and it answers **four** things rather than two: `new` (the machine
+   has one the manager never issued), `changed` (both have one and they differ),
+   `gone` (the machine says it has none and the manager has one), and
+   `not collected`, which is not an answer and is named rather than folded into
+   *no differences*. **A collected document with an empty list is the form of "I
+   have none"** — no second shape to learn, and it is what tells a deliberate
+   removal apart from a machine that has not reported. *core, cli, studio,
+   omahouse-battery*
 9. **The window says the three shapes without three screens.** The studio has the
    rule and budget editors already; one control changes, not a view. *studio*
 
