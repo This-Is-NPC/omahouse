@@ -1004,6 +1004,95 @@ private slots:
         }
     }
 
+
+    // -- one program under two ids ------------------------------------------
+    //
+    // A single Chromium window on real Omarchy produces two scopes: `chromium`,
+    // holding the child processes, and `org.chromium.Chromium`, holding the one
+    // that owns the window. Two budgets of the same number is not a browser
+    // limited to that number -- it is two clocks that happen to agree, and
+    // whoever writes one of them leaves half the browser with no limit at all.
+
+    void oneBudgetHoldsBothOfChromiumsIds()
+    {
+        Profile profile = profileOf();
+        profile.budgets.append(budget(QStringLiteral("chromium"),
+                                      {QStringLiteral("chromium"),
+                                       QStringLiteral("org.chromium.Chromium")},
+                                      2, OnExhausted::Close));
+        const AppScope children = scope(QStringLiteral("chromium"), 21);
+        const AppScope window = scope(QStringLiteral("org.chromium.Chromium"), 3);
+
+        // A minute per minute with both of them open, and not two. The rule
+        // that keeps 21 processes from spending 21 seconds is the same rule,
+        // asked of names instead of processes.
+        Outcome outcome = evaluate(profile, {children, window}, startOfDay(), at(19, 0), 60);
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("chromium")), 60);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 0);
+
+        // And when it runs out, both scopes are named: closing is a write to
+        // one scope's `cgroup.kill`, and this budget is holding two of them.
+        outcome = evaluate(profile, {children, window}, outcome.ledger, at(19, 1), 60);
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("chromium")), 120);
+
+        QStringList closed;
+        for (const Decision &decision : outcome.decisions) {
+            if (decision.kind == Decision::Kind::Close)
+                closed.append(decision.scopeUnit);
+        }
+        closed.sort();
+        QCOMPARE(closed, QStringList({children.unit, window.unit}));
+    }
+
+    // The defect this replaces, kept as a case: with the browser's other id
+    // left out, half of it goes on running past the limit. Without this the
+    // test above would pass on a budget that simply closed everything alive.
+    void aBudgetThatNamesOneOfTheTwoLeavesTheOtherRunning()
+    {
+        Profile profile = profileOf();
+        profile.budgets.append(budget(QStringLiteral("chromium"), QStringLiteral("chromium"),
+                                      1, OnExhausted::Close));
+        const AppScope children = scope(QStringLiteral("chromium"), 21);
+        const AppScope window = scope(QStringLiteral("org.chromium.Chromium"), 3);
+
+        const Outcome outcome =
+            evaluate(profile, {children, window}, startOfDay(), at(19, 0), 60);
+
+        QStringList closed;
+        for (const Decision &decision : outcome.decisions) {
+            if (decision.kind == Decision::Kind::Close)
+                closed.append(decision.scopeUnit);
+        }
+        QCOMPARE(closed, QStringList{children.unit});
+    }
+
+    // The same for the other namespace, because it falls out of the same field
+    // and refusing it would have taken more code than allowing it. A household
+    // that says `youtube.com` and `youtu.be` are one budget gets one budget,
+    // and the browser is told about both domains.
+    void aSiteBudgetCanHoldMoreThanOneDomain()
+    {
+        Profile profile = profileOf();
+        Budget shorts = siteBudget(QStringLiteral("youtube.com"), 1);
+        shorts.match = {QStringLiteral("youtube.com"), QStringLiteral("youtu.be")};
+        profile.budgets.append(shorts);
+
+        Outcome outcome = evaluate(profile, {}, startOfDay(), at(19, 0), 30,
+                                   QStringLiteral("youtu.be"));
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("youtube.com")), 30);
+        outcome = evaluate(profile, {}, outcome.ledger, at(19, 1), 30,
+                           QStringLiteral("youtube.com"));
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("youtube.com")), 60);
+
+        QStringList blocked;
+        for (const Decision &decision : outcome.decisions) {
+            if (decision.kind == Decision::Kind::Block)
+                blocked.append(decision.site);
+        }
+        blocked.sort();
+        QCOMPARE(blocked, QStringList({QStringLiteral("youtu.be"),
+                                       QStringLiteral("youtube.com")}));
+    }
 };
 
 int runPolicyTests(int argc, char **argv)

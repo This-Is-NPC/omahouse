@@ -1210,6 +1210,71 @@ def check_allow_warns_about_what_is_really_inside(box):
     assert box.run("deny", USER, "gtk-launch").stderr == ""
 
 
+def check_one_budget_covers_a_browsers_two_ids(box):
+    """A single Chromium window produces two scopes, so one clock has two names.
+
+    `chromium` holds the child processes and `org.chromium.Chromium` holds the
+    one that owns the window. Two commands with `--limit 45m` in each is two
+    clocks of 45 minutes that happen to agree, and whoever writes one of them
+    leaves half the browser with no limit at all -- which is a thing nothing in
+    the file says out loud. One command, one budget, both names.
+    """
+    box.write_profiles({"schemaVersion": 1, "profiles": [{"user": USER}]})
+
+    done = box.run("allow", USER, "chromium", "org.chromium.Chromium", "--limit", "45m")
+    assert done.returncode == 0, done.stderr
+    assert "chromium and org.chromium.Chromium allowed" in done.stdout, done.stdout
+    assert "45m a day between them" in done.stdout, done.stdout
+
+    profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    # A rule each, because the rules are read one at a time and either can be
+    # taken back on its own.
+    assert {"match": "chromium", "verdict": "allow"} in profile["rules"]
+    assert {"match": "org.chromium.Chromium", "verdict": "allow"} in profile["rules"]
+    # And one clock, holding both names.
+    assert len(profile["budgets"]) == 1, profile["budgets"]
+    budget = profile["budgets"][0]
+    assert budget["id"] == "chromium", budget
+    assert budget["match"] == ["chromium", "org.chromium.Chromium"], budget
+    assert budget["dailyMinutes"] == 45, budget
+
+    # `status` says the same, in the same shape the file uses.
+    shown = json.loads(box.run("status", USER, "--json").stdout)
+    budgets = {one["id"]: one for one in shown["budgets"]}
+    assert budgets["chromium"]["match"] == ["chromium", "org.chromium.Chromium"], budgets
+
+    # One name still writes a plain string. Every profiles.json on every machine
+    # already says it that way, and rewriting all of them to say it differently
+    # is a diff nobody asked for.
+    box.run("allow", USER, "code", "--limit", "45m")
+    profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    code = [one for one in profile["budgets"] if one["id"] == "code"][0]
+    assert code["match"] == "code", code
+
+    # Run again over the budget that is there, it replaces the names as well as
+    # the number -- or a command that says it covers the browser would cover
+    # half of it.
+    box.run("allow", USER, "chromium", "--limit", "30m")
+    profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    browser = [one for one in profile["budgets"] if one["id"] == "chromium"][0]
+    assert browser["match"] == "chromium", browser
+    assert browser["dailyMinutes"] == 30, browser
+
+    # `deny` takes several too, for the same reason: a browser half denied is a
+    # browser.
+    box.run("deny", USER, "chromium", "org.chromium.Chromium")
+    profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    verdicts = {rule["match"]: rule["verdict"] for rule in profile["rules"]}
+    assert verdicts["chromium"] == "deny", verdicts
+    assert verdicts["org.chromium.Chromium"] == "deny", verdicts
+
+    # And the same name twice is said rather than folded away: somebody who
+    # typed it twice meant two ids, and that is not what they typed.
+    twice = box.run("allow", USER, "chromium", "chromium")
+    assert twice.returncode == 1, twice.stdout
+    assert "named twice" in twice.stderr, twice.stderr
+
+
 def check_it_refuses_a_profile_for_an_administrator(box):
     """docs/design.md §1: the operator is whoever is in wheel.
 
@@ -3263,6 +3328,7 @@ def main():
         check_a_profile_from_nothing_to_read_back,
         check_grant_writes_the_days_ledger,
         check_allow_warns_about_what_is_really_inside,
+        check_one_budget_covers_a_browsers_two_ids,
         check_it_refuses_a_profile_for_an_administrator,
         check_it_refuses_to_write_without_privilege,
         check_create_user_is_built_but_never_run_here,

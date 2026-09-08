@@ -423,6 +423,93 @@ private slots:
         QCOMPARE(read.budgets.at(1).onExhausted, OnExhausted::Close);
     }
 
+    // One budget, two names, and a file that is not rewritten for the profiles
+    // that only ever had one.
+    void aBudgetAboutTwoIdsIsOneClockInTheFile()
+    {
+        Profile julia = person(QStringLiteral("julia"));
+        Budget browser;
+        browser.id = QStringLiteral("chromium");
+        browser.match = {QStringLiteral("chromium"), QStringLiteral("org.chromium.Chromium")};
+        browser.dailyMinutes = 45;
+        browser.onExhausted = OnExhausted::Close;
+        Budget editor;
+        editor.id = QStringLiteral("code");
+        editor.match = {QStringLiteral("code")};
+        editor.dailyMinutes = 45;
+        editor.onExhausted = OnExhausted::Close;
+        julia.budgets = {browser, editor};
+
+        const QJsonArray budgets = julia.toJson().value(QStringLiteral("budgets")).toArray();
+        const QJsonValue two = budgets.at(0).toObject().value(QStringLiteral("match"));
+        const QJsonValue one = budgets.at(1).toObject().value(QStringLiteral("match"));
+        QVERIFY2(two.isArray(), "two names did not come out as a list");
+        QCOMPARE(two.toArray().size(), 2);
+        QVERIFY2(one.isString(),
+                 "one name came out as a list, which rewrites every profiles.json there is");
+
+        Profile read;
+        QString error;
+        QVERIFY2(Profile::fromJson(julia.toJson(), &read, &error), qPrintable(error));
+        QCOMPARE(read.budgets.at(0).match,
+                 QStringList({QStringLiteral("chromium"),
+                              QStringLiteral("org.chromium.Chromium")}));
+        QCOMPARE(read.budgets.at(1).match, QStringList{QStringLiteral("code")});
+    }
+
+    // A one-element list and a plain string are the same budget. Both spellings
+    // are in the wild the moment this ships -- the writer makes strings and a
+    // person editing the file by hand makes lists -- and a reader that told
+    // them apart would be a reader that disagrees with itself.
+    void oneNameReadsTheSameWrittenEitherWay()
+    {
+        const auto profileWith = [](const QJsonValue &match) {
+            return QJsonObject {
+                {QStringLiteral("user"), QStringLiteral("julia")},
+                {QStringLiteral("budgets"),
+                 QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("code")},
+                                          {QStringLiteral("match"), match},
+                                          {QStringLiteral("dailyMinutes"), 45}}}}};
+        };
+
+        Profile plain;
+        Profile listed;
+        QString error;
+        QVERIFY2(Profile::fromJson(profileWith(QJsonValue(QStringLiteral("code"))), &plain,
+                                   &error), qPrintable(error));
+        QVERIFY2(Profile::fromJson(profileWith(QJsonArray{QStringLiteral("code")}), &listed,
+                                   &error), qPrintable(error));
+        QCOMPARE(plain.budgets.at(0).match, QStringList{QStringLiteral("code")});
+        QCOMPARE(listed.budgets.at(0).match, plain.budgets.at(0).match);
+        QCOMPARE(listed.toJson(), plain.toJson());
+    }
+
+    // And what is refused. A budget that matches nothing is a clock nobody can
+    // spend and nobody can see is unspendable, so it is said where the file is
+    // read rather than repaired into one that matches everything.
+    void aBudgetThatIsAboutNothingIsRefused()
+    {
+        const auto profileWith = [](const QJsonValue &match) {
+            QJsonObject entry {{QStringLiteral("id"), QStringLiteral("code")},
+                               {QStringLiteral("dailyMinutes"), 45}};
+            if (!match.isUndefined())
+                entry.insert(QStringLiteral("match"), match);
+            return QJsonObject {{QStringLiteral("user"), QStringLiteral("julia")},
+                                {QStringLiteral("budgets"), QJsonArray {entry}}};
+        };
+
+        Profile read;
+        QString error;
+        QVERIFY(!Profile::fromJson(profileWith(QJsonArray{}), &read, &error));
+        QVERIFY2(error.contains(QStringLiteral("about nothing")), qPrintable(error));
+        QVERIFY(!Profile::fromJson(profileWith(QJsonArray{QStringLiteral("code"), 7}), &read,
+                                   &error));
+        QVERIFY2(error.contains(QStringLiteral("not a name")), qPrintable(error));
+        QVERIFY(!Profile::fromJson(profileWith(QJsonValue(7)), &read, &error));
+        QVERIFY(!Profile::fromJson(profileWith(QJsonValue::Undefined), &read, &error));
+        QVERIFY2(error.contains(QStringLiteral("no match")), qPrintable(error));
+    }
+
     // A site with no action named blocks, an app with none warns. Different
     // defaults because they are the honest reading of each: the observing stage
     // for apps is `enforce: false`, and for sites it was the whole of §5.2.
