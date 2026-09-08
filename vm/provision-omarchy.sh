@@ -367,17 +367,23 @@ say "julia's profile"
 # one Chromium window makes TWO scopes with two different ids --
 # `app-Hyprland-chromium-*.scope` for the twelve child processes and
 # `app-org.chromium.Chromium-*.scope` for the one that owns the window -- so
-# both are allowed and both carry the three minute budget. Allowing only
-# `chromium`, under `default: deny`, would have had the daemon close the browser
-# for the wrong reason two seconds after it opened.
+# both are named. Allowing only `chromium`, under `default: deny`, would have
+# had the daemon close the browser for the wrong reason two seconds after it
+# opened.
+#
+# Both in one command, which is what `docs/how-to-release-programs.md` tells a
+# household to type: one rule each and **one** three minute budget between
+# them, called `chromium`. Two commands would be two clocks of three minutes
+# that happen to agree. The cases that hand this profile more time grant
+# `--budget chromium` for that reason -- there is no budget called
+# `org.chromium.Chromium` any more.
 guest 'sudo bash -s' <<'EOSH'
 set -e
 omahouse profile add julia --name "Júlia" 2>/dev/null || true
 omahouse profile default julia --deny
 omahouse allow julia xdg-terminal-exec
 omahouse allow julia omahouse
-omahouse allow julia chromium --limit 3m
-omahouse allow julia org.chromium.Chromium --limit 3m
+omahouse allow julia chromium org.chromium.Chromium --limit 3m
 # Omarchy's own two -- `udiskie` and `omarchy-hyprland-monitor-watch`, launched
 # by `default/hypr/autostart.lua` through `uwsm-app --` -- used to need a rule
 # each here, because they arrive as app scopes and were judged exactly like a

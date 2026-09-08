@@ -137,8 +137,9 @@ def _run(vm):
     # for its own, and it is the only field of the profile this case changes.
     vm.root("python3 -c " + _patch_grace(vm.pace["grace_seconds"]))
     vm.seed_ledger({SITE: vm.already_spent(seconds)})
-    for what in ("--session 180m", "--budget chromium=180m",
-                 "--budget org.chromium.Chromium=180m"):
+    # One budget covers both of Chromium's ids -- `vm/provision-omarchy.sh`
+    # writes it with one `allow` -- so there is one to hand more of.
+    for what in ("--session 180m", "--budget chromium=180m"):
         vm.root(f"omahouse grant {julia} {what}")
 
     # It loads. This is the before, and without it the after proves nothing: a

@@ -140,8 +140,9 @@ def run(vm):
     # `grant` takes `--session` or one `--budget`, never both.
     vm.stop_daemon()
     vm.root(f"rm -f {day}")
-    for what in ("--session 180m", "--budget chromium=180m",
-                 "--budget org.chromium.Chromium=180m"):
+    # One budget covers both of Chromium's ids -- `vm/provision-omarchy.sh`
+    # writes it with one `allow` -- so there is one to hand more of.
+    for what in ("--session 180m", "--budget chromium=180m"):
         vm.root(f"omahouse grant {julia} {what}")
     vm.start_daemon()
     time.sleep(1)
