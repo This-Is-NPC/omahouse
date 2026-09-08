@@ -11,6 +11,24 @@
 # Used by vm/provision.sh, which copies the tree to /home/howl/omahouse-src on
 # the guest and runs `makepkg -si` there.
 pkgname=omahouse
+# Fixed, and it is a trap for anybody who installs this with `pacman -S`.
+#
+# Every build of this working tree is 0.1.0-1, however many commits apart they
+# are. `pacman -S --needed omahouse` compares the installed version with the
+# repository's, finds them equal, does nothing, and **exits zero**: a provisioner
+# that reads the exit code is told the install worked and the guest goes on
+# running whatever binary it already had. That is how a showcase machine ran a
+# binary twenty-three commits old while its provisioning reported success.
+#
+# `vm/e2e.py` is not affected and not by luck: it installs with
+# `pacman -U --noconfirm --overwrite '*'` on a package file it just built, which
+# names the file rather than the version and always lands.
+#
+# So: install this package by path with `pacman -U`, never by name with
+# `pacman -S --needed`. The real PKGBUILD in `omarchy-pkgs` builds from the
+# tarball of a tag and has a version that moves; this one is the local twin of
+# it and deliberately does not, which is what makes the shortcut wrong here and
+# right there.
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='House rules: which programs each account may open, and for how long'
