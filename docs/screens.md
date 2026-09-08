@@ -189,6 +189,19 @@ urgent colour, a budget running out, a warning that was delivered, and the grant
 in the accent colour. It is **one list**, so `j` and `k` walk the whole of it
 without a key to get into a panel.
 
+On the computer that manages the household, every budget row carries a second
+line under its own: **the house.** `session: 2h` is two hours in the household
+and not two hours per computer — so a manager that drew only the machine it is
+sitting at was showing a third of somebody's evening as the whole of it. The
+line reads `the house: 1h40m spent · 30m left · here 1h10m · the kitchen laptop
+30m`, which is `omahouse house` in one sentence, and it names any computer that
+has sent nothing today rather than leaving it silently out of the sum.
+
+It is not in the pictures because the household they are drawn from is one
+computer, which is `machine kind: alone` and the state most households are in.
+What is enforced *here* is unchanged by it: this machine goes on holding its own
+number against its own ledger, and the total is a thing the window says.
+
 A site budget is a budget and is on this list too — `youtube.com`, with *stops
 opening when it runs out*, which is the fourth thing running out can do. What
 changes it is `m` here as well as on the sites view, and the verb underneath is

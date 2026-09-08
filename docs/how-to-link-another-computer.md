@@ -204,6 +204,14 @@ One row is one budget on one computer. What that computer last reported
 spending, the daily portion it was given, what is left of it, and when the
 report came in.
 
+The **today** view (`3`) adds the same days up in place. On a manager, each
+budget carries a line reading `the house: 1h40m spent · 30m left · here 1h10m ·
+the kitchen laptop 30m` under this machine's own numbers — the answer
+`omahouse house` gives, on the screen somebody already has open. A computer that
+has not reported is named on the end of that line and is not in the sum, for the
+reason the verb gives it out loud: a total quietly missing a computer reads
+exactly like a total of a quiet afternoon.
+
 `here` reports `local` and can never go stale. Every other row carries the
 instant its report came in, and **that line is the one to read first.** A
 portion stays reserved whether or not the computer is reporting, so `5m left`
