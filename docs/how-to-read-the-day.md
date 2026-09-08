@@ -215,14 +215,9 @@ pkexec`.
 
 ## What can go wrong
 
-**`/` in the window filters all four lists at once.** A needle that misses the
-person on the people list empties the people list, and then the programs view
-has nobody to be about.
-[The defect](what-does-not-work.md#3-the-filter-narrows-every-list-at-once).
-
 **There is a number the window computes and never shows** — the processes in
 scopes nothing can name. `omahouse status` is where to read it.
-[The defect](what-does-not-work.md#5-a-scope-nothing-can-name-has-no-screen-in-the-window).
+[The defect](what-does-not-work.md#4-a-scope-nothing-can-name-has-no-screen-in-the-window).
 
 ---
 

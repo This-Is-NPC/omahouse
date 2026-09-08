@@ -236,7 +236,7 @@ processes in it is somebody at the keyboard; omahouse counts it and cannot name
 it. No rule can reach it, so its verdict is the profile's default — which under
 `default: deny` with the teeth in means it is closed. `omahouse status` reports
 these under `Counted, not named`, and
-[the window has no screen for them](what-does-not-work.md#5-a-scope-nothing-can-name-has-no-screen-in-the-window).
+[the window has no screen for them](what-does-not-work.md#4-a-scope-nothing-can-name-has-no-screen-in-the-window).
 
 **Some programs are out of reach entirely.** Anything started by a raw `exec` in
 a keybinding, or from inside a terminal, lands in the compositor's own cgroup,
