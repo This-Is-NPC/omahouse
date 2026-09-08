@@ -231,10 +231,20 @@ QJsonObject Ledger::toJson() const
         {QStringLiteral("events"), eventArray},
     };
 
-    // Written only once there is something to say, so a machine that has never
-    // measured presence keeps writing the file it has always written. An empty
-    // object here would rewrite every ledger on disk on the first tick after an
-    // upgrade to say nothing.
+    // The rule for the three optional objects below, said once here.
+    //
+    // Each is written only when it has something to say. Not to keep older
+    // ledgers readable -- an empty object would be read fine -- but because
+    // this file is rewritten every couple of seconds for as long as the machine
+    // is on. `"presence": {}, "sites": {}, "kept": {}` on a machine that has
+    // none of the three is three lies about what was measured, on every tick,
+    // forever.
+    //
+    // It is worth being precise about what this rule is *not*, because a
+    // neighbouring one was removed for being the other thing: writing a field
+    // only when it means something is design. Reading two spellings of one
+    // value, as a budget's `match` did, was compatibility wearing design's
+    // clothes, and it went the moment somebody asked which files it was for.
     if (!presence.isEmpty()) {
         QJsonObject presenceObject;
         for (auto it = presence.constBegin(); it != presence.constEnd(); ++it)
@@ -242,18 +252,14 @@ QJsonObject Ledger::toJson() const
         document.insert(QStringLiteral("presence"), presenceObject);
     }
 
-    // The same discipline, and for the same reason: a machine where nobody has a
-    // browser extension on it writes exactly the file it has always written. An
-    // empty object here would rewrite every ledger on disk on the first tick
-    // after an upgrade to say nothing.
+    // The rule above, for a machine with no browser extension on it.
     if (!sites.isEmpty()) {
         QJsonObject siteObject;
         for (auto it = sites.constBegin(); it != sites.constEnd(); ++it)
             siteObject.insert(it.key(), it.value());
         document.insert(QStringLiteral("sites"), siteObject);
     }
-    // The same discipline a third time. A machine whose profiles have no budget
-    // that outlives the day writes exactly the file it always wrote.
+    // The rule above, for profiles with no budget that outlives the day.
     if (!keptSeconds.isEmpty()) {
         QJsonObject kept;
         for (auto it = keptSeconds.constBegin(); it != keptSeconds.constEnd(); ++it)

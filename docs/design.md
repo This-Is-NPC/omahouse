@@ -226,9 +226,19 @@ Since §5.1 the day also carries a `presence` object: seconds of the day spent i
 each state of being in front of the machine, keyed by the state's name. Since
 §5.2 it carries a `sites` object too: seconds spent with each registrable domain
 in the front tab of the browser. Both sit **beside** `budgets` and never inside
-it, and both are written only once there is something to say — a machine with
-neither a screen it can read nor a browser extension on it goes on writing
-exactly the file it has always written.
+it, and both are written only once there is something to say. Not for the sake
+of ledgers that already exist — this file is rewritten every couple of seconds
+for as long as the machine is on, and `"presence": {}` on a machine that cannot
+read a screen is a claim about a measurement that never happened, made twice a
+second forever.
+
+That is a different rule from reading two spellings of one value, which
+`profiles.json` did for a budget's `match` and no longer does. Writing a field
+only when it means something is design and stays true whoever is running this.
+Accepting a second spelling was compatibility with files that do not exist, and
+it went — recorded here rather than quietly deleted, because it is the kind of
+convenience somebody reintroduces believing they are being kind to whoever edits
+the file.
 
 A `kept` object joins them for the budgets whose `resets` is `never`: the
 seconds spent against each of them. It sits **beside** the daily seconds, and
