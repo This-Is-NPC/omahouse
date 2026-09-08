@@ -252,10 +252,36 @@ observation and **adds up**. If synchronisation overwrote observations by
 timestamp, the forty minutes spent at one computer would disappear the moment a
 second computer reported later.
 
-The model already separates the two correctly and must keep doing so.
-`omahouse collect` files each machine's day where the sum will find it, checks
-that the document names the right person and date, and refuses a day dated in
-the future. It never replaces anything.
+The model already separates the two correctly and must keep doing so — though not
+by the mechanism this page claimed when it was written.
+
+**`omahouse collect` does replace.** It writes the arriving machine's snapshot
+for that day over the stored one. That is correct: a machine's day is cumulative,
+so its second report contains its first, and adding two reports from one machine
+would count everything twice. What adds up is `consolidate`, and it adds up
+across machines rather than within one.
+
+So what protects consumption is not the absence of a replacement. It is
+**monotonicity, checked before the write**. Inside the lock, `collect` refuses a
+snapshot older than the one it holds — `stale snapshot` — and walks the stored
+budgets to refuse any that arrives with fewer seconds than it already had —
+`consumption moved backwards`. The second guard is *spending never goes
+backwards* written as code, and it is the sentence this section rests on.
+
+**Both guards sit behind a condition the documented path does not meet.** They
+run only when the stored snapshot carries an `observedAt`, and `omahouse day`
+stamps that field only for a profile enrolled in allocation. A household
+following [`how-to-link-another-computer.md`](../how-to-link-another-computer.md)
+— `omahouse day | ssh | sudo omahouse collect` — never stamps it. Neither
+document has the field, the condition is false, nothing is checked, and a late or
+smaller report overwrites a newer one in silence.
+
+That is a defect in what exists today rather than in this design, and it is
+written here because §5 is what found it: the section was drafted against the
+source, and the source disagreed with it.
+
+If `observedAt` becomes load-bearing for a network, **every `day` has to stamp
+it** and not only an enrolled machine's.
 
 The matching posture is already written down for missing reports, and it stays:
 
@@ -395,7 +421,10 @@ question from the rule matching of `selectorMatches`, and only the first is
 what §2 changes; that a budget of zero counts without running out;
 that the ledger is keyed by date with no session anchor; that the household
 divides equally, caps absolutely, and does not transfer during the day; that
-`collect` sums rather than replaces; that omastore reimplements the verdict and
+`collect` replaces a machine's snapshot and `consolidate` is what adds up; that
+`collect`'s two guards are monotonicity checks that run only when the stored
+snapshot has an `observedAt`, which `omahouse day` stamps only for an enrolled
+profile; that omastore reimplements the verdict and
 reads the same file; that the polkit rule asks a named administrator for their
 own password while refusing a blanket `auth_self`; and that
 `/etc/sudoers.d/omahouse-node` names the omahouse binary with no verb after it,
