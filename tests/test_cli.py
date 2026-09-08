@@ -1337,6 +1337,21 @@ def check_a_profile_records_who_changed_it_and_when(box):
     unstamped = box.run("profile", "show", USER)
     assert "Last changed: not recorded" in unstamped.stdout, unstamped.stdout
 
+    # Both doors to root, and the name of the person behind each.
+    #
+    # `sudo` sets the *real* uid to root as well as the effective one, so
+    # `getuid()` answers `root` for somebody who typed their own password a
+    # second ago. Without reading `SUDO_UID` every write from a terminal was
+    # signed `root`, which is the line docs/cli.md already refuses about a
+    # grant. `daemon` is used as the stand-in because it exists everywhere and
+    # is nobody, so the case does not depend on who is running it.
+    for door in ("PKEXEC_UID", "SUDO_UID"):
+        box.write_profiles({"schemaVersion": 1, "profiles": [{"user": USER}]})
+        signed = box.run("allow", USER, "code", extra_env={door: "2"})
+        assert signed.returncode == 0, signed.stderr
+        wrote = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+        assert wrote["writtenBy"] == "daemon", (door, wrote)
+
 
 def check_it_refuses_a_profile_for_an_administrator(box):
     """docs/design.md §1: the operator is whoever is in wheel.

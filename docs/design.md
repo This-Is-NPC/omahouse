@@ -187,9 +187,14 @@ profiles: `enabled`, `enforce`, `default`, `warnAt`, `grace`, `rules`,
 
 A profile also carries `writtenBy` and `writtenAt` once something has changed
 it. The file is written by root and read by everybody, and the honest answer to
-*who put this here* used to be "somebody". `writtenBy` is the person and never
-`root`: under `pkexec` it is who polkit authenticated, the same answer a grant
-records. The stamp is set where the file is saved rather than by each verb —
+*who put this here* used to be "somebody". `writtenBy` is whoever asked, and not
+`root`: `pkexec` sets `PKEXEC_UID` and `sudo` sets `SUDO_UID`, and sudo makes
+the real uid root as well as the effective one, so asking the process would
+answer `root` for somebody who typed their own password a second ago. It is the
+same answer a grant records. A profile pushed from a central omahouse arrives
+through the node's service account and is stamped with that account, which is
+what lets a merge tell a profile the household issued from one an administrator
+typed on the machine. The stamp is set where the file is saved rather than by each verb —
 there are a dozen places that change a profile, and a stamp a caller has to
 remember is one that will be missing from whichever verb is added next — and
 what is on disk is compared against what is about to be written, so exactly the

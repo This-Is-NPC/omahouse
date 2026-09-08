@@ -264,9 +264,29 @@ struct Profile {
     /// which was written last, and a profile a central omahouse issued can only
     /// be told from one an administrator typed here by who wrote it.
     ///
-    /// `writtenBy` is the person and never `root`. Under `pkexec` that is who
-    /// polkit authenticated, the same answer a grant records, because `root
-    /// changed the rules` is not a line anybody can act on.
+    /// `writtenBy` is whoever asked, and not `root`. Both doors say so in the
+    /// environment and neither leaves it in the uid: `pkexec` sets
+    /// `PKEXEC_UID` and `sudo` sets `SUDO_UID`, and sudo makes the *real* uid
+    /// root too, so asking the process would answer `root` for somebody who
+    /// typed their own password a second ago. It is the same answer a grant
+    /// records, because `root changed the rules` is not a line anybody can act
+    /// on.
+    ///
+    /// **A push has no person, and that is the point.** A profile that arrives
+    /// from a central omahouse comes through the node's service account, so
+    /// this reads that account's name -- which is exactly the thing a merge has
+    /// to be able to tell: a profile the household issued, against one an
+    /// administrator typed on the machine. Anybody "fixing" this to record a
+    /// human name would delete that distinction without the fix looking wrong.
+    ///
+    /// **Ties go to the local copy.** Two writes in one second are not unlikely
+    /// in the case that matters -- a central pushing on a loop while somebody
+    /// edits the machine, which is what they are doing precisely because the
+    /// central came back -- and the stamp has a second's resolution. Whoever is
+    /// sitting at the machine is the one looking at the problem, which is the
+    /// same reason the most recent wins at all. Without the rule written down,
+    /// the winner is whichever way the comparison happened to be spelled:
+    /// deterministic and accidental, which is the worse of the two.
     ///
     /// **Never a tiebreak for the ledger.** A profile is a decision and has one
     /// correct version, so the most recent wins. Consumption is an observation

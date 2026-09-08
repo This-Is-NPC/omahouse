@@ -90,10 +90,26 @@ QString currentUser()
 
 QString operatorUser()
 {
-    const QByteArray asked = qgetenv("PKEXEC_UID");
-    bool ok = false;
-    const uint uid = asked.toUInt(&ok);
-    if (ok) {
+    // Two doors to root and one question: who is behind this. `pkexec` is the
+    // window's, `sudo` is the terminal's, and both say who asked in the
+    // environment because neither leaves it in the uid -- sudo sets the real
+    // uid to root as well as the effective one, so `getuid()` below answers
+    // `root` for a person who typed their own password a second ago.
+    //
+    // Without the second door the answer was `root` for every write from a
+    // terminal, which is the line docs/cli.md already refuses about a grant:
+    // `root gave kid ten minutes` is not what an operator wants to read back
+    // in a month.
+    //
+    // Neither variable is trusted for anything but the record. Whoever can set
+    // them is already running this as root and has no need of a forged name;
+    // what they buy is a truthful answer on the ordinary path, and the file
+    // they would be writing into is one they could write by hand.
+    for (const char *asked : {"PKEXEC_UID", "SUDO_UID"}) {
+        bool ok = false;
+        const uint uid = qgetenv(asked).toUInt(&ok);
+        if (!ok)
+            continue;
         const QString name = userForUid(static_cast<uid_t>(uid));
         if (!name.isEmpty())
             return name;
