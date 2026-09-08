@@ -1014,9 +1014,11 @@ Window {
                             width: parent.width
                             wrapMode: Text.WordWrap
                             quiet: true
-                            text: "Each portion stays reserved while its machine is offline. "
-                                  + "Added credit is distributed by the next Battery run. "
-                                  + "A recent report is not a live connection."
+                            text: "One pot, spent on any of them: every row of a budget "
+                                  + "shows the same credit and the same balance, and USED "
+                                  + "is that computer's share of having spent it. A recent "
+                                  + "report is not a live connection, and a machine that "
+                                  + "has not reported leaves the balance behind."
                         }
                         Label {
                             width: parent.width
@@ -1028,7 +1030,7 @@ Window {
                             objectName: "fleetColumns"
                             width: parent.width
                             Label { width: parent.width * 0.45; text: "MACHINE / BUDGET"; quiet: true }
-                            Label { text: "USED / PORTION / LEFT"; quiet: true }
+                            Label { text: "USED / CREDIT / LEFT"; quiet: true }
                         }
                         ListView {
                             id: fleetList
@@ -1060,7 +1062,7 @@ Window {
                                             width: parent.width * 0.55
                                             elide: Text.ElideRight
                                             text: fleetRow.modelData.used + " / "
-                                                  + fleetRow.modelData.portion + " / " + fleetRow.modelData.left
+                                                  + fleetRow.modelData.credit + " / " + fleetRow.modelData.left
                                         }
                                     }
                                     Label {

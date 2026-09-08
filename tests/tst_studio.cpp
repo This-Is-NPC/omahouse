@@ -1881,9 +1881,19 @@ void TestStudio::writesTheOperatorShots()
     QVERIFY(readProfiles(paths::profilesFile(), &originalProfiles, &fleetError));
     auto enrolledProfiles = originalProfiles;
     const QString date = QDate::currentDate().toString(Qt::ISODate);
+    // The household's credit and what the other computer has spent of it, which
+    // is what a statement carries now. `station-02` has spent 40 minutes of the
+    // session, so this machine is told `elsewhere: 2400` and works out the same
+    // balance station-02 does.
+    const auto statement = [](int credit, int elsewhere) {
+        return QJsonObject{{"credit", credit}, {"elsewhere", elsewhere}};
+    };
     QJsonObject document{{"authority", "example"}, {"machine", "here"},
         {"user", "nobody"}, {"date", date}, {"revision", 1},
-        {"limits", QJsonObject{{"session", 4500}, {"code", 2700}, {"firefox", 3600}, {"youtube.com", 1800}}}};
+        {"house", QJsonObject{{"session", statement(7800, 2400)},
+                              {"code", statement(2700, 0)},
+                              {"firefox", statement(3600, 0)},
+                              {"youtube.com", statement(1800, 0)}}}};
     for (auto &profile : enrolledProfiles)
         if (profile.user == QLatin1String("nobody")) profile.allocation = document;
     QVERIFY(writeProfiles(paths::profilesFile(), enrolledProfiles, &fleetError));
@@ -1893,7 +1903,10 @@ void TestStudio::writesTheOperatorShots()
     remote.user = QStringLiteral("nobody"); remote.date = QDate::currentDate();
     remote.addSeconds(QStringLiteral("session"), 2400);
     document.insert("machine", "station-02");
-    document.insert("limits", QJsonObject{{"session", 2700}});
+    document.insert("house", QJsonObject{{"session", statement(7800, 4200)},
+                                         {"code", statement(2700, 1500)},
+                                         {"firefox", statement(3600, 3600)},
+                                         {"youtube.com", statement(1800, 1500)}});
     remote.allocation = document;
     remote.observedAt = QDateTime::fromString(QStringLiteral("2026-09-01T09:30:00"), Qt::ISODate);
     QVERIFY(writeLedger(paths::elsewhereLedgerFile(station.name, remote.user, remote.date), remote, &fleetError));

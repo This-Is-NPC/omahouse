@@ -2090,7 +2090,7 @@ def check_leave_says_what_is_left_and_can_be_said_twice(box):
     assert document["minutes"] == 15, document
 
 
-def check_allocations_are_absolute_and_fail_closed(box):
+def check_the_household_balance_is_absolute_and_fails_closed(box):
     box.write_profiles(watching_profile())
     box.write_day(TODAY, {"session": 1800})
     enrolled = box.run("allocation", "init", USER)
@@ -2099,12 +2099,17 @@ def check_allocations_are_absolute_and_fail_closed(box):
     zero = json.loads(box.run("status", USER, "--json").stdout)["budgets"][0]
     assert zero["leftSeconds"] == 0, zero
     refused_leave = box.run("leave", USER, "--session", "30m")
-    assert refused_leave.returncode == 1 and "exclusive portions" in refused_leave.stderr
+    assert refused_leave.returncode == 1, refused_leave.stdout
+    assert "comes from the household" in refused_leave.stderr, refused_leave.stderr
     planned = box.run("allocation", "plan", USER)
     assert planned.returncode == 0, planned.stderr
     plan = json.loads(planned.stdout)
     document = plan["documents"]["here"]
-    assert document["limits"]["session"] == 7200
+    # One computer in the household, so nothing has been spent elsewhere and
+    # the balance is the whole credit. The two numbers are carried separately
+    # even here, because which of them a late report moves is the difference
+    # between allowing a little too much and allowing a day too much.
+    assert document["house"]["session"] == {"credit": 7200, "elsewhere": 0}, document
     for _ in range(2):
         applied = box.run("allocation", "apply", USER, stdin=json.dumps(document))
         assert applied.returncode == 0, applied.stderr
@@ -2113,7 +2118,8 @@ def check_allocations_are_absolute_and_fail_closed(box):
     assert balance["leftSeconds"] == 5340, balance
     same = box.run("allocation", "plan", USER)
     assert same.returncode == 0 and json.loads(same.stdout) == plan, same.stderr
-    for changed in ({"revision": 0}, {"limits": {"session": 8000}},
+    for changed in ({"revision": 0}, {"house": {"session": {"credit": 8000}}},
+                    {"house": {"other": {"credit": 7200, "elsewhere": 0}}},
                     {"authority": "another"}, {"date": "2000-01-01"}):
         bad = box.run("allocation", "apply", USER, stdin=json.dumps(dict(document, **changed)))
         assert bad.returncode == 1, bad.stdout
@@ -2122,7 +2128,7 @@ def check_allocations_are_absolute_and_fail_closed(box):
     assert json.loads(granted.stdout)["pendingAllocation"] is True
     assert json.loads(granted.stdout)["leftSeconds"] == 5340
     next_plan = json.loads(box.run("allocation", "plan", USER).stdout)
-    assert next_plan["documents"]["here"]["limits"]["session"] == 7800
+    assert next_plan["documents"]["here"]["house"]["session"]["credit"] == 7800, next_plan
     assert next_plan["revision"] == 2
     # Reservations cannot be reconstructed from consumption after state loss.
     (box.state / "allocations" / USER / f"{TODAY}.json").unlink()
@@ -3352,7 +3358,7 @@ def main():
         check_leave_says_what_is_left_and_can_be_said_twice,
         check_leave_refuses_what_it_cannot_leave,
         check_leave_does_not_change_household_credit,
-        check_allocations_are_absolute_and_fail_closed,
+        check_the_household_balance_is_absolute_and_fails_closed,
         check_watch_counts_a_faster_tick,
         check_watch_runs_for_a_while_and_then_stops,
         check_watch_refuses_a_window_it_cannot_honour,

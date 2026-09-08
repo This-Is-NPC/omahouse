@@ -32,14 +32,20 @@ bool validAllocation(const QJsonObject &a, QString *error)
     if (!a.value(QStringLiteral("date")).isString()
             || !QDate::fromString(a.value(QStringLiteral("date")).toString(), Qt::ISODate).isValid()
             || !whole(a.value(QStringLiteral("revision")), &revision) || revision < 1
-            || !a.value(QStringLiteral("limits")).isObject())
-        return refuse(error, QStringLiteral("allocation needs date, positive revision and limits"));
-    const auto limits = a.value(QStringLiteral("limits")).toObject();
-    if (limits.isEmpty()) return refuse(error, QStringLiteral("allocation has no budgets"));
-    for (auto it = limits.begin(); it != limits.end(); ++it) {
-        int seconds;
-        if (it.key().isEmpty() || !whole(it.value(), &seconds))
-            return refuse(error, QStringLiteral("allocation limits must be nonnegative whole seconds"));
+            || !a.value(QStringLiteral("house")).isObject())
+        return refuse(error, QStringLiteral("allocation needs date, positive revision and house"));
+    const auto house = a.value(QStringLiteral("house")).toObject();
+    if (house.isEmpty()) return refuse(error, QStringLiteral("allocation has no budgets"));
+    for (auto it = house.begin(); it != house.end(); ++it) {
+        int credit = 0;
+        int elsewhere = 0;
+        const auto one = it.value().toObject();
+        if (it.key().isEmpty() || !it.value().isObject()
+                || !whole(one.value(QStringLiteral("credit")), &credit)
+                || !whole(one.value(QStringLiteral("elsewhere")), &elsewhere)) {
+            return refuse(error, QStringLiteral("a household budget is a credit and an "
+                                               "elsewhere, both nonnegative whole seconds"));
+        }
     }
     return true;
 }
@@ -51,7 +57,21 @@ int allowanceSeconds(const Profile &profile, const Budget &budget,
         return budget.dailyMinutes * 60 + ledger.grantedSeconds(budget.id);
     if (profile.allocation.value(QStringLiteral("date")).toString() != date.toString(Qt::ISODate))
         return 0;
-    return profile.allocation.value(QStringLiteral("limits")).toObject().value(budget.id).toInt(0);
+    // The household's credit, less what the other computers have already spent
+    // of it. What is left over here is then `allowance - spent here`, which is
+    // the household's balance -- so an hour is an hour wherever the person
+    // sits, and not a quota per machine.
+    //
+    // Two numbers and not one pre-baked cap, because they are different kinds
+    // of fact and they go stale differently. `credit` is a decision and has a
+    // correct current version; `elsewhere` is an observation and only grows. A
+    // report that arrives late under-states `elsewhere`, so this machine allows
+    // a little too much rather than too little -- bounded by how often the
+    // household reports, which is the number an operator sets.
+    const auto one = profile.allocation.value(QStringLiteral("house")).toObject()
+                         .value(budget.id).toObject();
+    return qMax(0, one.value(QStringLiteral("credit")).toInt(0)
+                       - one.value(QStringLiteral("elsewhere")).toInt(0));
 }
 
 bool applyAllocation(Profile *profile, const QJsonObject &d, const QDate &today, QString *error)
@@ -66,10 +86,10 @@ bool applyAllocation(Profile *profile, const QJsonObject &d, const QDate &today,
         if (d.value(key) != profile->allocation.value(key))
             return refuse(error, QStringLiteral("allocation names another %1").arg(key));
     }
-    const auto limits = d.value(QStringLiteral("limits")).toObject();
+    const auto house = d.value(QStringLiteral("house")).toObject();
     QSet<QString> expected;
     for (const auto &budget : profile->budgets) if (budget.hasLimit()) expected.insert(budget.id);
-    const auto keys = limits.keys();
+    const auto keys = house.keys();
     if (QSet<QString>(keys.begin(), keys.end()) != expected)
         return refuse(error, QStringLiteral("allocation budgets differ from the profile"));
     if (profile->allocation.value(QStringLiteral("date")) == d.value(QStringLiteral("date"))) {
@@ -77,10 +97,20 @@ bool applyAllocation(Profile *profile, const QJsonObject &d, const QDate &today,
         const int revision = d.value(QStringLiteral("revision")).toInt();
         if (revision < oldRevision || (revision == oldRevision && profile->allocation != d))
             return refuse(error, QStringLiteral("stale or conflicting allocation revision"));
-        const auto old = profile->allocation.value(QStringLiteral("limits")).toObject();
+        const auto old = profile->allocation.value(QStringLiteral("house")).toObject();
         for (const QString &key : keys) {
-            if (limits.value(key).toInt() < old.value(key).toInt())
-                return refuse(error, QStringLiteral("issued portions cannot be reclaimed during the day"));
+            // `elsewhere` is what other computers have spent, and consumption
+            // adds up: a report saying they spent less than the last one is a
+            // report going backwards, and honouring it would hand this machine
+            // the same minutes twice. The same rule `collect` keeps.
+            //
+            // `credit` is free to move either way. It is a decision, and an
+            // operator who lowers the daily number at four in the afternoon has
+            // lowered it -- refusing that would be the household unable to take
+            // back what it gave.
+            if (house.value(key).toObject().value(QStringLiteral("elsewhere")).toInt()
+                    < old.value(key).toObject().value(QStringLiteral("elsewhere")).toInt())
+                return refuse(error, QStringLiteral("household consumption moved backwards"));
         }
     }
     profile->allocation = d;
@@ -138,56 +168,54 @@ bool planAllocations(const Profile &profile, const QVector<QPair<QString, Ledger
                     || old.value("revision").toInt() != oldRevision)
                 return refuse(error, QStringLiteral("inconsistent issued document; restore the manager state"));
             const auto received = day.second.allocation;
-            if (received.value("date").toString() == date) {
-                if (received.value("revision").toInt() > oldRevision)
-                    return refuse(error, QStringLiteral("machine has a newer reservation; restore the manager state"));
-                const auto caps = received.value("limits").toObject();
-                for (auto it = caps.begin(); it != caps.end(); ++it) {
-                    if (it.value().toInt() > old.value("limits").toObject().value(it.key()).toInt(-1))
-                        return refuse(error, QStringLiteral("issued credit was rolled back; restore the manager state"));
-                }
-            }
+            if (received.value("date").toString() == date
+                    && received.value("revision").toInt() > oldRevision)
+                return refuse(error, QStringLiteral("machine has a newer statement; restore the manager state"));
         }
     }
     QJsonObject documents;
     for (const auto &day : days) {
         documents.insert(day.first, QJsonObject{{"authority", authority}, {"machine", day.first},
                          {"user", profile.user}, {"date", date}, {"revision", revision},
-                         {"limits", QJsonObject{}}});
+                         {"house", QJsonObject{}}});
     }
     bool any = false;
     for (const auto &budget : profile.budgets) {
         if (!budget.hasLimit()) continue;
         any = true;
+        // What the household has to spend today: the profile's own number plus
+        // every grant an operator made anywhere. Local adjustments are left out
+        // -- `leave` is a machine correcting its own balance and must not feed
+        // back into the household's.
         qint64 credit = qint64(budget.dailyMinutes) * 60;
+        qint64 spent = 0;
         for (const auto &day : days) {
-            for (const auto &grant : day.second.grants)
-                if (grant.budget == budget.id && !grant.adjustment)
-                    credit += qint64(grant.minutes) * 60;
+            credit += day.second.creditedSeconds(budget.id);
+            spent += day.second.secondsFor(budget.id);
         }
         if (credit < 0 || credit > 31536000)
             return refuse(error, QStringLiteral("household credit is outside the supported range"));
-        QVector<int> portions;
-        qint64 reserved = 0;
+        if (spent < 0 || spent > 31536000)
+            return refuse(error, QStringLiteral("household consumption is outside the supported range"));
+
+        // No division. Every machine is told the same credit and what the
+        // *others* have spent of it, so each of them works out the same balance
+        // and an hour is an hour wherever the person sits.
+        //
+        // What this gives up is exclusivity: two computers both told there are
+        // thirty minutes left can both start spending them. That is bounded by
+        // how often the household reports and by nothing else, which is why the
+        // reporting cadence stopped being a tuning knob and became the thing
+        // that holds the sum together.
         for (const auto &day : days) {
-            int portion = day.second.secondsFor(budget.id);
-            if (!previous.isEmpty()) {
-                const auto old = oldDocuments.value(day.first).toObject().value("limits").toObject();
-                if (!old.contains(budget.id) || !whole(old.value(budget.id), &portion))
-                    return refuse(error, QStringLiteral("issued plan is incomplete; do not recreate it"));
-            }
-            portions.append(portion);
-            reserved += portion;
-        }
-        if (reserved > credit)
-            return refuse(error, QStringLiteral("%1 has less credit than already spent/reserved; no reallocation").arg(budget.id));
-        const int extra = static_cast<int>(credit - reserved);
-        for (int i = 0; i < days.size(); ++i) {
-            auto doc = documents.value(days.at(i).first).toObject();
-            auto limits = doc.value("limits").toObject();
-            limits.insert(budget.id, portions.at(i) + extra / days.size() + (i < extra % days.size() ? 1 : 0));
-            doc.insert("limits", limits);
-            documents.insert(days.at(i).first, doc);
+            auto doc = documents.value(day.first).toObject();
+            auto house = doc.value("house").toObject();
+            const qint64 elsewhere = spent - day.second.secondsFor(budget.id);
+            house.insert(budget.id,
+                         QJsonObject{{"credit", static_cast<int>(credit)},
+                                     {"elsewhere", static_cast<int>(elsewhere)}});
+            doc.insert("house", house);
+            documents.insert(day.first, doc);
         }
     }
     if (!any) return refuse(error, QStringLiteral("profile has no limited budgets"));
@@ -201,8 +229,8 @@ bool planAllocations(const Profile &profile, const QVector<QPair<QString, Ledger
     }
     bool changed = previous.isEmpty();
     for (const QString &key : documents.keys()) {
-        if (documents.value(key).toObject().value("limits")
-                != oldDocuments.value(key).toObject().value("limits")) changed = true;
+        if (documents.value(key).toObject().value("house")
+                != oldDocuments.value(key).toObject().value("house")) changed = true;
     }
     if (!changed) { *plan = previous; return true; }
     *plan = QJsonObject{{"schemaVersion", 1}, {"authority", authority}, {"user", profile.user},

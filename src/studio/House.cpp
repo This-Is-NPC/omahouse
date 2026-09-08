@@ -137,7 +137,7 @@ QVariantList fleetRows(const Profile &profile, const Ledger &local, const QDateT
     QVariantList rows;
     if (!readMachines(paths::machinesFile(), &machines, &error, &absent)) {
         rows.append(QVariantMap{{"name", "machine list"}, {"state", error}, {"id", ""},
-                                {"limited", false}, {"used", "?"}, {"portion", "?"}, {"left", "?"},
+                                {"limited", false}, {"used", "?"}, {"credit", "?"}, {"left", "?"},
                                 {"lastReport", "unreadable"}});
         return rows;
     }
@@ -156,21 +156,28 @@ QVariantList fleetRows(const Profile &profile, const Ledger &local, const QDateT
         const bool fresh = here || (day.second.observedAt.isValid()
             && day.second.observedAt.secsTo(now) >= -5 && day.second.observedAt.secsTo(now) <= 120);
         const bool allocated = allocation.value("date").toString() == now.date().toString(Qt::ISODate);
-        const auto limits = allocation.value("limits").toObject();
+        const auto house = allocation.value("house").toObject();
         for (const auto &budget : profile.budgets) {
             if (!budget.hasLimit()) continue;
             const int used = day.second.secondsFor(budget.id);
-            const int portion = allocated ? limits.value(budget.id).toInt(0) : 0;
+            // The household's number, and what is left of it after every
+            // computer. It is the same on every row of a budget, because that
+            // is the point: there is one pot and no quota per machine. What
+            // differs down the column is `USED`, which is this computer's
+            // share of having spent it.
+            const auto one = house.value(budget.id).toObject();
+            const int credit = allocated ? one.value("credit").toInt(0) : 0;
+            const int elsewhere = allocated ? one.value("elsewhere").toInt(0) : 0;
             const QString state = faults.contains(day.first) ? faults.value(day.first)
                 : allocation.isEmpty() ? QStringLiteral("not enrolled")
-                : !fresh ? QStringLiteral("stale report; portion reserved")
-                : !allocated ? QStringLiteral("waiting for today's portion")
-                             : QStringLiteral("portion received");
+                : !fresh ? QStringLiteral("stale report; the balance below is behind")
+                : !allocated ? QStringLiteral("waiting for today's statement")
+                             : QStringLiteral("statement received");
             rows.append(QVariantMap{{"name", day.first}, {"id", budget.id}, {"kind", "budget"},
                 {"state", state}, {"limited", true}, {"hasBudget", true},
                 {"used", faults.contains(day.first) ? "?" : spellSeconds(used)},
-                {"portion", allocated ? spellSeconds(portion) : "0m"},
-                {"left", allocated ? spellSeconds(qMax(0, portion - used)) : "0m"},
+                {"credit", allocated ? spellSeconds(credit) : "0m"},
+                {"left", allocated ? spellSeconds(qMax(0, credit - elsewhere - used)) : "0m"},
                 {"lastReport", here ? QStringLiteral("local") : day.second.observedAt.isValid()
                     ? day.second.observedAt.toLocalTime().toString(Qt::ISODate) : QStringLiteral("never")}});
         }

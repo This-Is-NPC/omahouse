@@ -3888,7 +3888,8 @@ int cmdLeave(const Globals &g, const QStringList &positionals, const Options &op
     if (!profile)
         return status;
     if (!profile->allocation.isEmpty()) {
-        fail(QStringLiteral("leave: this profile uses exclusive portions; use allocation apply"));
+        fail(QStringLiteral("leave: this profile's balance comes from the household; "
+                            "use allocation apply"));
         return kUsage;
     }
     const Budget *budget = budgetFor(profile, id);
@@ -5305,7 +5306,7 @@ int dispatch(const Globals &g, const QStringList &args)
     const QString verb = rest.value(0);
     const QStringList positionals = rest.mid(1);
 
-    // The scheduler may apply a portion while an operator edits a rule. Both
+    // The scheduler may apply a statement while an operator edits a rule. Both
     // replace profiles.json, so serialize the entire read/modify/write cycle.
     const bool profileWrite = QStringList{"allow", "deny", "limit"}.contains(verb)
         || (verb == QLatin1String("profile") && !QStringList{"show", "list"}.contains(rest.value(1)))
