@@ -73,6 +73,12 @@ package() {
     "$pkgdir/usr/lib/systemd/system/omahouse.service"
   install -Dm644 packaging/org.omarchy.omahouse.policy \
     "$pkgdir/usr/share/polkit-1/actions/org.omarchy.omahouse.policy"
+  # The action says an administrator; the rule says *which* one. Named after the
+  # action rather than numbered, so that any `NN-` file a machine's own
+  # administrator drops in sorts ahead of it and wins -- a household that wants
+  # something else out of this action should not have to edit a packaged file.
+  install -Dm644 packaging/org.omarchy.omahouse.rules \
+    "$pkgdir/usr/share/polkit-1/rules.d/org.omarchy.omahouse.rules"
   install -Dm644 packaging/omahouse.desktop \
     "$pkgdir/usr/share/applications/omahouse.desktop"
   install -Dm644 packaging/omahouse.svg \

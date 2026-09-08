@@ -1,0 +1,52 @@
+/* -*- mode: js; js-indent-level: 4; indent-tabs-mode: nil -*- */
+
+/*
+ * Which administrator `pkexec omahouse` is asking for -- the half of
+ * `org.omarchy.omahouse.policy` that a `.policy` file cannot say.
+ *
+ * The action's defaults are `auth_admin`, and `auth_admin` means "any one of
+ * the administrators". On a machine with one person in wheel that reads as
+ * "your password" and is fine. On a machine with two -- which is the household
+ * of docs/design.md §1, where both parents administer and one of them is the
+ * one standing at the keyboard -- the prompt does not say whose password it
+ * wants and will take the other one's. The operator who just typed their own
+ * and was refused has no way to tell from the dialogue that it was never asking
+ * for theirs.
+ *
+ * So: somebody who is already an administrator authenticates as themselves.
+ * Everybody else falls through to the `.policy` defaults untouched and goes on
+ * needing an administrator's password.
+ *
+ * **Not a blanket `auth_self`, and this is the whole reason the file is a rule
+ * and not a one-word edit to the policy.** This action is the only gate in
+ * front of the CLI running as root: `omahouse` itself does not refuse a write
+ * from an account that is under rules, because by the time it runs it is root
+ * and there is nobody left to refuse. `auth_self` on the action would let the
+ * fiscalised account authorise its own release with its own password, which is
+ * the product answering the wrong question -- the whole of docs/design.md §1 is
+ * that the person the rules are about is not the person who changes them.
+ *
+ * `AUTH_SELF` and not `AUTH_SELF_KEEP`, for the reason the policy file gives
+ * about `auth_admin_keep` and for one more. The five minute window polkit keeps
+ * is five minutes in which the machine does it again without asking, and this
+ * product is about a household where the person the rules are about is standing
+ * at the same keyboard. And it would change how often the prompt comes up: the
+ * studio writes one verb per `pkexec`, docs/screens.md and the walkthrough in
+ * vm/cases both say every write asks, and a rule that quietly made three of
+ * four writes stop asking would be this file editing the documented product on
+ * its way past. Whose password is the defect being fixed here; how often is a
+ * different question and not this file's to answer.
+ */
+
+polkit.addRule(function (action, subject) {
+    if (action.id !== "org.omarchy.omahouse.manage")
+        return polkit.Result.NOT_HANDLED;
+
+    if (subject.isInGroup("wheel"))
+        return polkit.Result.AUTH_SELF;
+
+    /* Said out loud rather than fallen off the end of. Both are `not_handled`
+     * to polkit, and only one of them is legible to whoever reads this next
+     * wondering what happens to the account under rules. */
+    return polkit.Result.NOT_HANDLED;
+});
