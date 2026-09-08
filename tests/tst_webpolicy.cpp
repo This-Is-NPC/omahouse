@@ -510,6 +510,47 @@ private slots:
         QVERIFY2(error.contains(QStringLiteral("no match")), qPrintable(error));
     }
 
+// `resets` survives the file, and is written only when it is `session`.
+    void aBudgetAnchoredAtTheLoginSurvivesTheFile()
+    {
+        Profile julia = person(QStringLiteral("julia"));
+        Budget sitting;
+        sitting.id = QStringLiteral("visit");
+        sitting.match = {QStringLiteral("chromium")};
+        sitting.resets = Resets::Session;
+        sitting.dailyMinutes = 120;
+        sitting.onExhausted = OnExhausted::Close;
+        Budget day;
+        day.id = QStringLiteral("session");
+        day.match = {QStringLiteral("*")};
+        day.dailyMinutes = 120;
+        julia.budgets = {sitting, day};
+
+        const QJsonArray budgets = julia.toJson().value(QStringLiteral("budgets")).toArray();
+        QCOMPARE(budgets.at(0).toObject().value(QStringLiteral("resets")).toString(),
+                 QStringLiteral("session"));
+        QVERIFY2(!budgets.at(1).toObject().contains(QStringLiteral("resets")),
+                 "a daily budget wrote a resets, which rewrites every file on every machine");
+
+        Profile read;
+        QString error;
+        QVERIFY2(Profile::fromJson(julia.toJson(), &read, &error), qPrintable(error));
+        QVERIFY(read.budgets.at(0).perSession());
+        QVERIFY(!read.budgets.at(1).perSession());
+
+        // And an unknown one is said rather than guessed at, because a budget
+        // whose anchor was misread is a clock that resets at the wrong moment
+        // and reads back out of `profile show` looking correct.
+        const QJsonObject wrong {
+            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("budgets"),
+             QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("visit")},
+                                      {QStringLiteral("match"), QStringLiteral("chromium")},
+                                      {QStringLiteral("resets"), QStringLiteral("weekly")}}}}};
+        QVERIFY(!Profile::fromJson(wrong, &read, &error));
+        QVERIFY2(error.contains(QStringLiteral("weekly")), qPrintable(error));
+    }
+
     // A site with no action named blocks, an app with none warns. Different
     // defaults because they are the honest reading of each: the observing stage
     // for apps is `enforce: false`, and for sites it was the whole of §5.2.

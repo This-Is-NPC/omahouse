@@ -331,6 +331,91 @@ private slots:
         QVERIFY(error.contains(QStringLiteral("presence")));
     }
 
+// The sitting rides beside the budgets exactly as presence does, and is
+    // optional in exactly the same way.
+    void theSittingRidesBesideTheBudgetsAndIsOptional()
+    {
+        Ledger old;
+        QString error;
+        QVERIFY2(Ledger::fromJson(parse(kSpecLedger), &old, &error), qPrintable(error));
+        QVERIFY(old.sessionAnchor.isEmpty());
+        QVERIFY(old.sessionSeconds.isEmpty());
+        QVERIFY2(!old.toJson().contains(QStringLiteral("session")),
+                 "a ledger with no sitting wrote one, which rewrites every file on disk");
+
+        Ledger day;
+        day.user = QStringLiteral("julia");
+        day.date = QDate(2026, 9, 3);
+        day.addSeconds(QStringLiteral("session"), 600);
+        day.sessionAnchor = QStringLiteral("Thu 2026-09-03 19:02:11 -03");
+        day.addSessionSeconds(QStringLiteral("visit"), 400);
+        day.addSessionSeconds(QStringLiteral("visit"), 200);
+        QCOMPARE(day.sessionSecondsFor(QStringLiteral("visit")), 600);
+
+        // The two counters are two counters. This is the property every reader
+        // that adds days or machines together depends on without knowing it.
+        QCOMPARE(day.secondsFor(QStringLiteral("visit")), 0);
+        QCOMPARE(day.sessionSecondsFor(QStringLiteral("session")), 0);
+
+        Ledger back;
+        QVERIFY2(Ledger::fromJson(day.toJson(), &back, &error), qPrintable(error));
+        QCOMPARE(back.toJson(), day.toJson());
+        QCOMPARE(back.sessionAnchor, day.sessionAnchor);
+        QCOMPARE(back.sessionSecondsFor(QStringLiteral("visit")), 600);
+        QCOMPARE(back.secondsFor(QStringLiteral("session")), 600);
+
+        // Seconds without the anchor they belong to would be a total nobody can
+        // say the sitting of, so the two are written together or not at all.
+        QJsonObject anchorless = day.toJson();
+        QJsonObject sitting = anchorless.value(QStringLiteral("session")).toObject();
+        sitting.remove(QStringLiteral("anchor"));
+        anchorless.insert(QStringLiteral("session"), sitting);
+        Ledger nothing;
+        QVERIFY(!Ledger::fromJson(anchorless, &nothing, &error));
+        QVERIFY2(error.contains(QStringLiteral("anchor")), qPrintable(error));
+
+        QJsonObject broken = day.toJson();
+        broken.insert(QStringLiteral("session"), QStringLiteral("all evening"));
+        QVERIFY(!Ledger::fromJson(broken, &nothing, &error));
+        QVERIFY2(error.contains(QStringLiteral("session")), qPrintable(error));
+    }
+
+    // A grant carries the sitting it was handed over in, and only when there is
+    // one to carry.
+    void aGrantCarriesItsSittingAndOnlyWhenThereIsOne()
+    {
+        Ledger day;
+        day.user = QStringLiteral("julia");
+        day.date = QDate(2026, 9, 3);
+        Grant daily;
+        daily.at = QDateTime(QDate(2026, 9, 3), QTime(19, 12));
+        daily.by = QStringLiteral("howl");
+        daily.budget = QStringLiteral("session");
+        daily.minutes = 10;
+        Grant sitting = daily;
+        sitting.budget = QStringLiteral("visit");
+        sitting.anchor = QStringLiteral("this sitting");
+        day.grants = {daily, sitting};
+
+        const QJsonArray grants = day.toJson().value(QStringLiteral("grants")).toArray();
+        QVERIFY2(!grants.at(0).toObject().contains(QStringLiteral("anchor")),
+                 "a daily budget's grant wrote an anchor it does not have");
+        QCOMPARE(grants.at(1).toObject().value(QStringLiteral("anchor")).toString(),
+                 QStringLiteral("this sitting"));
+
+        Ledger back;
+        QString error;
+        QVERIFY2(Ledger::fromJson(day.toJson(), &back, &error), qPrintable(error));
+        QCOMPARE(back.toJson(), day.toJson());
+
+        // Counted whole, and counted by sitting: `leave` and the report want
+        // the first, and a budget anchored at the login wants the second.
+        QCOMPARE(back.grantedSeconds(QStringLiteral("visit")), 600);
+        QCOMPARE(back.grantedSeconds(QStringLiteral("visit"), QStringLiteral("this sitting")),
+                 600);
+        QCOMPARE(back.grantedSeconds(QStringLiteral("visit"), QStringLiteral("another")), 0);
+    }
+
     // tmp + rename, docs/design.md §4. A reader of the ledger sees the whole of one
     // tick or the whole of the one before it, never the first half of a write
     // that a power cut ended.
