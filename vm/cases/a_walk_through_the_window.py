@@ -126,11 +126,13 @@ def walk(vm, operator, subject):
         """Answer the polkit prompt, because every write raises one.
 
         The studio is never root: it reads with no privilege at all and every
-        write it does is `pkexec omahouse <verb>`. The policy asks `auth_admin`
-        and not `auth_admin_keep` on purpose -- what is being changed is
-        somebody else's evening, and a five minute window where the machine will
-        do it again without asking is a window where the person it is about is
-        standing at the same keyboard.
+        write it does is `pkexec omahouse <verb>`. The operator is in wheel, so
+        `org.omarchy.omahouse.rules` asks for their own password rather than for
+        "an administrator's"; anybody else arrives at the policy's `auth_admin`.
+        Neither keeps a window, on purpose -- what is being changed is somebody
+        else's evening, and five minutes where the machine will do it again
+        without asking is five minutes where the person it is about is standing
+        at the same keyboard. Which is why this is once per write and not once.
 
         So the prompt is not in the way of the demonstration. It *is* part of
         it, and the first version of this walk typed the whole rest of the

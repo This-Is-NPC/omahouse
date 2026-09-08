@@ -25,7 +25,8 @@ mise run build     # build/bin/omahouse and build/bin/omahouse-studio
 mise run studio    # open the window
 ```
 
-`packaging/` holds the unit, the polkit policy, the desktop entry and the icon.
+`packaging/` holds the unit, the polkit policy and its rule, the desktop entry
+and the icon.
 The Arch recipe lives in the sibling `omarchy-pkgs` repository. Released under
 the MIT license. **A checkout is not an installation** — no PAM line, no
 service, and no browser meter;

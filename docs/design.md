@@ -594,8 +594,8 @@ Every screen it draws is inventoried in [`screens.md`](screens.md).
 
 ## 9. Packaging
 
-`packaging/` holds the unit, the polkit policy, the desktop entry, the icon and
-the `.install`. The install script creates `/etc/omahouse` and
+`packaging/` holds the unit, the polkit policy, the polkit rule, the desktop
+entry, the icon and the `.install`. The install script creates `/etc/omahouse` and
 `/var/lib/omahouse`, adds the PAM line of §2, enables `omahouse.service`, and
 takes all of it out again on removal.
 

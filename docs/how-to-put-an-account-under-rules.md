@@ -85,8 +85,10 @@ those are their own page:
 ## In the window
 
 `omahouse-studio` does the same thing, and every write it makes goes out as
-`pkexec omahouse …`, so polkit asks for an administrator's password and the
-refusals are the CLI's own.
+`pkexec omahouse …`, so polkit asks for a password and the refusals are the
+CLI's own. If you are an administrator it asks for **your** password; anybody
+else is asked for an administrator's, and there is no arrangement of the window
+that lets the account under rules release itself.
 
 Open it from a terminal that is allowed:
 

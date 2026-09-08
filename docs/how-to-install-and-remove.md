@@ -16,7 +16,9 @@ to lift it.
   omahouse is `logind`, a real session and a real seat, so a container without
   systemd as PID 1 is not a place it runs.
 - **Qt 6** — `qt6-base`, and `qt6-declarative` for the window.
-- **`polkit`**, for `pkexec`. That is how the window writes.
+- **`polkit`**, for `pkexec`. That is how the window writes. The package puts a
+  rule beside the action, so an administrator authenticates as themselves and
+  everybody else is asked for an administrator's password.
 - **Chromium**, for anything to do with sites. It is optional; everything else
   works without a browser.
 - [**mise**](https://mise.jdx.dev/), for the tasks below and for the pinned
@@ -61,9 +63,9 @@ own `/etc/omahouse`.
 ## As a package
 
 The Arch recipe lives in the sibling `omarchy-pkgs` repository, and
-`packaging/` here holds what it installs: the systemd unit, the polkit policy,
-the desktop entry, the icon, the native messaging host shim, the extension
-packer and the `.install` scriptlet.
+`packaging/` here holds what it installs: the systemd unit, the polkit policy
+and its rule, the desktop entry, the icon, the native messaging host shim, the
+extension packer and the `.install` scriptlet.
 
 ```
 >>> omahouse: /etc/omahouse and /var/lib/omahouse are ready, and
