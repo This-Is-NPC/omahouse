@@ -162,6 +162,10 @@ The document is shaped like `profiles.json` with exactly one profile in it, and 
 
 A symbolic link in the way is refused before anything is opened, the directory as well as the file. Nothing is to be gained by one today -- whoever can write the stage is the account that already has its own line to root -- and that is exactly why nobody would look at it later, when that line is narrower and this is the door.
 
+**A push does not overwrite a profile somebody made here.** The tiebreak says the most recent written wins and a manager pushes on a schedule, so recency favours the central by construction: an administrator who fixes something by hand at two o'clock would be overwritten by the routine push at five past, with nobody deciding and nobody told. That defeats what omahouse being installed whole on every machine is for -- a fix the next cycle erases was not a fix -- and it would also destroy the evidence a merge exists to show, so the merge would list nothing forever without ever looking wrong.
+
+Three ways through, and nothing else: there is no profile here yet; the last write here was a push, so the household already knows what it is replacing; or the document carries a `supersedes` holding the profile the manager believes is here and it is exactly what is here. The last is somebody on the manager having looked at this machine's version and decided, which is the second pass of a merge and the only way a hand-made profile is replaced. It is the whole profile and not its stamp, because the stamp has a second's resolution and a machine edited twice inside one second would read as unchanged.
+
 What ends up written as `writtenBy` is the node's account, because a push has no person behind it. That is what lets a central tell later what it issued from what an administrator typed on the machine, so it is the answer that was wanted and not one to tidy away.
 
 ## `omahouse profile remove`

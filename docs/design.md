@@ -781,6 +781,24 @@ at it later, when the wide line is narrower and this is the door.
 is what lets a central tell later what it issued from what an administrator
 typed on the machine.
 
+**And it is what stops a push overwriting a profile somebody made here.** The
+tiebreak says the most recent written wins, and a manager pushes on a schedule —
+so recency favours the central by construction. An administrator who fixes
+something by hand at two o'clock would be overwritten by the routine push at five
+past, with nobody deciding and nobody told. That defeats what installing omahouse
+whole on every machine is *for*: a fix the next cycle erases was not a fix, it
+was a loan. It would also destroy the evidence a merge exists to show, so the
+merge would list nothing forever and never look wrong, because nothing is the
+ordinary answer.
+
+Three ways through and nothing else: there is no profile here yet; the last write
+here was a push; or the document carries a `supersedes` holding the profile the
+manager believes is here, and it is exactly what is here. The last is somebody on
+the manager having looked at this machine's version and decided — the second pass
+of a merge, and the only way a hand-made profile is replaced. It carries the
+whole profile and not its stamp, because the stamp has a second's resolution and
+a machine edited twice inside one second would read as unchanged.
+
 ---
 
 **Removal is half the job, not an appendix.** What omahouse puts on a machine

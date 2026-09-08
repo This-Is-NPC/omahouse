@@ -3296,14 +3296,73 @@ int cmdProfileApplyStaged(const Globals &g, const QStringList &positionals)
     if (!loadProfiles(&profiles, &status))
         return status;
 
-    bool replaced = false;
-    for (Profile &existing : profiles.all) {
-        if (existing.user != incoming.user)
-            continue;
-        existing = incoming;
-        replaced = true;
+    // Whether this push may overwrite what is here, and it is the difference
+    // between an emergency exit and a loan.
+    //
+    // The tiebreak says the most recent written wins, and a manager pushes on a
+    // schedule -- so recency favours the central by construction. An
+    // administrator who fixes something by hand at two o'clock is overwritten
+    // by the routine push at five past, with nobody deciding and nobody told.
+    // That defeats the thing the whole design is for: omahouse is installed
+    // whole on every machine so that somebody can sit down and fix it with the
+    // central unreachable, and a fix the next cycle erases was not a fix.
+    //
+    // It is also what makes a merge possible at all. A push that overwrote
+    // blind would destroy the evidence before anybody could be asked about it,
+    // and the merge screen would list nothing -- forever, and without looking
+    // wrong, because nothing is the ordinary answer.
+    //
+    // Three ways through, and each is a different sentence:
+    //
+    //  - nobody has one here, so there is nothing to overwrite;
+    //  - the last write here was a push, so the central already knows what it
+    //    is replacing;
+    //  - the document carries the profile the manager believes is here, and it
+    //    is exactly what is here -- a human on the manager having *looked* at
+    //    this one and decided. That is the second pass of a merge, and it is
+    //    the only way a hand-made profile is replaced.
+    //
+    // Anything else stands back and says so.
+    //
+    // `supersedes` is the whole profile and not its stamp, and the first
+    // attempt was the stamp. The stamp has a second's resolution: a machine
+    // edited twice inside one second reads as unchanged, and a resolution
+    // approved against the first edit would land on the second. Comparing what
+    // is actually there asks the question the check is about -- *is this still
+    // what you were shown* -- without a clock in the answer.
+    const QJsonObject supersedes = document.value(QStringLiteral("supersedes")).toObject();
+    Profile *existing = nullptr;
+    for (Profile &one : profiles.all) {
+        if (one.user == incoming.user)
+            existing = &one;
     }
-    if (!replaced)
+
+    if (existing && existing->writtenBy != Omakure::account()) {
+        const QString stampedAt =
+            existing->writtenAt.isValid()
+                ? existing->writtenAt.toOffsetFromUtc(existing->writtenAt.offsetFromUtc())
+                      .toString(Qt::ISODate)
+                : QString();
+        const bool looked = !supersedes.isEmpty() && supersedes == existing->toJson();
+        if (!looked) {
+            fail(QStringLiteral("%1: %2's profile here was last changed by %3%4, and this "
+                                "push does not say it is replacing that one.")
+                     .arg(verb, incoming.user,
+                          existing->writtenBy.isEmpty() ? QStringLiteral("somebody")
+                                                        : existing->writtenBy,
+                          stampedAt.isEmpty() ? QString()
+                                              : QStringLiteral(" at %1").arg(stampedAt)));
+            fail(QStringLiteral("%1  Left as it is. `omahouse profile show %2 --json` sends "
+                                "it to the household, where somebody decides.")
+                     .arg(QString(verb.size(), QLatin1Char(' ')), spellUser(incoming.user)));
+            return kUsage;
+        }
+    }
+
+    const bool replaced = existing != nullptr;
+    if (existing)
+        *existing = incoming;
+    else
         profiles.all.append(incoming);
 
     // Whose name ends up on it is `saveProfiles`, and it is the node account:

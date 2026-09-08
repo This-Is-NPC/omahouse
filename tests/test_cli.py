@@ -1529,12 +1529,15 @@ def check_a_pushed_profile_comes_in_through_the_stage(box):
     stage.mkdir(parents=True, exist_ok=True)
     document = stage / "profile.json"
 
+    # `daemon` stands in for the household's node account on both sides: it is
+    # who `sudo` says asked, and who omahouse thinks that account is. The two
+    # have to agree, because a push may replace what a previous push wrote and
+    # nothing else.
+    household = {"SUDO_UID": "2", "OMAHOUSE_OMAKURE_USER": "daemon"}
+
     def push(profile, schema=2):
         document.write_text(json.dumps({"schemaVersion": schema, "profiles": [profile]}))
-        # `SUDO_UID` is how sudo says who asked, and a push asks as the node's
-        # account. `daemon` stands in for it: what matters is that the name on
-        # the profile afterwards is not a person's.
-        return box.run("profile", "apply-staged", extra_env={"SUDO_UID": "2"})
+        return box.run("profile", "apply-staged", extra_env=household)
 
     box.write_profiles({"schemaVersion": 2, "profiles": []})
 
@@ -1549,7 +1552,7 @@ def check_a_pushed_profile_comes_in_through_the_stage(box):
     # The stage is a letterbox and not a record: left behind, the next run
     # would apply the same document again.
     assert not document.exists()
-    again = box.run("profile", "apply-staged", extra_env={"SUDO_UID": "2"})
+    again = box.run("profile", "apply-staged", extra_env=household)
     assert again.returncode == 2, again.stdout
     assert "nothing at" in again.stderr, again.stderr
 
@@ -1578,7 +1581,7 @@ def check_a_pushed_profile_comes_in_through_the_stage(box):
     # Two profiles at once is a merge and is not this.
     document.write_text(json.dumps({"schemaVersion": 2, "profiles": [
         {"user": "nobody"}, {"user": "daemon"}]}))
-    several = box.run("profile", "apply-staged", extra_env={"SUDO_UID": "2"})
+    several = box.run("profile", "apply-staged", extra_env=household)
     assert several.returncode == 1, several.stdout
     assert "takes one" in several.stderr, several.stderr
 
@@ -1596,9 +1599,90 @@ def check_a_pushed_profile_comes_in_through_the_stage(box):
     elsewhere.write_text(json.dumps({"schemaVersion": 2,
                                      "profiles": [{"user": "nobody"}]}))
     document.symlink_to(elsewhere)
-    linked = box.run("profile", "apply-staged", extra_env={"SUDO_UID": "2"})
+    linked = box.run("profile", "apply-staged", extra_env=household)
     assert linked.returncode == 1, linked.stdout
     assert "symbolic link" in linked.stderr, linked.stderr
+
+
+def check_a_push_stands_back_from_a_hand_made_profile(box):
+    """The difference between an emergency exit and a loan.
+
+    The tiebreak says the most recent written wins, and a manager pushes on a
+    schedule -- so recency favours the central by construction. An
+    administrator who fixes something by hand at two o'clock would be
+    overwritten by the routine push at five past, with nobody deciding and
+    nobody told. omahouse is installed whole on every machine so that somebody
+    can sit down and fix it with the central unreachable, and a fix the next
+    cycle erases was not a fix.
+
+    It is also what makes a merge possible. A push that overwrote blind would
+    destroy the evidence before anybody could be asked, and the merge would
+    list nothing -- forever, and without looking wrong, because nothing is the
+    ordinary answer.
+    """
+    # `daemon` stands in for the household's node account, on both sides: it is
+    # who `sudo` says asked, and who omahouse thinks the account is.
+    household = {"SUDO_UID": "2", "OMAHOUSE_OMAKURE_USER": "daemon"}
+    stage = box.config / "staged"
+    stage.mkdir(parents=True, exist_ok=True)
+
+    def push(display, supersedes=None):
+        document = {"schemaVersion": 2,
+                    "profiles": [{"user": "nobody", "displayName": display}]}
+        if supersedes is not None:
+            document["supersedes"] = supersedes
+        (stage / "profile.json").write_text(json.dumps(document))
+        return box.run("profile", "apply-staged", extra_env=household)
+
+    def local():
+        for one in json.loads((box.config / "profiles.json").read_text())["profiles"]:
+            if one["user"] == "nobody":
+                return one
+        return None
+
+    box.write_profiles({"schemaVersion": 2, "profiles": []})
+
+    # Nothing here yet: there is nothing to overwrite.
+    assert push("From the manager").returncode == 0
+    assert local()["displayName"] == "From the manager"
+
+    # The last write here was a push, so the central knows what it replaces.
+    assert push("From the manager again").returncode == 0
+    assert local()["displayName"] == "From the manager again"
+
+    # Now a person changes it on this machine.
+    assert box.run("profile", "remove", "nobody", "--keep-account").returncode == 0
+    assert box.run("profile", "add", "nobody", "--name", "By hand").returncode == 0
+    by_hand = local()
+    assert by_hand["writtenBy"] != "daemon", by_hand
+
+    # The routine push stands back, and says what it found and what to do.
+    stood = push("From the manager once more")
+    assert stood.returncode == 1, stood.stdout
+    assert "last changed by" in stood.stderr, stood.stderr
+    assert "does not say it is replacing" in stood.stderr, stood.stderr
+    assert local()["displayName"] == "By hand", local()
+
+    # A push that says which local version it is replacing goes through: that
+    # is somebody on the manager having looked at this one and decided, which
+    # is the second pass of a merge and the only way a hand-made profile is
+    # replaced.
+    resolved = push("Resolved", supersedes=by_hand)
+    assert resolved.returncode == 0, resolved.stderr
+    assert local()["displayName"] == "Resolved", local()
+
+    # And a resolution that has gone stale is refused: the machine changed
+    # between the manager looking and the manager deciding, so what was
+    # approved is not what is here.
+    #
+    # It is the *content* that is compared and not the stamp, and the first
+    # attempt compared the stamp: it has a second's resolution, this case runs
+    # in far less than one, and the stale push sailed through looking current.
+    assert box.run("profile", "remove", "nobody", "--keep-account").returncode == 0
+    assert box.run("profile", "add", "nobody", "--name", "Changed again").returncode == 0
+    stale = push("Stale", supersedes=by_hand)
+    assert stale.returncode == 1, stale.stdout
+    assert local()["displayName"] == "Changed again", local()
 
 
 def check_a_profile_travels_out_and_back_as_the_same_bytes(box):
@@ -3725,6 +3809,7 @@ def main():
         check_the_rules_for_anybody_are_readable_by_whoever_they_bind,
         check_the_verb_writes_the_profile_for_anybody,
         check_a_pushed_profile_comes_in_through_the_stage,
+        check_a_push_stands_back_from_a_hand_made_profile,
         check_a_profile_travels_out_and_back_as_the_same_bytes,
         check_it_refuses_a_profile_for_an_administrator,
         check_it_refuses_to_write_without_privilege,
