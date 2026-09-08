@@ -189,8 +189,11 @@ urgent colour, a budget running out, a warning that was delivered, and the grant
 in the accent colour. It is **one list**, so `j` and `k` walk the whole of it
 without a key to get into a panel.
 
-On the computer that manages the household, every budget row carries a second
-line under its own: **the house.** `session: 2h` is two hours in the household
+On the computer that manages the household, **and once there is another
+computer written down in `machines.json`**, every budget row carries a second
+line under its own: **the house.** A manager with nobody else on its list is a
+household of one, and a line adding that up would say `here` twice.
+`session: 2h` is two hours in the household
 and not two hours per computer — so a manager that drew only the machine it is
 sitting at was showing a third of somebody's evening as the whole of it. The
 line reads `the house: 1h40m spent · 30m left · here 1h10m · the kitchen laptop
