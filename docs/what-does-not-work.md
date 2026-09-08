@@ -103,7 +103,10 @@ are always in it. It is reported rather than hidden.
 
 **A session budget that is already running with nothing on screen.** The session
 is the budget whose selector is `*`, and Omarchy's own utilities are live app
-scopes from login onwards. See 5 above.
+scopes from login onwards. What is held out of `*` is the session's own
+furniture — `udiskie` and `omarchy-hyprland-monitor-watch`, which are not
+evidence that anybody is at the keyboard. Everything else somebody opened is,
+and it counts from login. [`design.md` §5](design.md) has the argument.
 
 **A blocked site with no count of attempts and no message on it.** A managed
 policy blocks inside Chromium and reports nothing out, so omahouse never learns
