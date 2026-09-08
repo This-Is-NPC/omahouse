@@ -102,7 +102,9 @@ measured the meter end to end deliberately did not exercise either.
 
 [**Profiles across a network**](profiles-across-a-network.md) is what it would
 take for one omahouse to govern many machines and many people: a lan house, an
-office, a lab. It was decided on 2026-09-08 and **none of it is built**.
+office, a lab. It was decided on 2026-09-08, and **all of it is unbuilt except
+the second clock**: a budget can now be anchored at the login and the ledger
+carries the sitting, while nothing reads logind and no verb writes `resets`.
 
 The engine is already general — [`design.md` §4](../design.md) says the same
 schema with `default: "allow"` is a focus profile for an adult — so the page is
