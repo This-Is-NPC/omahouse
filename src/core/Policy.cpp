@@ -32,9 +32,34 @@ Event stamp(EventKind kind, const QDateTime &now)
     return event;
 }
 
-bool anyLiveScopeMatches(const QVector<AppScope> &live, const QString &selector)
+/// Whether any of a budget's names is open right now.
+///
+/// Once for the whole budget, however many of its names are running: two
+/// Chromium scopes under one budget spend one second per second, exactly as 21
+/// processes in one scope always did.
+bool anyLiveScopeMatches(const QVector<AppScope> &live, const QStringList &selectors)
 {
-    for (const AppScope &scope : live) {
+    for (const QString &selector : selectors) {
+        for (const AppScope &scope : live) {
+            if (selectorMatches(selector, scope.id, scope.dominantExe))
+                return true;
+        }
+    }
+    return false;
+}
+
+bool anySelectorMatches(const QStringList &selectors, const QString &name)
+{
+    for (const QString &selector : selectors) {
+        if (selectorMatches(selector, name))
+            return true;
+    }
+    return false;
+}
+
+bool anySelectorMatches(const QStringList &selectors, const AppScope &scope)
+{
+    for (const QString &selector : selectors) {
         if (selectorMatches(selector, scope.id, scope.dominantExe))
             return true;
     }
@@ -162,10 +187,9 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
         if (budget.id.isEmpty())
             continue;
         const bool spending = budget.isSite()
-            ? (!siteInFront.isEmpty() && selectorMatches(budget.match, siteInFront))
+            ? (!siteInFront.isEmpty() && anySelectorMatches(budget.match, siteInFront))
             : anyLiveScopeMatches(billable, budget.match)
-                || (budget.match != QStringLiteral("*")
-                    && anyLiveScopeMatches(furniture, budget.match));
+                || (!budget.isSession() && anyLiveScopeMatches(furniture, budget.match));
         if (spending)
             outcome.ledger.addSeconds(budget.id, tick);
     }
@@ -263,15 +287,21 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
         // closes nothing and ends nobody's session, which is exactly what a
         // shared loop with an `if` in the middle of it would eventually do.
         if (budget.isSite()) {
-            Decision decision;
-            decision.kind = Decision::Kind::Block;
-            decision.reason = Decision::Reason::Exhausted;
-            decision.budgetId = budget.id;
-            // The selector, not the id: what the browser has to be told is the
-            // domain, and a budget called `web` matching `*` is a limit on
-            // browsing rather than on a site called web.
-            decision.site = budget.match;
-            outcome.decisions.append(decision);
+            // One Block per domain the budget names, because a Block is an
+            // instruction about one domain and the browser has to be told each
+            // of them. The same shape the app half has below, where one budget
+            // holding several scopes closes each of them by name.
+            for (const QString &domain : budget.match) {
+                Decision decision;
+                decision.kind = Decision::Kind::Block;
+                decision.reason = Decision::Reason::Exhausted;
+                decision.budgetId = budget.id;
+                // The selector, not the id: what the browser has to be told is
+                // the domain, and a budget called `web` matching `*` is a limit
+                // on browsing rather than on a site called web.
+                decision.site = domain;
+                outcome.decisions.append(decision);
+            }
             continue;
         }
 
@@ -292,7 +322,7 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
             // count a launcher's scope all day and close nothing at the end of
             // it. The unit named is the launcher's, because that is the cgroup
             // the program is really in.
-            if (!selectorMatches(budget.match, scope.id, scope.dominantExe))
+            if (!anySelectorMatches(budget.match, scope))
                 continue;
             Decision decision;
             decision.kind = Decision::Kind::Close;

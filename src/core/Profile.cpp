@@ -83,6 +83,51 @@ bool wantsInt(const QJsonObject &object, const QString &key, const QString &what
     return true;
 }
 
+/// A budget's `match`, which is one name or several.
+///
+/// A string and a one-element array read the same, because they mean the same
+/// thing and a file is allowed to have been written either way. What is refused
+/// is a list with nothing in it and a list with something that is not a name in
+/// it: a budget that matches nothing is a clock nobody can spend and nobody can
+/// see is unspendable, and repairing it into one that matches everything would
+/// be the worst possible guess.
+bool wantsNames(const QJsonObject &object, const QString &key, const QString &what,
+                QStringList *value, QString *error)
+{
+    const QJsonValue found = object.value(key);
+    if (found.isString()) {
+        *value = QStringList{found.toString()};
+        return true;
+    }
+    if (!found.isArray()) {
+        if (error) {
+            *error = found.isUndefined() || found.isNull()
+                ? QStringLiteral("%1 has no %2").arg(what, key)
+                : QStringLiteral("%1 has a %2 that is neither a name nor a list of names")
+                      .arg(what, key);
+        }
+        return false;
+    }
+    QStringList names;
+    for (const QJsonValue &entry : found.toArray()) {
+        if (!entry.isString()) {
+            if (error)
+                *error = QStringLiteral("%1 has a %2 list with something that is not a name in "
+                                        "it").arg(what, key);
+            return false;
+        }
+        names.append(entry.toString());
+    }
+    if (names.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("%1 has an empty %2, so it is about nothing")
+                         .arg(what, key);
+        return false;
+    }
+    *value = names;
+    return true;
+}
+
 /// The `rules` list of either half of a profile. `what` names the half in the
 /// message, because "has a rule with an unknown verdict" is only useful to
 /// somebody who is told which list said it.
@@ -290,10 +335,20 @@ QJsonObject Profile::toJson() const
 
     QJsonArray budgetArray;
     for (const Budget &budget : budgets) {
-        QJsonObject object{
-            {QStringLiteral("id"), budget.id},
-            {QStringLiteral("match"), budget.match},
-        };
+        QJsonObject object{{QStringLiteral("id"), budget.id}};
+        // One name is written as a plain string, and only two or more become an
+        // array. `["chromium"]` and `"chromium"` mean the same thing to the
+        // reader below, and writing the first would rewrite every profiles.json
+        // there is to say what it already said -- the discipline `kind`,
+        // `presence` and `sites` keep for the same reason.
+        if (budget.match.size() == 1) {
+            object.insert(QStringLiteral("match"), budget.match.constFirst());
+        } else {
+            QJsonArray names;
+            for (const QString &name : budget.match)
+                names.append(name);
+            object.insert(QStringLiteral("match"), names);
+        }
         // Written only when it is `site`. Absent is `app`, which is every budget
         // written before sites had one, and putting `"kind": "app"` into all of
         // them would rewrite every profiles.json there is to say what it already
@@ -439,7 +494,7 @@ bool Profile::fromJson(const QJsonObject &object, Profile *out, QString *error)
         Budget budget;
         if (!wantsString(entry, QStringLiteral("id"), named, &budget.id, true, error))
             return false;
-        if (!wantsString(entry, QStringLiteral("match"), named, &budget.match, true, error))
+        if (!wantsNames(entry, QStringLiteral("match"), named, &budget.match, error))
             return false;
         if (!wantsInt(entry, QStringLiteral("dailyMinutes"), named, &budget.dailyMinutes, error))
             return false;

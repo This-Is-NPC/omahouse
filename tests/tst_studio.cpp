@@ -1498,13 +1498,13 @@ void TestStudio::seedTheExampleHousehold()
     QCOMPARE(profiles.size(), 1);
     QString session, code, firefox, youtube;
     for (const Budget &budget : profiles.first().budgets) {
-        if (budget.match == QLatin1String("*"))
+        if (budget.isSession())
             session = budget.id;
-        else if (budget.match == QLatin1String("code"))
+        else if (budget.match.contains(QLatin1String("code")))
             code = budget.id;
-        else if (budget.match == QLatin1String("firefox"))
+        else if (budget.match.contains(QLatin1String("firefox")))
             firefox = budget.id;
-        else if (budget.isSite() && budget.match == QLatin1String("youtube.com"))
+        else if (budget.isSite() && budget.match.contains(QLatin1String("youtube.com")))
             youtube = budget.id;
     }
     QVERIFY2(!session.isEmpty() && !code.isEmpty() && !firefox.isEmpty() && !youtube.isEmpty(),
@@ -1651,7 +1651,7 @@ void TestStudio::theTodayViewAddsUpTheHouse()
     QCOMPARE(profiles.size(), 1);
     QString session;
     for (const Budget &budget : profiles.first().budgets) {
-        if (budget.match == QLatin1String("*"))
+        if (budget.isSession())
             session = budget.id;
     }
     QVERIFY2(!session.isEmpty(), "the fixture has no session budget to add up");

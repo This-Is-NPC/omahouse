@@ -2,6 +2,7 @@
 
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 namespace omahouse {
@@ -134,8 +135,26 @@ struct Web {
 
 struct Budget {
     QString id;
-    QString match;
-    /// Whether `match` is an app's scope id or a site's registrable domain.
+    /// Every name this one budget is about, in the order they were written.
+    ///
+    /// A list rather than a name, because one program is not always one id. A
+    /// single Chromium window on real Omarchy produces two scopes -- `chromium`,
+    /// holding the child processes, and `org.chromium.Chromium`, holding the
+    /// one that owns the window -- and two budgets of 45 minutes each is not a
+    /// browser limited to 45 minutes. It is two clocks that run together, and
+    /// whoever writes only one of them leaves half the browser with no limit at
+    /// all and no way to see that from the file.
+    ///
+    /// It is spent once per tick however many of its names are open, which is
+    /// the same rule as before: `anyLiveScopeMatches` asks whether *anything*
+    /// matches, and 21 processes in one Chromium never spent 21 seconds either.
+    ///
+    /// Written as a plain string when there is one of them, and only then as an
+    /// array. That is docs/design.md §4's discipline for `kind`, `presence` and
+    /// `sites`: a file that already says what it means is not rewritten to say
+    /// it differently.
+    QStringList match;
+    /// Whether `match` is a list of app scope ids or of registrable domains.
     ///
     /// The whole of what a site budget adds to the model. Everything else about
     /// it -- the daily limit, the grants, `warnAt`, `grace`, the notification,
@@ -153,6 +172,11 @@ struct Budget {
 
     bool hasLimit() const { return dailyMinutes > 0; }
     bool isSite() const { return selects == Selects::Site; }
+    /// The budget whose selector is everything -- docs/design.md §2's whole
+    /// argument for there being no separate idea of "the user's time". A list
+    /// containing `*` is that budget whatever else is beside it, because `*`
+    /// already matches everything the other names would.
+    bool isSession() const { return match.contains(QStringLiteral("*")); }
 };
 
 /// Whether an action is one this kind of budget can carry out.

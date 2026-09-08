@@ -483,9 +483,30 @@ bool loadLedger(const QString &user, const QDate &date, Ledger *ledger, bool *mi
 
 // -- what a budget looks like right now --------------------------------------
 
+/// Every name a budget is about, in one line for a person to read. A budget
+/// holding `chromium` and `org.chromium.Chromium` is one browser and one clock,
+/// and a table that showed only the first would be hiding half of what the
+/// number covers.
+QString namesSpelled(const QStringList &names)
+{
+    return names.join(QStringLiteral(", "));
+}
+
+/// The same for a machine, in the shape the file uses: a name on its own, or a
+/// list once there are two. One rule to remember rather than two.
+QJsonValue namesToJson(const QStringList &names)
+{
+    if (names.size() == 1)
+        return QJsonValue(names.constFirst());
+    QJsonArray array;
+    for (const QString &name : names)
+        array.append(name);
+    return array;
+}
+
 struct Balance {
     QString id;
-    QString match;
+    QStringList match;
     /// Below zero when the budget has no limit: it counts and never runs out.
     int limitSeconds = -1;
     int grantedSeconds = 0;
@@ -542,7 +563,7 @@ QJsonArray balancesToJson(const QVector<Balance> &balances)
     for (const Balance &balance : balances) {
         QJsonObject object {
             {QStringLiteral("id"), balance.id},
-            {QStringLiteral("match"), balance.match},
+            {QStringLiteral("match"), namesToJson(balance.match)},
             {QStringLiteral("usedSeconds"), balance.usedSeconds},
             {QStringLiteral("grantedSeconds"), balance.grantedSeconds},
             {QStringLiteral("onExhausted"), onExhaustedName(balance.onExhausted)},
@@ -2645,7 +2666,7 @@ int cmdProfileShow(const Globals &g, const QStringList &positionals)
         out() << "\nBUDGETS\n";
         QVector<QStringList> rows;
         for (const Budget &budget : profile->budgets) {
-            rows.append({budget.id, budget.match,
+            rows.append({budget.id, namesSpelled(budget.match),
                          budget.hasLimit() ? humanDuration(budget.dailyMinutes * 60) : kNothing,
                          budget.hasLimit() ? whenOut(budget.onExhausted)
                                            : QStringLiteral("never runs out")});
@@ -3177,16 +3198,33 @@ int cmdProfile(const Globals &g, const QStringList &positionals, const Options &
 int cmdRule(const Globals &g, const QString &verb, const QStringList &positionals,
             const Options &options, Verdict verdict)
 {
-    if (positionals.size() != 2) {
+    if (positionals.size() < 2) {
         fail(QStringLiteral("%1: which user, and which app? (try omahouse --help)").arg(verb));
         return kUsage;
     }
     const QString user = positionals.at(0);
-    const QString id = positionals.at(1);
-    if (id.startsWith(QLatin1Char('-'))) {
-        fail(QStringLiteral("%1: '%2' does not look like an app id").arg(verb, id));
-        return kUsage;
+
+    // Several apps in one command, because one program is not always one id.
+    // A single Chromium window produces `chromium` and `org.chromium.Chromium`,
+    // and two commands with the same number in them is two clocks that anybody
+    // can half-write -- which leaves half a browser with no limit at all.
+    QStringList ids;
+    for (const QString &id : positionals.mid(1)) {
+        if (id.startsWith(QLatin1Char('-'))) {
+            fail(QStringLiteral("%1: '%2' does not look like an app id").arg(verb, id));
+            return kUsage;
+        }
+        // Said rather than folded away. Somebody who typed a name twice meant
+        // something by it, and the thing they most likely meant -- two ids --
+        // is not what they typed.
+        if (ids.contains(id)) {
+            fail(QStringLiteral("%1: '%2' is named twice, and one budget cannot be about it "
+                                "twice").arg(verb, id));
+            return kUsage;
+        }
+        ids.append(id);
     }
+    const QString id = ids.constFirst();
 
     // `allow ... --limit 45m` is sugar, and docs/design.md §7 says why: the rule and the
     // budget are one thought at the moment somebody is configuring, and making
@@ -3212,34 +3250,68 @@ int cmdRule(const Globals &g, const QString &verb, const QStringList &positional
     if (!profile)
         return status;
 
-    ruleFor(profile, id)->verdict = verdict;
+    // One rule per app -- the rules are read one at a time and an operator has
+    // to be able to take one of them back on its own.
+    for (const QString &one : ids)
+        ruleFor(profile, one)->verdict = verdict;
     if (limited) {
+        // And one budget for all of them, which is the difference. The budget
+        // is named after the first app, because that is the name somebody
+        // typed first and the handle `limit --budget` and `grant --budget`
+        // take.
         Budget *budget = budgetFor(profile, id);
         if (!budget) {
             // The budget of an app closes that app when it runs out. The one
             // that logs the session out is the session's, and it is written by
             // `omahouse limit --session`.
             profile->budgets.append(
-                Budget {id, id, Selects::App, minutes, OnExhausted::Close});
+                Budget {id, ids, Selects::App, minutes, OnExhausted::Close});
         } else {
             budget->dailyMinutes = minutes;
+            // The names too, or `allow kid chromium org.chromium.Chromium
+            // --limit 45m` run over an existing one-name budget would say it
+            // covered the browser and cover half of it.
+            budget->match = ids;
         }
     }
     if (!saveProfiles(verb, profiles.all))
         return kUsage;
 
-    if (verdict == Verdict::Allow)
-        warnAboutWhatIsInside(user, id);
+    if (verdict == Verdict::Allow) {
+        for (const QString &one : ids)
+            warnAboutWhatIsInside(user, one);
+    }
+
+    // The apps as they were typed, so the line reads back as the command. `and`
+    // before the last, because `chromium, org.chromium.Chromium allowed` reads
+    // like one id with a comma in it.
+    QString named = ids.constFirst();
+    for (int i = 1; i < ids.size(); ++i) {
+        named += (i + 1 == ids.size() ? QStringLiteral(" and ") : QStringLiteral(", "))
+            + ids.at(i);
+    }
+    const bool several = ids.size() > 1;
 
     QString line;
     if (verdict == Verdict::Deny) {
-        line = QStringLiteral("%1: %2 is not allowed to run.").arg(user, id);
+        line = QStringLiteral("%1: %2 %3 not allowed to run.")
+                   .arg(user, named, several ? QStringLiteral("are") : QStringLiteral("is"));
     } else if (limited) {
-        line = QStringLiteral("%1: %2 allowed, %3 a day, and it closes when the time is out.")
-                   .arg(user, id, durationFromMinutes(minutes));
+        // `between them` is the whole point of the plural line: one number for
+        // several names is not the same offer as that number each, and this is
+        // the sentence somebody reads back to check which one they made.
+        line = several
+            ? QStringLiteral("%1: %2 allowed, %3 a day between them, and they close when the "
+                             "time is out.")
+                  .arg(user, named, durationFromMinutes(minutes))
+            : QStringLiteral("%1: %2 allowed, %3 a day, and it closes when the time is out.")
+                  .arg(user, named, durationFromMinutes(minutes));
     } else {
-        line = QStringLiteral("%1: %2 allowed. No limit of its own, so it spends the session's.")
-                   .arg(user, id);
+        line = several
+            ? QStringLiteral("%1: %2 allowed. No limit of their own, so they spend the "
+                             "session's.").arg(user, named)
+            : QStringLiteral("%1: %2 allowed. No limit of its own, so it spends the "
+                             "session's.").arg(user, named);
     }
     return wrote(g, *profile, line);
 }
@@ -3606,7 +3678,7 @@ int cmdLimit(const Globals &g, const QStringList &positionals, const Options &op
 
     Budget *budget = budgetFor(profile, id);
     if (!budget) {
-        profile->budgets.append(Budget {id, match, selects, minutes, whenGone});
+        profile->budgets.append(Budget {id, {match}, selects, minutes, whenGone});
         budget = &profile->budgets.last();
     } else if (budget->selects != selects) {
         // One id, one thing. `org.freedesktop.Platform` is a scope id with dots
@@ -5136,8 +5208,10 @@ Writing, and root needed — the studio gets there by pkexec:
   profile remove <user> [--keep-account]
   profile enforce <user> --on | --off
   profile default <user> --allow | --deny
-  allow <user> <app> [--limit 45m]   let it run, and put it on the clock
-  deny  <user> <app>                 do not let it run
+  allow <user> <app>... [--limit 45m]  let them run; several apps is one
+                                       budget between them, which is what a
+                                       Chromium window's two ids need
+  deny  <user> <app>...                do not let them run
   limit <user> --session 2h | --budget minecraft=45m | --site youtube.com=30m
   allocation init|enroll|apply|plan|show <user>
       enroll: --node <authority> --name <machine>; apply reads JSON from stdin

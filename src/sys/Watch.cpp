@@ -127,7 +127,7 @@ QString whoseSiteBudget(const QVector<Profile> &profiles, const QString &domain)
 {
     for (const Profile &profile : profiles) {
         for (const Budget &budget : profile.budgets) {
-            if (budget.isSite() && budget.match == domain)
+            if (budget.isSite() && budget.match.contains(domain))
                 return profile.user;
         }
     }

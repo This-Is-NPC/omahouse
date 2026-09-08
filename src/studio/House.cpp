@@ -99,11 +99,15 @@ Live liveFor(const QVector<AppScope> &scopes, const QString &id)
     return live;
 }
 
-bool anythingMatching(const QVector<AppScope> &scopes, const QString &selector)
+/// Whether any of a budget's names is open right now -- the same question
+/// `Policy::evaluate` asks before debiting it, asked the same way.
+bool anythingMatching(const QVector<AppScope> &scopes, const QStringList &selectors)
 {
-    for (const AppScope &scope : scopes) {
-        if (scope.isLive() && selectorMatches(selector, scope.id, scope.dominantExe))
-            return true;
+    for (const QString &selector : selectors) {
+        for (const AppScope &scope : scopes) {
+            if (scope.isLive() && selectorMatches(selector, scope.id, scope.dominantExe))
+                return true;
+        }
     }
     return false;
 }
@@ -118,7 +122,7 @@ bool anythingMatching(const QVector<AppScope> &scopes, const QString &selector)
 const Budget *budgetFor(const Profile &profile, const QString &id, Selects selects)
 {
     for (const Budget &budget : profile.budgets) {
-        if (budget.match == id && budget.selects == selects)
+        if (budget.selects == selects && budget.match.contains(id))
             return &budget;
     }
     return nullptr;
@@ -288,10 +292,15 @@ QVariantList programsOf(const Profile &profile, const Ledger &ledger,
         // rules, an `x` that would have written `omahouse deny <user>
         // youtube.com`, and no way to tell it from a flatpak with dots in its
         // name. It belongs on the sites view, which is where `sitesOf` puts it.
-        if (budget.match == QLatin1String("*") || budget.isSite())
+        if (budget.isSession() || budget.isSite())
             continue;
-        if (!ids.contains(budget.match))
-            ids << budget.match;
+        // Every name the budget holds, because a budget about two ids is two
+        // rows on this list and one clock: whoever is looking for `chromium`
+        // and whoever is looking for `org.chromium.Chromium` both find it.
+        for (const QString &name : budget.match) {
+            if (!ids.contains(name))
+                ids << name;
+        }
     }
 
     QVariantList rows;
@@ -346,14 +355,14 @@ QVariantList todayOf(const Profile &profile, const Ledger &ledger,
     // The session first, whatever order it was written in: it is the answer to
     // "how much is left today", and the rest of the list is the breakdown.
     std::stable_sort(ordered.begin(), ordered.end(), [](const Budget &a, const Budget &b) {
-        const bool sessionA = a.match == QLatin1String("*");
-        const bool sessionB = b.match == QLatin1String("*");
+        const bool sessionA = a.isSession();
+        const bool sessionB = b.isSession();
         return sessionA != sessionB ? sessionA : false;
     });
 
     QVariantList rows;
     for (const Budget &budget : std::as_const(ordered)) {
-        const bool session = budget.match == QLatin1String("*");
+        const bool session = budget.isSession();
         // A site budget is never `running now`. What would make it so is the
         // domain in the front tab, and that is `/run/user/<uid>/omahouse/focus`,
         // 0600 in the fiscalised account's own runtime directory — this window
@@ -364,16 +373,24 @@ QVariantList todayOf(const Profile &profile, const Ledger &ledger,
                                   !budget.isSite() && anythingMatching(scopes, budget.match));
         row.insert(QStringLiteral("kind"), QStringLiteral("budget"));
         row.insert(QStringLiteral("id"), budget.id);
-        row.insert(QStringLiteral("match"), budget.match);
+        row.insert(QStringLiteral("match"), budget.match.join(QStringLiteral(", ")));
         row.insert(QStringLiteral("session"), session);
         // Which namespace the id is in, carried on the row because the verb that
         // changes it differs: `limit --budget` for an app and `limit --site` for
         // a domain, and the CLI refuses the wrong one rather than guessing.
         row.insert(QStringLiteral("site"), budget.isSite());
-        const QString named = catalogue.value(budget.match).name;
+        // Named after the first of its names, with the rest said beside it: a
+        // budget about `chromium` and `org.chromium.Chromium` is one browser
+        // and reads as one row.
+        const QString first = budget.match.value(0);
+        const QString named = catalogue.value(first).name;
+        const QString spelled = named.isEmpty() ? first : named;
         row.insert(QStringLiteral("name"),
                    session ? QStringLiteral("the whole day")
-                           : (named.isEmpty() ? budget.match : named));
+                           : (budget.match.size() > 1
+                                  ? QStringLiteral("%1 and %2 more").arg(spelled)
+                                        .arg(budget.match.size() - 1)
+                                  : spelled));
 
         const HouseBudget *added = nullptr;
         for (const HouseBudget &one : house) {
@@ -503,8 +520,10 @@ QVariantList sitesOf(const Profile &profile, const Ledger &ledger,
     for (const Rule &rule : profile.web.rules)
         mention(rule.match);
     for (const Budget &budget : profile.budgets) {
-        if (budget.isSite())
-            mention(budget.match);
+        if (!budget.isSite())
+            continue;
+        for (const QString &domain : budget.match)
+            mention(domain);
     }
     QVector<QPair<int, QString>> counted;
     for (auto it = ledger.sites.constBegin(); it != ledger.sites.constEnd(); ++it)

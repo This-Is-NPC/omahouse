@@ -396,13 +396,13 @@ private slots:
         Profile julia = person(QStringLiteral("julia"));
         Budget site;
         site.id = QStringLiteral("youtube.com");
-        site.match = QStringLiteral("youtube.com");
+        site.match = {QStringLiteral("youtube.com")};
         site.selects = Selects::Site;
         site.dailyMinutes = 30;
         site.onExhausted = OnExhausted::Block;
         Budget app;
         app.id = QStringLiteral("chromium");
-        app.match = QStringLiteral("chromium");
+        app.match = {QStringLiteral("chromium")};
         app.dailyMinutes = 45;
         app.onExhausted = OnExhausted::Close;
         julia.budgets = {site, app};

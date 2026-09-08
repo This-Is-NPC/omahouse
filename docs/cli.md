@@ -32,7 +32,7 @@ The identity of a running app is its systemd scope and not the path of its execu
 
   The shapes, by verb:
 
-  - `status` -- `user`, `uid`, `date`, `session`, `presence`, `profile` (the whole profile, or null), `scopes`, `unnamed`, `outOfReach` and `budgets`. `presence` is `present` (a boolean, or null when nothing could be read -- nobody there and nothing looked at must never read the same), `reason` (`using`, `screen-off`, `locked`, `other-session`, `no-session`, `unknown`), `screen`, `seatRead`, `seatUid`, and `today`, the seconds of the day spent in each state. A `scopes` entry is `id`, `unit`, `cgroup` and `processes`, plus `verdict` where there is a profile to give one, plus `exe`, `exeProcesses` and `exeAgrees` -- the executable most of its processes are running, how many of them are running it, and whether that backs up the id. `exe` and `exeAgrees` are null together when nothing in the scope could be read, which is no opinion and not a disagreement. `unnamed` is the same minus the id and the agreement, for a scope under `app.slice` whose unit name is not an app scope name. `outOfReach` is `processes` and the `units` they are in.
+  - `status` -- `user`, `uid`, `date`, `session`, `presence`, `profile` (the whole profile, or null), `scopes`, `unnamed`, `outOfReach` and `budgets`. A budget's `match` is a name on its own, or a list of names once there is more than one -- the same shape `profiles.json` uses, and one rule to remember rather than two. `presence` is `present` (a boolean, or null when nothing could be read -- nobody there and nothing looked at must never read the same), `reason` (`using`, `screen-off`, `locked`, `other-session`, `no-session`, `unknown`), `screen`, `seatRead`, `seatUid`, and `today`, the seconds of the day spent in each state. A `scopes` entry is `id`, `unit`, `cgroup` and `processes`, plus `verdict` where there is a profile to give one, plus `exe`, `exeProcesses` and `exeAgrees` -- the executable most of its processes are running, how many of them are running it, and whether that backs up the id. `exe` and `exeAgrees` are null together when nothing in the scope could be read, which is no opinion and not a disagreement. `unnamed` is the same minus the id and the agreement, for a scope under `app.slice` whose unit name is not an app scope name. `outOfReach` is `processes` and the `units` they are in.
   - `report` -- `user`, `since`, `until`, `days` and `totals`. A day is the ledger of `docs/design.md` §4 without its `schemaVersion` and `user`, both of which would be the same words on every day of the range.
   - `profile list` -- an array of `user`, `displayName`, `enabled`, `enforce`, `default`, and the counts of `rules` and `budgets`.
   - `profile show` -- the profile as `/etc/omahouse/profiles.json` holds it, including its `web` half when it has one.
@@ -428,7 +428,7 @@ Unpairing it in Omakure, and taking the rules off whoever lives there, are separ
 
 ## `omahouse allow`
 
-- **Usage:** `omahouse allow [--limit <duration>] <user> <app>`
+- **Usage:** `omahouse allow [--limit <duration>] <user> <app>…`
 
 Let an app run, and put it on the clock.
 
@@ -438,18 +438,20 @@ The app is named by the id of its scope, which is what `omahouse status` lists. 
 
 An app allowed without a limit of its own spends the session's budget and nothing else.
 
+Several apps at once is one budget between them, and it exists because one program is not always one id: a single Chromium window produces `chromium`, holding the child processes, and `org.chromium.Chromium`, holding the one that owns the window. `omahouse allow kid chromium org.chromium.Chromium --limit 45m` is a browser limited to 45 minutes; the same two commands run separately are two clocks of 45 minutes that happen to agree, and whoever writes only one of them leaves half the browser with no limit at all. Each app still gets a rule of its own, so one of them can be taken back on its own; the budget is named after the first, which is the handle `limit --budget` and `grant --budget` take. Run over a budget that already exists, it replaces both the number and the names.
+
 It warns, and does not refuse, when the id does not name one program. An app launched through a shim takes the shim's name -- `docs/design.md` round 4 found seven `gtk-launch` scopes on the development machine with VS Code inside every one of them -- so allowing that id is allowing whatever it launches next. The warning prints what is running inside the scopes that are open under it, and the rule is written anyway: it may be exactly what was meant, and a flatpak reads the same way for the opposite reason, since every flatpak on a machine runs `/usr/bin/bwrap`. Allowing the program's own name is usually what was meant and is enough -- a scope whose id is a launcher's is also matched by a rule naming what is running inside it. With nothing open under that id there is no evidence, and with no evidence there is nothing said.
 
 ### Arguments
 - **`<user>`**
-- **`<app>`** — The id of the app's scope, as `omahouse status` lists it
+- **`<app>…`** — The id of the app's scope, as `omahouse status` lists it. Several is one budget between them
 
 ### Flags
 - **`--limit <duration>`** — And no more than this a day: 45m, 2h, 1h30m
 
 ## `omahouse deny`
 
-- **Usage:** `omahouse deny <user> <app>`
+- **Usage:** `omahouse deny <user> <app>…`
 
 Do not let an app run.
 
@@ -457,9 +459,11 @@ The mirror of `allow`, and the way to take back a rule that was written by mista
 
 A budget written for that app is left where it is. The rule and the clock are two facts, and a program that is denied today may be allowed again tomorrow with the same limit it had.
 
+Several apps at once writes a rule for each, for the reason `allow` takes several: one program is not always one id, and a browser half denied is a browser.
+
 ### Arguments
 - **`<user>`**
-- **`<app>`**
+- **`<app>…`**
 
 ## `omahouse limit`
 

@@ -109,10 +109,10 @@ private slots:
 
         Budget session;
         session.id = QStringLiteral("session");
-        session.match = QStringLiteral("*");
+        session.match = {QStringLiteral("*")};
         Budget chromium;
         chromium.id = QStringLiteral("chromium");
-        chromium.match = QStringLiteral("chromium");
+        chromium.match = {QStringLiteral("chromium")};
         profile.budgets = {session, chromium};
 
         // One Chromium window with its twenty one processes, a second Chromium
@@ -153,7 +153,7 @@ private slots:
         profile.enforce = true;
         Budget session;
         session.id = QStringLiteral("session");
-        session.match = QStringLiteral("*");
+        session.match = {QStringLiteral("*")};
         session.dailyMinutes = 120;
         session.onExhausted = OnExhausted::Logout;
         profile.budgets = {session};
@@ -206,7 +206,7 @@ private slots:
         QCOMPARE(julia.rules.at(0).verdict, Verdict::Allow);
         QCOMPARE(julia.budgets.size(), 3);
         QCOMPARE(julia.budgets.at(0).id, QStringLiteral("session"));
-        QCOMPARE(julia.budgets.at(0).match, QStringLiteral("*"));
+        QCOMPARE(julia.budgets.at(0).match, QStringList{QStringLiteral("*")});
         QCOMPARE(julia.budgets.at(0).dailyMinutes, 120);
         QCOMPARE(julia.budgets.at(0).onExhausted, OnExhausted::Logout);
         QCOMPARE(julia.budgets.at(1).onExhausted, OnExhausted::Close);
@@ -224,7 +224,7 @@ private slots:
         counted.user = QStringLiteral("howl");
         Budget watched;
         watched.id = QStringLiteral("chromium");
-        watched.match = QStringLiteral("chromium");
+        watched.match = {QStringLiteral("chromium")};
         counted.budgets = {watched};
         Profile reread;
         QVERIFY2(Profile::fromJson(counted.toJson(), &reread, &error), qPrintable(error));

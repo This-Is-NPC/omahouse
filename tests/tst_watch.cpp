@@ -256,11 +256,11 @@ private:
         profile.warnAt = {10, 5, 1};
         profile.graceSeconds = 20;
         profile.budgets = {
-            Budget {QStringLiteral("session"), QStringLiteral("*"), Selects::App, 120,
+            Budget {QStringLiteral("session"), {QStringLiteral("*")}, Selects::App, 120,
                     OnExhausted::Logout},
-            Budget {QStringLiteral("chromium"), QStringLiteral("chromium"), Selects::App, 45,
+            Budget {QStringLiteral("chromium"), {QStringLiteral("chromium")}, Selects::App, 45,
                     OnExhausted::Close},
-            Budget {QStringLiteral("code"), QStringLiteral("code"), Selects::App, 0,
+            Budget {QStringLiteral("code"), {QStringLiteral("code")}, Selects::App, 0,
                     OnExhausted::Warn},
         };
         return profile;
@@ -1088,7 +1088,7 @@ private slots:
         withASite.graceSeconds = 0;
         Budget site;
         site.id = QStringLiteral("youtube.com");
-        site.match = QStringLiteral("youtube.com");
+        site.match = {QStringLiteral("youtube.com")};
         site.selects = Selects::Site;
         site.dailyMinutes = 1;
         site.onExhausted = OnExhausted::Block;
@@ -1177,7 +1177,7 @@ private slots:
         withASite.graceSeconds = 0;
         Budget site;
         site.id = QStringLiteral("youtube.com");
-        site.match = QStringLiteral("youtube.com");
+        site.match = {QStringLiteral("youtube.com")};
         site.selects = Selects::Site;
         site.dailyMinutes = 1;
         site.onExhausted = OnExhausted::Block;
@@ -1233,7 +1233,7 @@ private slots:
         withASite.graceSeconds = 0;
         Budget site;
         site.id = QStringLiteral("youtube.com");
-        site.match = QStringLiteral("youtube.com");
+        site.match = {QStringLiteral("youtube.com")};
         site.selects = Selects::Site;
         site.dailyMinutes = 1;
         site.onExhausted = OnExhausted::Block;

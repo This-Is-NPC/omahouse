@@ -62,7 +62,8 @@ Ledger startOfDay(const QString &user = QStringLiteral("julia"))
     return ledger;
 }
 
-Budget budget(const QString &id, const QString &match, int dailyMinutes, OnExhausted onExhausted)
+Budget budget(const QString &id, const QStringList &match, int dailyMinutes,
+              OnExhausted onExhausted)
 {
     Budget entry;
     entry.id = id;
@@ -70,6 +71,14 @@ Budget budget(const QString &id, const QString &match, int dailyMinutes, OnExhau
     entry.dailyMinutes = dailyMinutes;
     entry.onExhausted = onExhausted;
     return entry;
+}
+
+/// The ordinary case: a budget about one name. Two or more is the browser, and
+/// the overload above is what says so.
+Budget budget(const QString &id, const QString &match, int dailyMinutes,
+              OnExhausted onExhausted)
+{
+    return budget(id, QStringList{match}, dailyMinutes, onExhausted);
 }
 
 // The same noun with the other kind of selector -- docs/design.md §2. Written as
@@ -994,6 +1003,7 @@ private slots:
                 QCOMPARE(decision.scopeUnit, menu.unit);
         }
     }
+
 };
 
 int runPolicyTests(int argc, char **argv)

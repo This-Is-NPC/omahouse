@@ -25,7 +25,7 @@ private slots:
         profile.user = "kid";
         profile.allocation = QJsonObject{{"authority", "manager"}, {"machine", "here"}};
         Budget budget;
-        budget.id = "session"; budget.match = "*"; budget.dailyMinutes = 120;
+        budget.id = "session"; budget.match = {QStringLiteral("*")}; budget.dailyMinutes = 120;
         budget.onExhausted = OnExhausted::Logout;
         profile.budgets << budget;
         const QDateTime now(QDate(2026, 9, 7), QTime(12, 0), QTimeZone::UTC);
@@ -85,7 +85,7 @@ private slots:
         Profile profile;
         profile.user = "kid"; profile.enforce = true;
         Budget budget;
-        budget.id = "session"; budget.match = "*"; budget.dailyMinutes = 120;
+        budget.id = "session"; budget.match = {QStringLiteral("*")}; budget.dailyMinutes = 120;
         budget.onExhausted = OnExhausted::Logout;
         profile.budgets << budget;
         const QDateTime now(QDate(2026, 9, 7), QTime(12, 0), QTimeZone::UTC);
@@ -217,7 +217,7 @@ private slots:
         profile.user = QStringLiteral("kid");
         Budget session;
         session.id = QStringLiteral("session");
-        session.match = QStringLiteral("*");
+        session.match = {QStringLiteral("*")};
         session.dailyMinutes = 120;
         profile.budgets << session;
 
