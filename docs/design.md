@@ -1371,6 +1371,6 @@ credit and balance, and their age. It never turns an HTTP launch into proof of a
 The host gate exercises arithmetic, refusals and keyboard/mouse interaction.
 The Battery's `.scripts/test-sync.py` uses real CLI processes with disposable
 file roots for retries, partial delivery, readback, offline peers and overlap.
-The VM case `a_battery_schedule_reserves_household_credit` exercises actual
+The VM case `a_battery_schedule_shares_one_balance` exercises actual
 Omakure scheduled history, paired HTTP transport, repeated runs, restart, an
 offline machine and a subsequent grant in two disposable guests.

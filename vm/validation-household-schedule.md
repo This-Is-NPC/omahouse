@@ -1,5 +1,14 @@
 # Household scheduling validation — 2026-09-07
 
+> **This is the record of a run that happened, and it describes behaviour
+> omahouse no longer has.** On 2026-09-08 the per-machine portion was replaced
+> by one household balance every computer is told, so the assertions below about
+> issued documents *totalling* 7,200s and about reserved credit surviving an
+> offline peer are about the model of the day this was written. The case itself
+> was renamed to `a_battery_schedule_shares_one_balance` and its assertions
+> changed with the behaviour. Nothing here has been edited to agree with the new
+> model: a record rewritten to match what shipped later is not a record.
+
 The feature was exercised from the local working trees of omahouse and
 omahouse-battery. The implementation is recorded in omahouse `5221fe8` and
 omahouse-battery `ff26a04`. Nothing was published or installed as a host service.
