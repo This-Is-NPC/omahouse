@@ -5,6 +5,7 @@
 #include "AppScope.h"
 #include "Catalog.h"
 #include "Duration.h"
+#include "Kind.h"
 #include "Ledger.h"
 #include "Paths.h"
 #include "Policy.h"
@@ -169,6 +170,45 @@ QVariantList fleetRows(const Profile &profile, const Ledger &local, const QDateT
     return rows;
 }
 
+/// The household's day, added up exactly the way `omahouse house` adds it up.
+///
+/// The profile's number is the household's number -- Fleet.h says it and
+/// `consolidate` is where the arithmetic lives, so this reaches for that
+/// function rather than growing a second copy of it that could disagree with
+/// the verb an operator checks against.
+///
+/// A machine whose day is not in `<stateDir>/elsewhere/` is left out of the sum
+/// and named in `notHeardFrom`, which is the CLI's own discipline: a total
+/// quietly missing a computer is worse than no total at all. An unreadable day
+/// is the same for the sum and also says so on the status bar, because a file
+/// that is there and will not parse is not the same fact as a machine that has
+/// sent nothing.
+QVector<HouseBudget> houseOf(const Profile &profile, const Ledger &local,
+                             const QVector<Machine> &machines, const QDate &today,
+                             QStringList *notHeardFrom, QString *error)
+{
+    // `here` and not a hostname, for the reason `cmdHouse` gives: the
+    // household's word for a computer is in `machines.json`, and the one you
+    // are sitting at has not necessarily been written down.
+    QVector<QPair<QString, Ledger>> days{{QStringLiteral("here"), local}};
+    for (const Machine &machine : machines) {
+        Ledger theirs;
+        QString why;
+        bool absent = false;
+        const QString path = paths::elsewhereLedgerFile(machine.name, profile.user, today);
+        if (!readLedger(path, &theirs, &why, &absent) || absent) {
+            notHeardFrom->append(machine.name);
+            if (!absent && error && error->isEmpty()) {
+                *error = QStringLiteral("%1's day from %2: %3")
+                             .arg(profile.user, machine.name, why);
+            }
+            continue;
+        }
+        days.append({machine.name, theirs});
+    }
+    return consolidate(profile, days);
+}
+
 /// A local clock uses its received portion when enrolled; grants await a plan.
 QVariantMap clockOf(const Profile &profile, const Budget &budget, const Ledger &ledger, bool running)
 {
@@ -278,9 +318,24 @@ QVariantList programsOf(const Profile &profile, const Ledger &ledger,
     return rows;
 }
 
+/// The day, and -- on the machine that manages the household -- the house's day
+/// beside it.
+///
+/// `house` is a whole set of empties when there is nothing to add up, rather
+/// than absent: a row of this list is read by QML, where a missing key and a
+/// key that says no are the same `undefined` and the difference between them is
+/// the difference between "this household has one computer" and "somebody
+/// forgot to fill this in".
+///
+/// What is left *here* is untouched by any of it. This machine goes on
+/// enforcing its own number against its own ledger -- docs/design.md's whole
+/// argument for a managed machine being complete on its own -- and the house's
+/// total is a thing the window says, not a thing the machine does differently
+/// because it was said.
 QVariantList todayOf(const Profile &profile, const Ledger &ledger,
                      const QVector<AppScope> &scopes,
-                     const QHash<QString, DesktopApp> &catalogue)
+                     const QHash<QString, DesktopApp> &catalogue,
+                     const QVector<HouseBudget> &house, const QStringList &notHeardFrom)
 {
     QVector<Budget> ordered = profile.budgets;
     // The session first, whatever order it was written in: it is the answer to
@@ -314,6 +369,29 @@ QVariantList todayOf(const Profile &profile, const Ledger &ledger,
         row.insert(QStringLiteral("name"),
                    session ? QStringLiteral("the whole day")
                            : (named.isEmpty() ? budget.match : named));
+
+        const HouseBudget *added = nullptr;
+        for (const HouseBudget &one : house) {
+            if (one.id == budget.id)
+                added = &one;
+        }
+        QStringList where;
+        if (added) {
+            for (const Contribution &one : added->spent)
+                where.append(QStringLiteral("%1 %2").arg(one.machine, spellSeconds(one.seconds)));
+        }
+        row.insert(QStringLiteral("house"), added != nullptr);
+        row.insert(QStringLiteral("houseLimited"), added && added->hasLimit());
+        row.insert(QStringLiteral("houseSpentSeconds"), added ? added->totalSeconds : 0);
+        row.insert(QStringLiteral("houseSpent"),
+                   added ? spellSeconds(added->totalSeconds) : QString());
+        row.insert(QStringLiteral("houseLeftSeconds"),
+                   added && added->hasLimit() ? added->leftSeconds() : 0);
+        row.insert(QStringLiteral("houseLeft"),
+                   added && added->hasLimit() ? spellSeconds(added->leftSeconds()) : QString());
+        row.insert(QStringLiteral("houseWhere"), where.join(QStringLiteral(" · ")));
+        row.insert(QStringLiteral("notHeardFrom"),
+                   added ? notHeardFrom.join(QStringLiteral(", ")) : QString());
         rows.append(row);
     }
 
@@ -713,6 +791,31 @@ void House::refresh()
     const QDateTime when = QDateTime::currentDateTime();
     const QDate today = when.date();
 
+    // Where this machine stands in the household, and the list of the others.
+    //
+    // Both are read once, outside the loop over profiles: they are facts about
+    // the computer and not about anybody's account. A machine that is `Alone`
+    // or `Managed` reads neither list and adds nothing up -- `house` is the
+    // manager's question (Kind.h), and a managed machine drawing a household
+    // total would be drawing it out of days it is not the one that collects.
+    ThisMachine here;
+    QString machineError;
+    bool noMachineFile = false;
+    if (!readThisMachine(paths::thisMachineFile(), &here, &machineError, &noMachineFile)
+        && !noMachineFile && error.isEmpty()) {
+        error = QStringLiteral("machine: %1").arg(machineError);
+    }
+    QVector<Machine> household;
+    if (here.kind == Kind::Manager) {
+        QString listError;
+        bool noList = false;
+        if (!readMachines(paths::machinesFile(), &household, &listError, &noList)) {
+            household.clear();
+            if (!noList && error.isEmpty())
+                error = QStringLiteral("machines: %1").arg(listError);
+        }
+    }
+
     // The day of every profile, and not only of the visible ones.
     //
     // What the browser really does about a site is the composition of *all* the
@@ -786,8 +889,17 @@ void House::refresh()
         const Ledger ledger = days.value(profile.user);
         if (administers) fleet.insert(profile.user, fleetRows(profile, ledger, when));
 
+        // A manager with nobody else written down is a household of one, and
+        // adding one machine up is a line that says `here` twice. The sum
+        // starts existing when there is something to add to it.
+        QStringList notHeardFrom;
+        QVector<HouseBudget> house;
+        if (!household.isEmpty())
+            house = houseOf(profile, ledger, household, today, &notHeardFrom, &error);
+
         const QVariantList programRows = programsOf(profile, ledger, scopes, byId);
-        const QVariantList todayRows = todayOf(profile, ledger, scopes, byId);
+        const QVariantList todayRows =
+            todayOf(profile, ledger, scopes, byId, house, notHeardFrom);
         const QVariantList siteRows = sitesOf(profile, ledger, machine, spent);
         programs.insert(profile.user, programRows);
         todays.insert(profile.user, todayRows);

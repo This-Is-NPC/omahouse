@@ -1372,7 +1372,11 @@ Window {
                             readonly property var line: todayRow.modelData
                             readonly property bool isBudget: todayRow.line.kind === "budget"
                             width: todayList.width
-                            height: todayRow.isBudget ? 56 : 26
+                            // Taller only where there is a household line to
+                            // hold: a machine on its own draws exactly the row
+                            // it always drew.
+                            height: todayRow.isBudget
+                                    ? (todayRow.line.house === true ? 74 : 56) : 26
                             color: todayList.currentIndex === todayRow.index
                                    ? Theme.fill(Theme.accent, 0.16) : "transparent"
 
@@ -1425,6 +1429,32 @@ Window {
                                           ? todayRow.line.spent + " spent · "
                                             + todayRow.line.ending + " when it runs out"
                                           : todayRow.line.spent + " spent · no limit"
+                                }
+                                // The house, on the machine that manages it.
+                                //
+                                // Under this machine's own numbers and not over
+                                // them: what is enforced here is what is spent
+                                // here, and the household total is the other
+                                // fact — `session: 2h` is two hours in the
+                                // house and not two hours per computer. The
+                                // machines that have sent nothing today are
+                                // named, because a total quietly missing a
+                                // computer is worse than no total at all.
+                                Label {
+                                    objectName: "todayHouse"
+                                    visible: todayRow.line.house === true
+                                    quiet: true
+                                    color: Theme.accent
+                                    width: parent.width
+                                    elide: Text.ElideRight
+                                    text: "the house: " + (todayRow.line.houseSpent || "")
+                                          + " spent"
+                                          + (todayRow.line.houseLimited === true
+                                             ? " · " + todayRow.line.houseLeft + " left" : "")
+                                          + " · " + (todayRow.line.houseWhere || "")
+                                          + ((todayRow.line.notHeardFrom || "") !== ""
+                                             ? " · not heard from " + todayRow.line.notHeardFrom
+                                             : "")
                                 }
                             }
 
