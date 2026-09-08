@@ -99,6 +99,16 @@ QString furnitureFile()
     return configDir() + QStringLiteral("/furniture");
 }
 
+QString stagedDir()
+{
+    return configDir() + QStringLiteral("/staged");
+}
+
+QString stagedProfileFile()
+{
+    return stagedDir() + QStringLiteral("/profile.json");
+}
+
 QString elsewhereDir()
 {
     return stateDir() + QStringLiteral("/elsewhere");

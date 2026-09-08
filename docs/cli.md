@@ -130,6 +130,22 @@ Only one profile per account: two would be two sets of rules nobody could point 
 
   An account that is already there is left alone and said so; a useradd that fails is the profile not being written.
 
+## `omahouse profile apply-staged`
+
+- **Usage:** `omahouse profile apply-staged`
+
+Take in the profile the household left in the stage.
+
+The machine's half of a profile arriving from a central omahouse. The manager cues a script that writes `/etc/omahouse/staged/profile.json` **as the node's service account** -- the directory belongs to it, so putting a document there needs no privilege -- and then runs this, which has root and does the reading.
+
+**It takes no arguments, and that is the whole design.** The sudoers entry that lets the node account run this names every argument, because a rule ending in a wildcard lets the caller append what it likes to whatever the pattern matched. A rule with nothing after the verb can only be that command or a refusal, which makes what the household may push a question somebody answers by reading a file. The price is that the path cannot be given on the command line, so it is fixed.
+
+The document is shaped like `profiles.json` with exactly one profile in it, and is read by the same reader that file gets: the schema version, the verdicts, an action that cannot happen to that kind of budget, and a budget that never resets on a profile for anybody are all refused here exactly as they are there. A refusal that lived only in the verbs would have this as its back door. Reconciling several profiles at once is a merge and is not this.
+
+A symbolic link in the way is refused before anything is opened, the directory as well as the file. Nothing is to be gained by one today -- whoever can write the stage is the account that already has its own line to root -- and that is exactly why nobody would look at it later, when that line is narrower and this is the door.
+
+What ends up written as `writtenBy` is the node's account, because a push has no person behind it. That is what lets a central tell later what it issued from what an administrator typed on the machine, so it is the answer that was wanted and not one to tidy away.
+
 ## `omahouse profile remove`
 
 - **Usage:** `omahouse profile remove [--keep-account] <user>`

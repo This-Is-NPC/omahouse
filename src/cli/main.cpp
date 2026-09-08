@@ -1779,13 +1779,53 @@ QString sudoersFile()
 /// a rule naming `ALL` here would turn one script into a route to everything.
 bool letTheNodeReachOmahouse(const QString &verb, QString *error)
 {
-    const QString rule = QStringLiteral("%1 ALL=(root) NOPASSWD: %2\n")
-                                 .arg(Omakure::account(),
-                                      QCoreApplication::applicationFilePath());
-    if (Omakure::writeSystemFile(sudoersFile(), rule, QString(), 0440, error))
-        return true;
-    fail(QStringLiteral("%1: %2").arg(verb, *error));
-    return false;
+    const QString who = Omakure::account();
+    const QString binary = QCoreApplication::applicationFilePath();
+    // Two lines and not one, and the second is the shape the first should have.
+    //
+    // The first names the binary and no verb, which was right while the only
+    // thing that travelled was `collect` -- a day, which only ever adds up. The
+    // moment policy travels the same way, that line authorises `profile add`,
+    // `allow` and `enforce` too, and omahouse's own gate for those is polkit,
+    // which is not on this path at all.
+    //
+    // The second is the push, and it names every argument. A rule ending in a
+    // wildcard lets the caller append whatever it likes to whatever the pattern
+    // matched; a rule with nothing after the verb can only be that command or a
+    // refusal. It is why `profile apply-staged` takes no arguments and reads a
+    // fixed path.
+    //
+    // This does not narrow the first, and pretending otherwise would be worse
+    // than leaving it: whoever can act as this account still runs any verb as
+    // root. What it buys is that **policy does not travel by widening what was
+    // there**, and that what the household may push is a question somebody can
+    // answer by reading a file rather than by knowing what verbs exist.
+    const QString rule = QStringLiteral("%1 ALL=(root) NOPASSWD: %2\n"
+                                        "%1 ALL=(root) NOPASSWD: %2 profile apply-staged\n")
+                                 .arg(who, binary);
+    if (!Omakure::writeSystemFile(sudoersFile(), rule, QString(), 0440, error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, *error));
+        return false;
+    }
+
+    // And somewhere for it to put the document, owned by the account that will
+    // be writing it: a push writes the stage as itself and needs no privilege
+    // to do it, which is what keeps the privileged half down to one command
+    // with no arguments.
+    const QString stage = paths::stagedDir();
+    if (!QDir().mkpath(stage)) {
+        *error = QStringLiteral("cannot make %1").arg(stage);
+        fail(QStringLiteral("%1: %2").arg(verb, *error));
+        return false;
+    }
+    if (QProcess::execute(QStringLiteral("chown"),
+                          {QStringLiteral("%1:%1").arg(who), stage}) != 0
+        || QProcess::execute(QStringLiteral("chmod"), {QStringLiteral("0700"), stage}) != 0) {
+        *error = QStringLiteral("cannot give %1 to %2").arg(stage, who);
+        fail(QStringLiteral("%1: %2").arg(verb, *error));
+        return false;
+    }
+    return true;
 }
 
 /// This machine's Omakure config as omahouse last wrote it, or defaults.
@@ -3147,6 +3187,135 @@ int cmdProfileAdd(const Globals &g, const QStringList &positionals, const Option
     return kOk;
 }
 
+/// Takes in the one profile the household's node account left in the stage.
+///
+/// The whole of the push, on this side. The manager cues a script that writes
+/// `<configDir>/staged/profile.json` **as the node account** -- the directory is
+/// its own, so no privilege is needed to put it there -- and then runs this,
+/// which has root and does the reading.
+///
+/// **No arguments, and that is the design.** The sudoers entry that lets the
+/// node account run this names every argument, because a rule ending in a
+/// wildcard lets the caller append what it likes to whatever the pattern
+/// matched. A rule with nothing after the verb has nothing to get wrong, and
+/// what the household may do becomes a question somebody can answer by reading
+/// a file. The price is that the path cannot be said on the command line, which
+/// is why `paths::stagedProfileFile` is fixed.
+///
+/// The document is shaped like `profiles.json` with exactly one profile in it,
+/// and not a shape of its own: there is no second format to learn, and the
+/// schema check comes along for free -- which matters, because a central that
+/// had not caught up would otherwise push a document this omahouse reads
+/// differently from how it was meant.
+int cmdProfileApplyStaged(const Globals &g, const QStringList &positionals)
+{
+    const QString verb = QStringLiteral("profile apply-staged");
+    if (!positionals.isEmpty()) {
+        fail(QStringLiteral("%1: it takes nothing. The document is %2, because the sudoers "
+                            "line that lets the household run this names every argument")
+                 .arg(verb, paths::stagedProfileFile()));
+        return kUsage;
+    }
+    if (!mayWrite(verb, paths::profilesFile(), paths::configDirIsTheSystems(), g))
+        return kUsage;
+
+    const QString staged = paths::stagedProfileFile();
+    // Refused before it is opened, and refused for the directory as well as the
+    // file: a link either place sends this read somewhere else, and this read
+    // has root.
+    //
+    // Nothing is to be gained by it today -- whoever can write the stage is the
+    // node account, which already has a line to root of its own. That is
+    // precisely why nobody would look at it later. When that line narrows, this
+    // becomes the door, and a reader that follows a link is a reader somebody
+    // points at /etc/shadow.
+    for (const QString &path : {paths::stagedDir(), staged}) {
+        if (QFileInfo(path).isSymLink()) {
+            fail(QStringLiteral("%1: %2 is a symbolic link, and this reads as root. Put a "
+                                "real file there.").arg(verb, path));
+            return kUsage;
+        }
+    }
+
+    QJsonObject document;
+    QString error;
+    bool missing = false;
+    if (!readJsonObject(staged, &document, &error, &missing) || missing) {
+        fail(missing ? QStringLiteral("%1: there is nothing at %2").arg(verb, staged)
+                     : QStringLiteral("%1: %2").arg(verb, error));
+        return missing ? kMissing : kUsage;
+    }
+
+    // Read with the same reader `profiles.json` gets, so everything that file
+    // cannot mean this one cannot mean either: the schema, an unknown verdict,
+    // an action that cannot happen to that kind of budget, and a budget that
+    // never resets on a profile for anybody. A refusal that lived only in the
+    // verbs would have this as its back door.
+    QVector<Profile> pushed;
+    if (!profilesFromJson(document, &pushed, &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+    if (pushed.size() != 1) {
+        fail(QStringLiteral("%1: the stage holds %2 profiles and takes one. Reconciling "
+                            "several is what a merge is for.").arg(verb).arg(pushed.size()));
+        return kUsage;
+    }
+    const Profile &incoming = pushed.constFirst();
+
+    // The same refusal `profile add` makes, for the same reason and against the
+    // same argument: an administrator does not fiscalise themselves by
+    // accident, and a document arriving over the wire must not do through the
+    // back door what the verb turns away at the front.
+    QString why;
+    if (isAdministrator(incoming.user, &why)) {
+        fail(QStringLiteral("%1: %2 %3, and an administrator does not fiscalise themselves "
+                            "by accident.").arg(verb, incoming.user, why));
+        return kUsage;
+    }
+
+    int status = kOk;
+    Profiles profiles;
+    if (!loadProfiles(&profiles, &status))
+        return status;
+
+    bool replaced = false;
+    for (Profile &existing : profiles.all) {
+        if (existing.user != incoming.user)
+            continue;
+        existing = incoming;
+        replaced = true;
+    }
+    if (!replaced)
+        profiles.all.append(incoming);
+
+    // Whose name ends up on it is `saveProfiles`, and it is the node account:
+    // `sudo` says who asked in `SUDO_UID`, and a push has no person. That is
+    // the thing that lets a central tell later what it issued from what an
+    // administrator typed on the machine, so it is deliberate and not a
+    // shortcoming to be tidied away.
+    if (!saveProfiles(verb, profiles.all))
+        return kUsage;
+
+    // The stage is a letterbox and not a record. Left behind, the same document
+    // would be applied again by the next run and would read as though something
+    // were still pending.
+    if (!QFile::remove(staged)) {
+        note(QStringLiteral("omahouse: %1 was applied and could not be removed; the next "
+                            "run would apply it again").arg(staged));
+    }
+
+    if (g.json) {
+        printJson(incoming.toJson());
+        return kOk;
+    }
+    out() << QStringLiteral("%1: %2 from the household, %3.\n")
+                 .arg(incoming.user, replaced ? QStringLiteral("profile replaced")
+                                              : QStringLiteral("profile taken in"),
+                      paths::profilesFile());
+    return kOk;
+}
+
 int cmdProfileRemove(const Globals &g, const QStringList &positionals, const Options &options)
 {
     if (positionals.size() != 1) {
@@ -3306,6 +3475,11 @@ int cmdProfile(const Globals &g, const QStringList &positionals, const Options &
                               QStringLiteral("profile add")))
             return kUsage;
         return cmdProfileAdd(g, positionals.mid(1), options);
+    }
+    if (subcommand == QLatin1String("apply-staged")) {
+        if (!onlyTheseOptions(options, {}, QStringLiteral("profile apply-staged")))
+            return kUsage;
+        return cmdProfileApplyStaged(g, positionals.mid(1));
     }
     if (subcommand == QLatin1String("remove")) {
         if (!onlyTheseOptions(options, {QStringLiteral("--keep-account")},
@@ -5347,6 +5521,9 @@ Writing, and root needed — the studio gets there by pkexec:
                            omahouse day julia | ssh study omahouse collect …
   profile add '*'          rules for whoever sits here without their own.
                            Quote it: bare, the shell eats it
+  profile apply-staged     take in the profile the household left in
+                           /etc/omahouse/staged/profile.json. No arguments,
+                           on purpose: the sudoers line names all of them
   profile remove <user> [--keep-account]
   profile enforce <user> --on | --off
   profile default <user> --allow | --deny

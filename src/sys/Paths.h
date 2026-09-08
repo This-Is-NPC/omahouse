@@ -66,6 +66,22 @@ QString machineTokensFile();
 /// answer to what a day is, and the first one is already on disk.
 QString elsewhereLedgerFile(const QString &machine, const QString &user,
                             const QDate &date);
+/// `<configDir>/staged/profile.json` -- one profile, put there by the household's
+/// node account for `omahouse profile apply-staged` to take in.
+///
+/// A fixed path and not an argument, because the sudoers entry that lets the
+/// node account run that verb as root names every argument: a rule ending in a
+/// wildcard lets the caller append whatever it likes to whatever the pattern
+/// matched, and a rule with no arguments at all has nothing to get wrong. So
+/// there is nowhere to say *which* file, and this is it.
+///
+/// The directory belongs to the node account, which is what lets a push write
+/// here without root. What reads it has root and must therefore not follow a
+/// symbolic link out of it.
+QString stagedProfileFile();
+/// `<configDir>/staged` -- the directory above, which the pairing creates.
+QString stagedDir();
+
 /// `<stateDir>/elsewhere` -- where every other machine's days are collected.
 QString elsewhereDir();
 /// `<configDir>/furniture` -- what this machine starts for itself, one name per

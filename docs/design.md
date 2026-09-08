@@ -706,6 +706,46 @@ entry, the icon and the `.install`. The install script creates `/etc/omahouse` a
 `/var/lib/omahouse`, adds the PAM line of §2, enables `omahouse.service`, and
 takes all of it out again on removal.
 
+### A profile that arrives without anybody at the keyboard
+
+Every other write to `profiles.json` has a person behind it: a terminal with
+`sudo`, or the window with `pkexec`, and polkit is the gate. A profile pushed
+from a central omahouse has nobody, and no prompt stands in front of it — so
+what authorises it is the sudoers line the pairing writes for the node's service
+account, and nothing else.
+
+The shape that takes: the manager cues a script that writes
+`/etc/omahouse/staged/profile.json` **as that account**, into a directory the
+pairing gave it, so putting a document there needs no privilege at all. Then it
+runs `omahouse profile apply-staged`, which has root and does the reading.
+
+**The verb takes no arguments**, and the sudoers entry names every one of them.
+A rule ending in a wildcard lets the caller append what it likes to whatever the
+pattern matched; a rule with nothing after the verb can only be that command or
+a refusal. The price is that the path cannot be given on the command line, which
+is why it is fixed. What it buys is that what the household may push becomes a
+question somebody answers by reading a file.
+
+It does **not** narrow the line that was already there. That one names the
+binary and no verb, which was right while the only thing travelling was a day,
+and whoever can act as that account still runs any verb as root. What changes is
+that policy does not travel by widening it.
+
+The document is shaped like `profiles.json` with one profile in it and is read
+by the reader that file gets, so every refusal is the same refusal — the schema
+version, an unknown verdict, an action that cannot happen to that kind of
+budget, a budget that never resets on a profile for anybody, and a profile for
+an administrator. A refusal that lived only in the verbs would have this as its
+back door. A symbolic link in the way is turned down before anything is opened:
+nothing is to be gained by one today, and that is exactly why nobody would look
+at it later, when the wide line is narrower and this is the door.
+
+`writtenBy` ends up being the node's account, because a push has no person. That
+is what lets a central tell later what it issued from what an administrator
+typed on the machine.
+
+---
+
 **Removal is half the job, not an appendix.** What omahouse puts on a machine
 cannot be taken off it by a file list, and every one of those things is a
 restriction: the PAM line, `/etc/omahouse/blocked`, the browser policy of §11,

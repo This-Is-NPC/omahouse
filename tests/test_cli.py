@@ -1509,6 +1509,92 @@ def check_the_verb_writes_the_profile_for_anybody(box):
     assert refused.returncode != 0 or "never resets" in refused.stderr, refused.stderr
 
 
+def check_a_pushed_profile_comes_in_through_the_stage(box):
+    """A profile arriving from a central omahouse, and the refusals it meets.
+
+    The push has no person behind it: the household's node account writes the
+    document into a directory it owns, then runs one command with root. So this
+    is the one path into `profiles.json` that no verb and no polkit prompt
+    stands in front of, and everything omahouse would refuse of a file it reads
+    it has to refuse here too -- otherwise the refusals that live in the verbs
+    have a back door with a wire attached to it.
+    """
+    stage = box.config / "staged"
+    stage.mkdir(parents=True, exist_ok=True)
+    document = stage / "profile.json"
+
+    def push(profile, schema=2):
+        document.write_text(json.dumps({"schemaVersion": schema, "profiles": [profile]}))
+        # `SUDO_UID` is how sudo says who asked, and a push asks as the node's
+        # account. `daemon` stands in for it: what matters is that the name on
+        # the profile afterwards is not a person's.
+        return box.run("profile", "apply-staged", extra_env={"SUDO_UID": "2"})
+
+    box.write_profiles({"schemaVersion": 2, "profiles": []})
+
+    taken = push({"user": "nobody", "displayName": "Pushed", "default": "deny"})
+    assert taken.returncode == 0, taken.stderr
+    written = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    assert written["user"] == "nobody" and written["default"] == "deny", written
+    # Signed with the account it came through, which is what lets a central
+    # tell later what it issued from what somebody typed on the machine.
+    assert written["writtenBy"] == "daemon", written
+
+    # The stage is a letterbox and not a record: left behind, the next run
+    # would apply the same document again.
+    assert not document.exists()
+    again = box.run("profile", "apply-staged", extra_env={"SUDO_UID": "2"})
+    assert again.returncode == 2, again.stdout
+    assert "nothing at" in again.stderr, again.stderr
+
+    # A second push replaces rather than duplicating.
+    push({"user": "nobody", "displayName": "Pushed again", "default": "allow"})
+    people = json.loads((box.config / "profiles.json").read_text())["profiles"]
+    assert [p["user"] for p in people] == ["nobody"], people
+    assert people[0]["default"] == "allow", people
+
+    # And now every refusal that has to reach this path. Each is a thing the
+    # file reader turns away, and each would otherwise arrive over the wire.
+    refused = push({"user": "nobody"}, schema=1)
+    assert refused.returncode == 1, refused.stdout
+    assert "schema version 1" in refused.stderr, refused.stderr
+
+    refused = push({"user": anybody(),
+                    "budgets": [{"id": "pot", "match": ["*"], "dailyMinutes": 60,
+                                 "resets": "never"}]})
+    assert refused.returncode == 1, refused.stdout
+    assert "never resets" in refused.stderr, refused.stderr
+
+    refused = push({"user": "root"})
+    assert refused.returncode == 1, refused.stdout
+    assert "does not fiscalise themselves" in refused.stderr, refused.stderr
+
+    # Two profiles at once is a merge and is not this.
+    document.write_text(json.dumps({"schemaVersion": 2, "profiles": [
+        {"user": "nobody"}, {"user": "daemon"}]}))
+    several = box.run("profile", "apply-staged", extra_env={"SUDO_UID": "2"})
+    assert several.returncode == 1, several.stdout
+    assert "takes one" in several.stderr, several.stderr
+
+    # An argument is refused, because the sudoers line names every one of them
+    # and a verb that took a path would make that line meaningless.
+    argued = box.run("profile", "apply-staged", "somewhere-else.json")
+    assert argued.returncode == 1, argued.stdout
+    assert "takes nothing" in argued.stderr, argued.stderr
+
+    # And a symbolic link is refused before anything is opened. This read has
+    # root, and the day the account's wide sudoers line narrows, this is the
+    # door.
+    document.unlink(missing_ok=True)
+    elsewhere = box.root / "somewhere-else.json"
+    elsewhere.write_text(json.dumps({"schemaVersion": 2,
+                                     "profiles": [{"user": "nobody"}]}))
+    document.symlink_to(elsewhere)
+    linked = box.run("profile", "apply-staged", extra_env={"SUDO_UID": "2"})
+    assert linked.returncode == 1, linked.stdout
+    assert "symbolic link" in linked.stderr, linked.stderr
+
+
 def check_it_refuses_a_profile_for_an_administrator(box):
     """docs/design.md §1: the operator is whoever is in wheel.
 
@@ -3572,6 +3658,7 @@ def main():
         check_a_profile_records_who_changed_it_and_when,
         check_the_rules_for_anybody_are_readable_by_whoever_they_bind,
         check_the_verb_writes_the_profile_for_anybody,
+        check_a_pushed_profile_comes_in_through_the_stage,
         check_it_refuses_a_profile_for_an_administrator,
         check_it_refuses_to_write_without_privilege,
         check_create_user_is_built_but_never_run_here,
