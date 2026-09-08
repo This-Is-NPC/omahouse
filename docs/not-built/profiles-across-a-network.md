@@ -242,8 +242,11 @@ the count and every machine reporting at the counter's own cadence, two machines
 spending at once are two machines the manager can see, and the balance each of
 them reads is already right.
 
-What a machine out of contact may still do is the one thing left in this area,
-and it is written in §7 as a number rather than a mechanism.
+**A machine out of contact spends what it has.** The cache holds the balance the
+machine last read, and it spends that down to zero. Two hours granted and thirty
+minutes spent before the wire dropped leaves an hour and a half, and it is used.
+A profile with no limit goes on having no limit. There is no timeout to invent
+and no ceiling to choose: the balance is the ceiling.
 
 ### What it costs, and the way out
 
@@ -455,8 +458,9 @@ different sums to report and to read back.
 13. **The Battery changes job.** From dividing once a day to carrying the report
     and the balance at the counter's cadence. Check what that rate costs the
     scheduler's run history before choosing it. *omahouse-battery*
-14. **Say what a machine out of contact may do.** A number, not a mechanism: how
-    long it may go on spending against a cache before it stops. *core, docs*
+14. **Spend the cache down.** A machine out of contact keeps spending the balance
+    it last read, to zero, and reports when it can. No timeout and no ceiling.
+    *core, sys*
 15. **The downstream readers follow.** omastore learns the fallback profile; the
     Battery refuses a credit that never resets instead of dividing it wrongly.
     *omastore, omahouse-battery*
