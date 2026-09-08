@@ -524,6 +524,21 @@ bool loadLedger(const QString &user, const QDate &date, Ledger *ledger, bool *mi
 /// with the shell's own wildcard, so `omahouse profile enforce * --on` printed
 /// bare is a line that turns into the contents of whatever directory it is
 /// pasted into. Quoted, it is the command that was meant.
+///
+/// **For a line a person pastes, and never for a value.** `--json` carries the
+/// name as it is in the file, because nobody pipes JSON into a shell and quotes
+/// inside a value would be the same mistake pointing the other way -- a
+/// consumer reading `"'*'"` and looking for an account spelled with quotation
+/// marks in it.
+///
+/// The next line somebody adds here will look like it is printing an account
+/// name, and that is the trap: it is printing a *wildcard* that is only
+/// dangerous once it has been copied somewhere else. omastore never had this
+/// class of bug and not by care -- it reports each person under their own real
+/// name, decided because the `omahouse allow` line it prints alongside would
+/// otherwise name an account that cannot exist. The same decision, taken for a
+/// different reason, happens to mean it never puts a wildcard in a copyable
+/// line at all.
 QString spellUser(const QString &user)
 {
     return user == anybody() ? QStringLiteral("'%1'").arg(user) : user;

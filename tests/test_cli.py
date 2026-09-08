@@ -1462,6 +1462,13 @@ def check_the_verb_writes_the_profile_for_anybody(box):
         if "omahouse " in line:
             assert "'*'" in line or anybody() not in line, line
 
+    # And `--json` carries the name as the file has it. Quoting there would be
+    # the same mistake pointing the other way: a consumer reading `"'*'"` and
+    # looking for an account spelled with quotation marks in it. Nobody pipes
+    # JSON into a shell, so the hazard the quoting exists for is not there.
+    shown = json.loads(box.run("profile", "show", anybody(), "--json").stdout)
+    assert shown["user"] == anybody(), shown
+
     # A second one is refused, and the refusal quotes it too.
     again = box.run("profile", "add", anybody())
     assert again.returncode == 1, again.stdout
