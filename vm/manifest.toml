@@ -52,6 +52,44 @@ subject = "julia"
 uid = 1001
 disposable = true
 
+# -- the showcase's two computers ---------------------------------------------
+#
+# Real Omarchy, both of them, cloned from `omahouse-omarchy` by
+# `vm/make-dad.sh omahouse-omarchy <name>` and never that machine itself: it is
+# the owner's demonstration VM and the one thing here nobody could rebuild.
+#
+# They exist because `poc` and `dad` are not Omarchy -- they are Arch with
+# Hyprland, which is enough to exercise cgroups, PAM and the daemon and is not
+# enough to film. A showcase of what a household sees has to be the thing the
+# household would be looking at.
+#
+# `parent` is in wheel with passwordless sudo; `kid` has no privilege, which is
+# what the story says about each of them. Both are autologged into a real
+# session by SDDM, because a film that opens on a greeter opens on a screen
+# nobody in the story is looking at.
+
+[machines.showcase-parent]
+name = "omahouse-parent"
+uri = "qemu:///system"
+disk = "/var/lib/libvirt/images/omahouse-parent.qcow2"
+hostname = "omahouse-parent"
+key = "~/.ssh/id_vms"
+operator = "parent"
+subject = "kid"
+uid = 1003
+disposable = true
+
+[machines.showcase-kid]
+name = "omahouse-kid"
+uri = "qemu:///system"
+disk = "/var/lib/libvirt/images/omahouse-kid.qcow2"
+hostname = "omahouse-kid"
+key = "~/.ssh/id_vms"
+operator = "parent"
+subject = "kid"
+uid = 1003
+disposable = true
+
 [machines.omarchy]
 # The owner's demonstration machine, on real Omarchy: SDDM rather than an
 # autologin on tty1, a `bochs` framebuffer the VNC can see, and a real Chromium.
