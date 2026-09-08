@@ -75,10 +75,20 @@ Two things worth knowing:
   total. That is a legitimate thing to want.
 - **A budget can be written for a program no rule names.** That is a program
   somebody wants a number for at the end of the day, and it is allowed.
-- **Chromium turns up as two ids**, so it takes two budgets with the same number
-  — `chromium` and `org.chromium.Chromium`. Otherwise the browser closes for the
-  wrong reason and the grace warning arrives twice.
-  [The defect](what-does-not-work.md#3-chromium-turns-up-as-two-ids).
+- **Chromium turns up as two ids**, so name both of them in one command and
+  they share one clock:
+
+  ```bash
+  sudo omahouse allow kid chromium org.chromium.Chromium --limit 45m
+  ```
+
+  ```
+  kid: chromium and org.chromium.Chromium allowed, 45m a day between them, and they close when the time is out.
+  ```
+
+  *Between them* is the part to read. Two commands with `--limit 45m` in each
+  would be two clocks of 45 minutes that happen to agree, and forgetting one
+  leaves half the browser with no limit at all.
 
 A budget that is already there gets the new number and keeps everything else:
 what a budget does when it runs out is a decision somebody made once, and a new
@@ -124,11 +134,13 @@ omahouse profile show kid
 
 ```
 BUDGETS
-BUDGET                 APP                    A DAY  WHEN OUT
-chromium               chromium                  3m  closes
-org.chromium.Chromium  org.chromium.Chromium     3m  closes
-session                *                      2h00m  logs out
+BUDGET    APP                              A DAY  WHEN OUT
+chromium  chromium, org.chromium.Chromium     3m  closes
+session   *                               2h00m  logs out
 ```
+
+One row and two names: the `APP` column is every id the budget is about, and the
+number is what they have between them.
 
 `omahouse status kid` is the same numbers live, with what has been spent and
 what is left — [reading the day](how-to-read-the-day.md).
@@ -151,9 +163,14 @@ rules was called `julia`. The commands here say `kid`; it is the same
 placeholder.)*
 
 **The grace window.** Once the budget is spent, twenty seconds open between
-*time is up* and the closing. Chromium has two ids, so two notifications arrive:
+*time is up* and the closing, and it is said once per budget. The run these
+pictures come from predates one budget holding both of Chromium's ids and had
+two of them, which is what two notifications look like:
 
 ![Two notifications stacked: `Time is up / org.chromium.Chromium closes in 20 seconds.` and `Time is up / chromium closes in 20 seconds.`](../vm/shots/11-aviso-chromium-carencia.png)
+
+Written the way §2 writes it — both ids in one command — the same moment is one
+notification, and both halves of the browser close together.
 
 **The program closes and the session stays.** Twenty seconds later the browser
 is gone, the terminal is still open, the bar is still there:

@@ -126,7 +126,9 @@ is taken back.
 
 - **Chromium turns up as two ids.** One window produces `chromium` (the child
   processes) and `org.chromium.Chromium` (the process that owns the window).
-  Releasing only one closes the browser for the wrong reason. Write both.
+  Name both in the same command: they get a rule each and, with `--limit`, one
+  clock between them. Releasing only one closes the browser for the wrong
+  reason.
 - **Omarchy launches its own utilities as though they were apps.** Its
   `autostart.lua` brings up `udiskie` and `omarchy-hyprland-monitor-watch`
   through `uwsm-app --`; with no rule for them, and the teeth in, omahouse
@@ -142,8 +144,7 @@ A list built the way the pictures on this page were:
 ```bash
 sudo omahouse allow kid xdg-terminal-exec
 sudo omahouse allow kid omahouse
-sudo omahouse allow kid chromium --limit 3m
-sudo omahouse allow kid org.chromium.Chromium --limit 3m
+sudo omahouse allow kid chromium org.chromium.Chromium --limit 3m
 sudo omahouse allow kid omarchy-hyprland-monitor-watch
 sudo omahouse allow kid udiskie
 ```
@@ -235,7 +236,7 @@ processes in it is somebody at the keyboard; omahouse counts it and cannot name
 it. No rule can reach it, so its verdict is the profile's default — which under
 `default: deny` with the teeth in means it is closed. `omahouse status` reports
 these under `Counted, not named`, and
-[the window has no screen for them](what-does-not-work.md#6-a-scope-nothing-can-name-has-no-screen-in-the-window).
+[the window has no screen for them](what-does-not-work.md#5-a-scope-nothing-can-name-has-no-screen-in-the-window).
 
 **Some programs are out of reach entirely.** Anything started by a raw `exec` in
 a keybinding, or from inside a terminal, lands in the compositor's own cgroup,

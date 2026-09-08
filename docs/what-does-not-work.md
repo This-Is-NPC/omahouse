@@ -4,7 +4,7 @@ Every defect omahouse has, in one place, each with what to do in the meantime.
 **Nothing else in this documentation names a defect that is not here**, and
 nothing here has a fix in omahouse today.
 
-The first four were measured on a real Omarchy 4.0.2, driven by keyboard and
+The first three were measured on a real Omarchy 4.0.2, driven by keyboard and
 captured frame by frame; the pictures come from that run, where the account
 under rules was called `julia`. The rest are in the code as written, and the
 last one was found by running the shipped binary while this page was being
@@ -46,24 +46,7 @@ and not taken.
 restarts `sddm` when the seat is left with no session — or do not use a session
 budget that logs out, on a machine nobody will be able to reach the console of.
 
-## 3. Chromium turns up as two ids
-
-**What happens.** One Chromium window on real Omarchy produces two scopes:
-`chromium`, holding the child processes, and `org.chromium.Chromium`, holding
-the process that owns the window. Releasing or limiting only one closes the
-browser for the wrong reason, and the grace arrives as two notifications:
-
-![Two notifications stacked: "Time is up / org.chromium.Chromium closes in 20 seconds." and "Time is up / chromium closes in 20 seconds."](../vm/shots/11-aviso-chromium-carencia.png)
-
-**What to do in the meantime.** Write both rules and both limits, with the same
-number:
-
-```bash
-sudo omahouse allow kid chromium --limit 45m
-sudo omahouse allow kid org.chromium.Chromium --limit 45m
-```
-
-## 4. The filter narrows every list at once
+## 3. The filter narrows every list at once
 
 **What happens.** There is one filter in the window, and `/` applies it to the
 people, the programs, the day, the sites and the machines together. A needle that misses the
@@ -77,7 +60,7 @@ that.
 **What to do in the meantime.** Filter with something that also matches the
 profile's own name, or press `Esc` and walk the list with `j` and `k`.
 
-## 5. A refusal loses its reason on the way to the window
+## 4. A refusal loses its reason on the way to the window
 
 **What happens.** Only the last line the CLI printed reaches the status bar. The
 sentence that says *what* was refused and why — `profile add: howl is in wheel,
@@ -90,7 +73,7 @@ missing:
 **What to do in the meantime.** Run the same verb in a terminal to read the
 whole refusal.
 
-## 6. A scope nothing can name has no screen in the window
+## 5. A scope nothing can name has no screen in the window
 
 **What happens.** `omahouse status` reports these prominently — a
 `tmux-spawn-<uuid>.scope` with twenty processes in it is somebody at the
@@ -101,7 +84,7 @@ What the status bar does show is the other number, the processes in
 
 **What to do in the meantime.** Use `omahouse status` for that number.
 
-## 7. The key that opens more time today lands in the field
+## 6. The key that opens more time today lands in the field
 
 **What happens.** Pressing `+` on a program opens the *more time today* sheet
 and the same keystroke arrives in the field it opened, so the field starts with
@@ -111,7 +94,7 @@ a lone `+` in it and `ok` is born greyed out:
 
 **What to do in the meantime.** Clear the `+` before typing the number.
 
-## 8. In a narrow window the header overlaps the tabs
+## 7. In a narrow window the header overlaps the tabs
 
 **What happens.** The header draws over the subtitle and the tabs, and the
 result is unreadable.

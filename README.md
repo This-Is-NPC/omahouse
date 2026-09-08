@@ -156,13 +156,12 @@ logout, the counting and the daemon.
 ## What is broken
 
 A sample. None of them has a fix here yet, and
-[what does not work yet](docs/what-does-not-work.md) is the whole list — eight
+[what does not work yet](docs/what-does-not-work.md) is the whole list — seven
 of them, each with what to do in the meantime.
 
 - The idle lock takes the screen, and the last warnings go out behind it.
 - When a session runs out, SDDM stops and the screen stays black until somebody
   brings it back.
-- Chromium turns up as two ids, and both need the rule.
 - `/` in the studio filters all four lists at once, against what its own key
   sheet says.
 - A CLI refusal loses its reason on the way to the studio: only the last line
