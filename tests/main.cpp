@@ -1,11 +1,11 @@
 #include <QCoreApplication>
 
-// One binary, two archives, fourteen suites and the smoke test.
+// One binary, two archives, fifteen suites and the smoke test.
 //
 // QTEST_MAIN writes a main() of its own, so it can only appear once; each suite
 // hands out a function instead and this runs them in turn. The alternative --
-// a .pro and a binary per suite -- links the same two archives fifteen times
-// to assert fourteen groups of things about them.
+// a .pro and a binary per suite -- links the same two archives sixteen times
+// to assert fifteen groups of things about them.
 int runSmokeTests(int argc, char **argv);
 int runScopeNameTests(int argc, char **argv);
 int runPolicyTests(int argc, char **argv);
@@ -21,6 +21,7 @@ int runWebPolicyTests(int argc, char **argv);
 int runFleetTests(int argc, char **argv);
 int runPairingTests(int argc, char **argv);
 int runKindTests(int argc, char **argv);
+int runPolkitTests(int argc, char **argv);
 
 int main(int argc, char **argv)
 {
@@ -44,5 +45,6 @@ int main(int argc, char **argv)
     failures += runFleetTests(argc, argv);
     failures += runPairingTests(argc, argv);
     failures += runKindTests(argc, argv);
+    failures += runPolkitTests(argc, argv);
     return failures == 0 ? 0 : 1;
 }
