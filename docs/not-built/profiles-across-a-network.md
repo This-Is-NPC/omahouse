@@ -86,6 +86,45 @@ map would count a sitting's total once per midnight crossed. Kept apart, every
 one of those readers stays correct without knowing this exists, which is how §5's
 invariant survives a second clock.
 
+### Where the sitting has to come from, measured
+
+The obvious source is wrong, and it was measured rather than reasoned about.
+
+**`loginctl show-user <name> -p Timestamp` does not move between sittings.** On a
+disposable guest, the same account's graphical session was ended twice and left
+to log in again — sessions `2`, then `265`, then `268`. The user's timestamp
+answered `Mon 2026-09-07 19:16:16 UTC` all three times, with the same monotonic
+value. **Three sittings, one anchor**, and the second and third would inherit the
+first one's clock, which is the failure the anchor exists to prevent and in the
+direction that hands out free time.
+
+**It does not depend on lingering.** Lingering was turned off between the second
+and the third and the timestamp still did not move, because the account's
+`manager` session stays alive either way.
+
+What moves is `show-user -p Display`, which names the graphical session and went
+`2` → `265` → `268`, and `show-session` on that id answers real, different
+timestamps. So the sitting comes from the session, never from the user.
+
+**And the session id alone is not enough, because the ledger outlives the boot
+and the id does not.** logind keeps its session bookkeeping in
+`/run/systemd/sessions`, which is `tmpfs` — measured on two machines — so the
+state the counter is allocated from cannot survive a restart by construction. A
+machine switched off at night hands session `1` to somebody who would inherit
+session `1` of yesterday. That is not an unlikely collision inside one second; it
+is every machine that gets turned off.
+
+`/proc/sys/kernel/random/boot_id` is `0444` and unique per boot. **The boot id
+with the graphical session's id is an opaque word with no collision available to
+it**: unique per boot by construction, and unique within the boot by the counter.
+It is still compared only by equality, and it still never reaches `evaluate`,
+which takes the anchor and does not know where it came from.
+
+That also buys a property nobody asked for. A sitting cannot be confused with one
+that was open before a restart, so whatever the ledger carried into today's file
+is discarded on the first tick after the boot — which is the right answer, because
+the machine went off and the person got up.
+
 ### Two things the second anchor drags along
 
 **A grant belongs to a sitting.** Grants live in the day's file and the day
@@ -492,11 +531,20 @@ own password while refusing a blanket `auth_self`; and that
 is written by both `machine invite` and `machine prepare`, and is removed by
 `packaging/omahouse.install`.
 
-Also measured, on this machine on the same day: that `loginctl show-user -p
-Timestamp` answers with a weekday name and a locale and that its monotonic form
-counts from a boot the ledger outlives, which is why the sitting is an opaque
-word; and that this machine's own session had been open for three days, which is
-why a sitting crossing midnight is ordinary.
+Also measured, on this machine and on a disposable guest on the same day: that
+`loginctl show-user -p Timestamp` answers with a weekday name and a locale, that
+its monotonic form counts from a boot the ledger outlives, and that it does not
+move across three sittings with lingering on or off; that `show-user -p Display`
+does move and `show-session` on that id answers different timestamps; that
+`/run/systemd/sessions` is `tmpfs` and `/proc/sys/kernel/random/boot_id` is
+`0444`; and that this machine's own session had been open for three days, which
+is why a sitting crossing midnight is ordinary.
+
+**Inferred, and worth marking as such:** that session ids number from low again
+after a restart. Nobody rebooted a machine to watch it. The evidence is the tmpfs
+and two machines whose numbers run the wrong way for a lifetime counter — the one
+up for three days holds `1` and `2`, the guest holds `265` and `268` — and that
+evidence is strong without being a measurement.
 
 Also measured, in Omakure on the same day: that the Conductor opens the session
 towards the Performer, that Cue and Baseline are what cross towards a machine,
