@@ -9,6 +9,32 @@
 > changed with the behaviour. Nothing here has been edited to agree with the new
 > model: a record rewritten to match what shipped later is not a record.
 
+## The balance, measured — 2026-09-08
+
+The model above was replaced the next day and the case was rerun on the same two
+disposable guests, `omahouse-poc` and `omahouse-dad`, through `vm/run.sh --case
+a_battery_schedule_shares_one_balance --keep`. **PASS**, 124 seconds for the
+case, 139 including provisioning and cleanup.
+
+The number the case exists for: **300 seconds spent on `poc` reached `dad` in 9
+seconds**, with the credit unchanged on both sides and the manager having spent
+nothing of its own. Under the portions that trip did not exist — time on one
+machine was time the other could not have.
+
+Everything before that assertion passed unchanged from the run above: explicit
+enrollment, collection, two real `Scheduled` history rows, a manager restart, a
+machine that stopped reporting, reconnection, and a ten minute grant arriving as
+exactly 600 seconds of credit on both machines.
+
+**Two red runs came first, and both were the case being wrong rather than the
+code.** The first failed at setup — `profile add: julia already has a profile` —
+because a previous run had died before its teardown and left the peer dirty and
+running. The second failed on the new assertion after waiting three minutes for
+a number that could not move: the case claimed the far machine's daemon was
+earning time, and the reference setup's `seed_ledger` stops that daemon to write
+a deterministic day. The exact `1800` it kept reading was the tell. A round
+number is a seeded number.
+
 The feature was exercised from the local working trees of omahouse and
 omahouse-battery. The implementation is recorded in omahouse `5221fe8` and
 omahouse-battery `ff26a04`. Nothing was published or installed as a host service.

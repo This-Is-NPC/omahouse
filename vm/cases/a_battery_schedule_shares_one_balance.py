@@ -110,6 +110,36 @@ def exercise(vm, dad):
     spending_moves_the_other_balance(vm, dad, child, json_cli)
 
 
+def _spend_more(child, seconds):
+    """Another `seconds` on the far machine's session, and nothing else touched.
+
+    Written against the file rather than through a verb because the daemon that
+    would earn it is stopped: `seed_ledger` in the reference setup stops it to
+    write a deterministic day, and it never comes back. The first run of this
+    case assumed otherwise, waited three minutes for a number that could not
+    move, and said so.
+
+    `seed_ledger` itself is no good here either -- it writes a whole ledger, and
+    the `allocation` and `observedAt` inside this one are what the manager's
+    plan checks before it will issue anything. So this reads, adds and writes
+    back, and leaves every other field where it was.
+
+    What that means for what this case proves: the *accrual* of time is
+    `close_takes_the_scope_not_the_session`, which seeds a ledger, starts the
+    real daemon and waits for a budget to run out against the real clock -- an
+    ending that only arrives if the seconds were counted. What is measured here
+    is the other half: the arithmetic and the trip, a number that grew on one
+    computer arriving in the other's statement.
+    """
+    import shlex
+    return shlex.quote(
+        "import json, glob\n"
+        f"for p in glob.glob('/var/lib/omahouse/{child}/*.json'):\n"
+        "    d=json.load(open(p))\n"
+        f"    d['budgets']['session'] = d['budgets'].get('session', 0) + {int(seconds)}\n"
+        "    open(p,'w').write(json.dumps(d, indent=2))\n")
+
+
 def spending_moves_the_other_balance(vm, dad, child, json_cli):
     """The one thing the portions could not do, and the reason they went.
 
@@ -118,10 +148,8 @@ def spending_moves_the_other_balance(vm, dad, child, json_cli):
     a balance both are told the same credit and what the *other* has spent of it,
     so an hour is an hour wherever the person sits.
 
-    Nothing is simulated here. `poc` has the child's session open and its own
-    `omahouse watch` is debiting it every couple of seconds, so the spending is
-    real; what is being waited for is that spending reaching the *manager's*
-    statement, which is the trip a portion never made.
+    The trip is what is measured: a number that grew on `poc` has to arrive in
+    the manager's own statement, carried by a scheduled cycle and nobody's hand.
     """
     def statement(box):
         return json_cli(box, 'profile', 'show', child)['allocation']['house']['session']
@@ -137,7 +165,14 @@ def spending_moves_the_other_balance(vm, dad, child, json_cli):
     print(f'      the manager is told {before["elsewhere"]}s spent elsewhere, '
           f'{mine}s of its own')
 
-    deadline = time.monotonic() + 180
+    added = 300
+    vm.root('python3 -c ' + _spend_more(child, added))
+    if spent_here(vm) != before['elsewhere'] + added:
+        raise vm.Failed('the far machine did not take the extra time: '
+                        f'{spent_here(vm)}s, expected {before["elsewhere"] + added}s')
+
+    began = time.monotonic()
+    deadline = began + 240
     while time.monotonic() < deadline:
         now = statement(dad)
         if now['elsewhere'] > before['elsewhere']:
@@ -151,8 +186,12 @@ def spending_moves_the_other_balance(vm, dad, child, json_cli):
                 raise vm.Failed(f'the credit moved too ({before["credit"]} to '
                                 f'{now["credit"]}), so this is a grant and not spending')
             moved = now['elsewhere'] - before['elsewhere']
-            print(f'      and {moved}s later, without anybody dividing anything')
+            if moved != added:
+                raise vm.Failed(f'{added}s were spent on the far machine and {moved}s '
+                                'arrived')
+            print(f'      {added}s spent on {vm.machine} reached {dad.machine} in '
+                  f'{time.monotonic() - began:.0f}s, without anybody dividing anything')
             return
         time.sleep(2)
     raise vm.Failed('time spent on one computer never reached the other machine: '
-                    f'still {statement(dad)["elsewhere"]}s elsewhere after 180s')
+                    f'still {statement(dad)["elsewhere"]}s elsewhere after 240s')
