@@ -110,7 +110,7 @@ urgent colour, rather than doing nothing:
 Only the last line of what the CLI printed reaches that bar. The sentence that
 says *what* was refused is above it and is dropped, so what is on screen is the
 advice with the verdict missing — it is
-[defect 8](what-does-not-work.md#6-a-refusal-loses-its-reason-on-the-way-to-the-window).
+[defect 5](what-does-not-work.md#5-a-refusal-loses-its-reason-on-the-way-to-the-window).
 
 **When it works, there is a row.** This is the view the window opens on from now
 on, and `1` comes back to it from anywhere:
@@ -156,7 +156,7 @@ empty answer:
 
 Then polkit, and then the list has rows in it:
 
-![The programs view: Code with "open now · 2 processes" and "20m left of 45m"; Firefox with "0m left of 1h" and a full red bar; gtk-launch with the red line "that name is not what is running: /usr/share/code/code — 3 of 3"; steam marked "not released".](img/02-operator-programs.png)
+![The programs view: Code with "open now · 5 processes" and "20m left of 45m"; Firefox with "0m left of 1h" and a full red bar; gtk-launch with the red line "that name is not what is running: /usr/share/code/code — 3 of 3"; steam marked "not released".](img/02-operator-programs.png)
 
 Four rows and four different things: a program running under its limit, one that
 has run out (the balance and the bar in the urgent colour), one whose scope name
@@ -216,7 +216,7 @@ adds to the limit rather than replacing it:
 
 The `+` on the left is drawn by the field and is not in it. On a live session the
 keystroke that opened the sheet lands in the field as well, which is
-[defect 10](what-does-not-work.md#8-the-key-that-opens-more-time-today-lands-in-the-field).
+[defect 7](what-does-not-work.md#7-the-key-that-opens-more-time-today-lands-in-the-field).
 
 # 5. Saying which sites open
 
@@ -334,7 +334,7 @@ there is nothing to hand more of.
 Worth knowing before reading that picture: the needle is `o`, and it has to be
 something that also matches the profile's own name, because one filter is
 applied to all four lists at once. That is
-[defect 7](what-does-not-work.md#5-the-filter-narrows-all-four-lists-at-once).
+[defect 4](what-does-not-work.md#4-the-filter-narrows-every-list-at-once).
 
 # 8. The same window, from the other side
 
@@ -419,7 +419,7 @@ nowhere in this window: `House` computes `unnamedProcesses` for every profile
 and no view reads it. What the status bar does say is the other number, `7 it
 cannot see`, which is the processes in `session.slice` — a different fact, and
 not this one. It is
-[defect 9](what-does-not-work.md#7-a-scope-nothing-can-name-has-no-screen-in-the-window).
+[defect 6](what-does-not-work.md#6-a-scope-nothing-can-name-has-no-screen-in-the-window).
 
 ---
 

@@ -4,7 +4,7 @@ Every defect omahouse has, in one place, each with what to do in the meantime.
 **Nothing else in this documentation names a defect that is not here**, and
 nothing here has a fix in omahouse today.
 
-The first five were measured on a real Omarchy 4.0.2, driven by keyboard and
+The first four were measured on a real Omarchy 4.0.2, driven by keyboard and
 captured frame by frame; the pictures come from that run, where the account
 under rules was called `julia`. The rest are in the code as written, and the
 last one was found by running the shipped binary while this page was being
@@ -12,25 +12,7 @@ assembled.
 
 ---
 
-## 1. Programs opened from the menu cannot be allowed by name
-
-**What happens.** The Omarchy menu (`SUPER + Space`) launches everything through
-`gtk-launch`, so every entry collapses into that one scope id. Under
-`default: deny` with the teeth in, the program is closed before its window
-appears, and the notification accuses the launcher rather than the program:
-
-![The Omarchy menu opened "Regras da Casa"; two seconds later the notification says `gtk-launch is not allowed — It is not one of the programs released for Júlia.` The window never appeared.](../vm/shots/08-menu-gtk-launch-negado.png)
-
-What is left in the day's report is a line reading
-`app-Hyprland-gtk\x2dlaunch-…: not on the list, and was closed`.
-
-**What to do in the meantime.** Build the allowlist out of Omarchy's key
-bindings, which give real ids, and open what is missing with
-`uwsm app -- <name>.desktop` from a terminal that is allowed.
-`sudo omahouse allow kid gtk-launch` makes the menu work — and releases the
-whole menu, which is an unknown and moving set of programs.
-
-## 2. If the screen locks on idle, the last warnings go unseen
+## 1. If the screen locks on idle, the last warnings go unseen
 
 **What happens.** Omarchy's idle service locks the screen and blanks the monitor
 a second or two later. The one-minute warning and the grace warning go out
@@ -43,7 +25,7 @@ already ended, having seen nothing:
 reliable one. If a profile really has to warn to the end, turn the idle lock off
 for that account — knowing that is loosening something else.
 
-## 3. When the session runs out, the screen goes black
+## 2. When the session runs out, the screen goes black
 
 **What happens.** SDDM 0.21 reads a session ended by `loginctl terminate-user`
 as `Process crashed` and does nothing further: no greeter, no new display.
@@ -64,7 +46,7 @@ and not taken.
 restarts `sddm` when the seat is left with no session — or do not use a session
 budget that logs out, on a machine nobody will be able to reach the console of.
 
-## 4. Chromium turns up as two ids
+## 3. Chromium turns up as two ids
 
 **What happens.** One Chromium window on real Omarchy produces two scopes:
 `chromium`, holding the child processes, and `org.chromium.Chromium`, holding
@@ -81,7 +63,7 @@ sudo omahouse allow kid chromium --limit 45m
 sudo omahouse allow kid org.chromium.Chromium --limit 45m
 ```
 
-## 5. The filter narrows every list at once
+## 4. The filter narrows every list at once
 
 **What happens.** There is one filter in the window, and `/` applies it to the
 people, the programs, the day, the sites and the machines together. A needle that misses the
@@ -95,7 +77,7 @@ that.
 **What to do in the meantime.** Filter with something that also matches the
 profile's own name, or press `Esc` and walk the list with `j` and `k`.
 
-## 6. A refusal loses its reason on the way to the window
+## 5. A refusal loses its reason on the way to the window
 
 **What happens.** Only the last line the CLI printed reaches the status bar. The
 sentence that says *what* was refused and why — `profile add: howl is in wheel,
@@ -108,7 +90,7 @@ missing:
 **What to do in the meantime.** Run the same verb in a terminal to read the
 whole refusal.
 
-## 7. A scope nothing can name has no screen in the window
+## 6. A scope nothing can name has no screen in the window
 
 **What happens.** `omahouse status` reports these prominently — a
 `tmux-spawn-<uuid>.scope` with twenty processes in it is somebody at the
@@ -119,7 +101,7 @@ What the status bar does show is the other number, the processes in
 
 **What to do in the meantime.** Use `omahouse status` for that number.
 
-## 8. The key that opens more time today lands in the field
+## 7. The key that opens more time today lands in the field
 
 **What happens.** Pressing `+` on a program opens the *more time today* sheet
 and the same keystroke arrives in the field it opened, so the field starts with
@@ -129,7 +111,7 @@ a lone `+` in it and `ok` is born greyed out:
 
 **What to do in the meantime.** Clear the `+` before typing the number.
 
-## 9. In a narrow window the header overlaps the tabs
+## 8. In a narrow window the header overlaps the tabs
 
 **What happens.** The header draws over the subtitle and the tabs, and the
 result is unreadable.

@@ -131,7 +131,7 @@ In the window the same refusal lands on the status bar, in red:
 Only the last line the CLI printed reaches that bar, so the sentence that says
 *what* was refused is dropped and what is on screen is the advice with the
 verdict missing. That is a known defect —
-[a refusal loses its reason on the way to the window](what-does-not-work.md#6-a-refusal-loses-its-reason-on-the-way-to-the-window)
+[a refusal loses its reason on the way to the window](what-does-not-work.md#5-a-refusal-loses-its-reason-on-the-way-to-the-window)
 — and running the same verb in a terminal is how to read the whole of it.
 
 **There is no such account yet.** Not a refusal: the profile is written and the

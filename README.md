@@ -156,11 +156,9 @@ logout, the counting and the daemon.
 ## What is broken
 
 A sample. None of them has a fix here yet, and
-[what does not work yet](docs/what-does-not-work.md) is the whole list — nine
+[what does not work yet](docs/what-does-not-work.md) is the whole list — eight
 of them, each with what to do in the meantime.
 
-- Programs opened from the Omarchy menu all arrive as one id, `gtk-launch`, so
-  they cannot be released by name.
 - The idle lock takes the screen, and the last warnings go out behind it.
 - When a session runs out, SDDM stops and the screen stays black until somebody
   brings it back.

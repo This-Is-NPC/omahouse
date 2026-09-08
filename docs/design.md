@@ -916,10 +916,19 @@ scope. The two signals fail in opposite situations: the id fails on the shim and
 is right on the flatpak; the `exe` fails on the flatpak (`bwrap`) and is right on
 the shim.
 
-**Cost:** `evaluate` still matches by id and stays pure. The dominant `exe` is
-*configuration* information — it keeps the operator from releasing blind, and it
-is what `status` and the studio's picker print under each id. It is not a
-decision criterion.
+**Cost:** `evaluate` stays pure — it is handed the `exe` along with the id and
+reads no machine of its own. The `exe` is still *configuration* information
+first: it keeps the operator from releasing blind, and it is what `status` and
+the studio's picker print under each id.
+
+It also decides, in exactly one place and in one direction. A selector may match
+a scope by the `exe` **only where the id is not the name of what is running**,
+and it can only ever add a match, never take one away. That is what lets a rule
+about `code` reach the program the menu opened as `gtk-launch`, and it is what
+keeps `org.freedesktop.Platform` matching its own rule while `bwrap` is the
+executable of every flatpak alike. A scope that has already said what it is
+answers to that name and to no other — otherwise the path would be a selector of
+its own, and an allowlist would be quietly wider than what is written in it.
 
 The same round found a second, distinct blind spot: 23 scopes under `app.slice`
 whose names the parser refuses (`tmux-spawn-<uuid>.scope`, 71 processes). Unlike

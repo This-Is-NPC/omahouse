@@ -24,8 +24,10 @@ what may open. Putting a clock on any of it is
 
 **An app's identity, as far as omahouse is concerned, is its systemd scope id**
 — not the path of its executable. That is what groups a browser's twenty-one
-processes into one app, and it is what goes into a rule. `omahouse status` is
-what lists the ids that are open right now:
+processes into one app, and it is what goes into a rule. The executable is a
+second opinion and never a replacement: it is consulted only for a scope whose
+id is not the name of what is running, which is [the launcher below](#2-the-menu-names-every-program-after-the-launcher).
+`omahouse status` is what lists the ids that are open right now:
 
 ```bash
 omahouse status
@@ -63,42 +65,36 @@ is a sentence and never a verdict: the rule goes on matching the id, and the
 executable is there so that nobody releases blind. A flatpak reads the same way
 for the opposite reason, since every flatpak on a machine runs `/usr/bin/bwrap`.
 
-## 2. Know the trap before you write the list
-
-**The Omarchy menu is no way to build an allowlist, and this decides the shape
-of yours.**
+## 2. The menu names every program after the launcher
 
 The Omarchy menu (`SUPER + Space` → *Apps*) launches **everything** through
 `gtk-launch`. The scope that is born is called `gtk-launch`, not the name of the
-program, and every entry in that menu collapses into that one id. Under
-`default: deny` the program is closed before its window appears, and the
-notification names the launcher rather than the program somebody was trying to
-open:
+program, and every entry in that menu collapses into that one id.
 
-![The Omarchy menu opened "Regras da Casa"; two seconds later the notification says `gtk-launch is not allowed — It is not one of the programs released for Júlia.` The window never appeared.](../vm/shots/08-menu-gtk-launch-negado.png)
+**You still write the program's own name.** Where a scope's id is not the name
+of what is running, omahouse asks what is: a rule about `code` reaches the
+program the menu opened, and so does its limit. The id is never overruled by
+this — it only gains a second way to be named — so the rule you wrote is the
+rule you can read back.
+
+```bash
+sudo omahouse allow kid code --limit 45m
+```
+
+That covers the menu, `uwsm app --`, and a terminal, because all three end up
+running the same executable inside whatever scope launched them.
 
 *(The pictures from the live machine were taken with the account under rules
 called `julia`; the commands here say `kid`. They are the same placeholder.)*
 
-Allowing `gtk-launch` **allows the whole menu** — an unknown set of programs
-that changes with every `.desktop` file installed.
+**`gtk-launch` is still not a name to write.** Allowing it allows the whole
+menu — an unknown set of programs that changes with every `.desktop` file
+installed. It is a launcher, and what you want released is what it launches.
 
-While it is like this, build the list out of programs opened by Omarchy's **key
-bindings**, which give real ids:
-
-| key | the id it is born with |
-|---|---|
-| `SUPER + Enter` | `xdg-terminal-exec` |
-| `SUPER + Shift + B` | `chromium` **and** `org.chromium.Chromium` |
-
-and open anything else from a terminal that is allowed:
-
-```bash
-uwsm app -- omahouse.desktop
-```
-
-The whole of this defect, with what to do in the meantime, is
-[programs opened from the menu cannot be allowed by name](what-does-not-work.md#1-programs-opened-from-the-menu-cannot-be-allowed-by-name).
+**And `bwrap` is not one either, for the opposite reason.** Every flatpak on the
+machine runs `/usr/bin/bwrap`, so releasing the runner releases all of them. A
+flatpak's id is already correct — `org.freedesktop.Platform` — and that is the
+name to write.
 
 ## 3. Write the rules
 
@@ -208,7 +204,7 @@ Against a real catalogue, on the live machine, most of it is shims:
 Choosing a row asks how long a day for it, and then polkit. The list that comes
 out reads like this:
 
-![The programs view: Code with "open now · 2 processes" and "20m left of 45m"; Firefox with "0m left of 1h" and a full red bar; gtk-launch with the red line "that name is not what is running: /usr/share/code/code — 3 of 3"; steam marked "not released".](img/02-operator-programs.png)
+![The programs view: Code with "open now · 5 processes" and "20m left of 45m"; Firefox with "0m left of 1h" and a full red bar; gtk-launch with the red line "that name is not what is running: /usr/share/code/code — 3 of 3"; steam marked "not released".](img/02-operator-programs.png)
 
 Four rows and four different things: a program running under its limit, one that
 has run out, one whose scope name is a launcher shim with something else inside
@@ -239,7 +235,7 @@ processes in it is somebody at the keyboard; omahouse counts it and cannot name
 it. No rule can reach it, so its verdict is the profile's default — which under
 `default: deny` with the teeth in means it is closed. `omahouse status` reports
 these under `Counted, not named`, and
-[the window has no screen for them](what-does-not-work.md#7-a-scope-nothing-can-name-has-no-screen-in-the-window).
+[the window has no screen for them](what-does-not-work.md#6-a-scope-nothing-can-name-has-no-screen-in-the-window).
 
 **Some programs are out of reach entirely.** Anything started by a raw `exec` in
 a keybinding, or from inside a terminal, lands in the compositor's own cgroup,

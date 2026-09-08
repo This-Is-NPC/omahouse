@@ -78,7 +78,7 @@ Two things worth knowing:
 - **Chromium turns up as two ids**, so it takes two budgets with the same number
   — `chromium` and `org.chromium.Chromium`. Otherwise the browser closes for the
   wrong reason and the grace warning arrives twice.
-  [The defect](what-does-not-work.md#4-chromium-turns-up-as-two-ids).
+  [The defect](what-does-not-work.md#3-chromium-turns-up-as-two-ids).
 
 A budget that is already there gets the new number and keeps everything else:
 what a budget does when it runs out is a decision somebody made once, and a new
@@ -182,9 +182,9 @@ the turn of the day, a grant, `enforce --off` and `profile remove` each let
 somebody back in.
 
 Two defects live in this sequence, and both were measured:
-[if the screen locks on idle the last warnings go unseen](what-does-not-work.md#2-if-the-screen-locks-on-idle-the-last-warnings-go-unseen),
+[if the screen locks on idle the last warnings go unseen](what-does-not-work.md#1-if-the-screen-locks-on-idle-the-last-warnings-go-unseen),
 and
-[when the session runs out the screen goes black](what-does-not-work.md#3-when-the-session-runs-out-the-screen-goes-black).
+[when the session runs out the screen goes black](what-does-not-work.md#2-when-the-session-runs-out-the-screen-goes-black).
 Read both before switching on `logout` on a machine nobody can reach the console
 of.
 
