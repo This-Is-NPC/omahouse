@@ -338,19 +338,42 @@ restraint and not as configuration: `packaging/omahouse.install` lists
 
 ## 5. Two people wrote the same profile
 
-### The tiebreak
+### The tiebreak, and the smaller job it actually has
 
 **The most recently written document wins.** An administrator who edited the
 cache while the central omahouse was down beats the central copy, because their
 edit is newer.
 
-This requires a field the profile does not have today. `schemaVersion` exists;
-a written-at and a written-by do not. Without them there is no "most recent" —
-there are only two different files.
+This requires fields the profile did not have. `schemaVersion` existed; a
+written-at and a written-by did not, and without them there is no "most recent",
+only two different files. They also do a second job: they are how the manager
+tells a profile it issued from one an administrator created on a machine.
 
-That field also does the second job: it is how the central omahouse tells a
-profile it issued from one an administrator created on a machine, which is what
-the merge screen has to show.
+**The tiebreak decides which copy is current. It does not authorise discarding a
+policy nobody has seen, and an earlier draft of this page conflated the two.**
+
+The difference is not academic, because **the manager pushes on a schedule**.
+Recency therefore favours the centre by construction: a hand edit made at two
+o'clock is passed by a routine push five minutes later, with nobody deciding
+anything and nobody knowing. That would defeat the reason omahouse is installed
+whole on every machine — an administrator's fix that the next cycle erases was
+never a fix.
+
+So the push **stands off** rather than resolving. A local profile whose
+`writtenBy` is not the node's account, carrying a stamp the manager never
+issued, is a human edit the manager does not know about: it is left alone, and
+the standing off is said out loud. The merge is where somebody decides, and it
+proposes rather than deciding.
+
+Without that, the merge would have nothing to propose — the push would have
+destroyed the evidence before the merge ran, and the screen would list zero
+forever without ever looking wrong, because zero is the ordinary answer.
+
+**And the proposal carries the whole profile it believes it is replacing, not
+its stamp.** The stamp has one-second resolution, so two edits inside the same
+second are indistinguishable and a decision approved against the first would
+land on the second. Carrying the document asks the question that has no clock in
+it: *is this still what you were shown?*
 
 ### The trap: clocks
 
