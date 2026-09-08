@@ -38,6 +38,7 @@
 #include "House.h"
 #include "Ledger.h"
 #include "Fleet.h"
+#include "Kind.h"
 #include "Profile.h"
 #include "Theme.h"
 #include "Paths.h"
@@ -155,6 +156,7 @@ private slots:
     void saysWhatIsReallyInsideAShim();
     void drawsItself();
     void fleetPanelShowsMissingMachinesAndUsesTheKeyboard();
+    void theTodayViewAddsUpTheHouse();
     void theSubjectFaceHasNothingToPress();
     void theWindowNeverWritesToTheMachine();
     void writesTheOperatorShots();
@@ -1617,6 +1619,143 @@ void TestStudio::fleetPanelShowsMissingMachinesAndUsesTheKeyboard()
     // A subject cannot enter the operator's fleet view through its public go.
     m_admin->run("fixture", {"machine", "remove", "station-02"});
     QVERIFY(waitForWrite());
+}
+
+/// The day of the *house*, on the view that says today.
+///
+/// `session: 2h` is two hours in the household and not two hours per computer
+/// — Fleet.h says so and `omahouse house` in a terminal is where it was said.
+/// A manager that drew only the machine it is sitting at was a window showing a
+/// third of somebody's evening as the whole of it.
+///
+/// Three things at once, because separately each of them passes on a bug: the
+/// total adds the collected day in, the machine that has sent nothing today is
+/// named rather than quietly left out of the sum, and a machine that is not a
+/// manager says nothing at all.
+void TestStudio::theTodayViewAddsUpTheHouse()
+{
+    if (!root()->property("operating").toBool()) QSKIP("operator only");
+    seedTheExampleHousehold();
+    if (QTest::currentTestFailed())
+        return;
+
+    const QString who = QStringLiteral("nobody");
+    const QDate today = QDate::currentDate();
+
+    // The session budget's id, out of what the verbs wrote. Not a literal: the
+    // id is the CLI's to choose and a test that hard-codes it is a test that
+    // goes green against a profile nobody has.
+    QVector<Profile> profiles;
+    QString error;
+    QVERIFY2(readProfiles(paths::profilesFile(), &profiles, &error), qPrintable(error));
+    QCOMPARE(profiles.size(), 1);
+    QString session;
+    for (const Budget &budget : profiles.first().budgets) {
+        if (budget.match == QLatin1String("*"))
+            session = budget.id;
+    }
+    QVERIFY2(!session.isEmpty(), "the fixture has no session budget to add up");
+
+    // What the fixture spent here: 70 minutes against a 2h limit with 10
+    // minutes handed over, so 2h10m of allowance and 60 minutes left *on this
+    // machine*. Read rather than assumed, so that the arithmetic below is
+    // about the numbers the window is actually holding.
+    const auto sessionRow = [&]() {
+        for (const QVariant &row : todayOf(who)) {
+            const QVariantMap map = row.toMap();
+            if (map.value(QStringLiteral("session")).toBool())
+                return map;
+        }
+        return QVariantMap();
+    };
+    QVariantMap row = sessionRow();
+    QVERIFY2(!row.isEmpty(), "the today view has no session row to add up");
+    const int hereSeconds = row.value(QStringLiteral("spentSeconds")).toInt();
+    const int allowance = row.value(QStringLiteral("allowanceSeconds")).toInt();
+    QCOMPARE(hereSeconds, 70 * 60);
+    QCOMPARE(allowance, 130 * 60);
+
+    // Before anything else: a machine that is not a manager says nothing about
+    // a house. Asserted first and against the same row the rest of this case
+    // reads, so `house` being true later is a change and not a constant.
+    QCOMPARE(row.value(QStringLiteral("house")).toBool(), false);
+
+    // Two other computers, one of which has sent a day and one of which has
+    // not. The second is the case Fleet.h and `omahouse house` both insist on
+    // saying out loud: a total quietly missing a computer is worse than none.
+    m_admin->run("fixture", {"machine", "add", "the kitchen laptop"});
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    m_admin->run("fixture", {"machine", "add", "the study"});
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+
+    Ledger theirs;
+    theirs.user = who;
+    theirs.date = today;
+    theirs.seconds.insert(session, 30 * 60);
+    const QString collected = paths::elsewhereLedgerFile(QStringLiteral("the kitchen laptop"),
+                                                         who, today);
+    QVERIFY(QDir().mkpath(QFileInfo(collected).absolutePath()));
+    QVERIFY2(writeLedger(collected, theirs, &error), qPrintable(error));
+
+    // The machines exist and one of them has a day, and the window still says
+    // nothing: what turns this on is this machine being the household's
+    // console, which is `machine.json` and not the length of `machines.json`.
+    m_house->reload();
+    settle();
+    row = sessionRow();
+    QVERIFY(!row.isEmpty());
+    QCOMPARE(row.value(QStringLiteral("house")).toBool(), false);
+
+    ThisMachine mine;
+    mine.kind = Kind::Manager;
+    mine.name = QStringLiteral("the desk");
+    mine.since = QDateTime::currentDateTime();
+    QVERIFY2(writeThisMachine(paths::thisMachineFile(), mine, &error), qPrintable(error));
+    m_house->reload();
+    settle();
+
+    row = sessionRow();
+    QVERIFY(!row.isEmpty());
+    QVERIFY2(row.value(QStringLiteral("house")).toBool(),
+             "this machine manages the household and the day is still only its own");
+    QCOMPARE(row.value(QStringLiteral("houseSpentSeconds")).toInt(), (70 + 30) * 60);
+    QCOMPARE(row.value(QStringLiteral("houseLeftSeconds")).toInt(), 30 * 60);
+    QCOMPARE(row.value(QStringLiteral("houseSpent")).toString(), QStringLiteral("1h40m"));
+    QCOMPARE(row.value(QStringLiteral("houseLeft")).toString(), QStringLiteral("30m"));
+    // What is left here is untouched. The machine goes on enforcing its own
+    // number; adding the house up is a thing the window says and not a thing
+    // this machine does differently because it was said.
+    QCOMPARE(row.value(QStringLiteral("spentSeconds")).toInt(), hereSeconds);
+    QCOMPARE(row.value(QStringLiteral("leftSeconds")).toInt(), 60 * 60);
+
+    // Every machine that contributed, named, and the one that did not, named
+    // separately. A sum whose parts cannot be read back is a number nobody can
+    // check against `omahouse house`.
+    const QString where = row.value(QStringLiteral("houseWhere")).toString();
+    QVERIFY2(where.contains(QStringLiteral("the kitchen laptop 30m")), qPrintable(where));
+    QVERIFY2(where.contains(QStringLiteral("here 1h10m")), qPrintable(where));
+    QVERIFY2(!where.contains(QStringLiteral("the study")), qPrintable(where));
+    QCOMPARE(row.value(QStringLiteral("notHeardFrom")).toString(),
+             QStringLiteral("the study"));
+
+    // And it is on screen, not only in the snapshot.
+    key('3');
+    QCOMPARE(root()->property("view").toInt(), 3);
+    QQuickItem *drawn = awaitItem("todayHouse");
+    QVERIFY2(drawn, "the today view draws no household line");
+    const QString said = drawn->property("text").toString();
+    QVERIFY2(said.contains(QStringLiteral("1h40m")), qPrintable(said));
+    QVERIFY2(said.contains(QStringLiteral("the study")), qPrintable(said));
+
+    // Put back, or every case after this one runs on a manager.
+    QVERIFY(QFile::remove(paths::thisMachineFile()));
+    m_admin->run("fixture", {"machine", "remove", "the kitchen laptop"});
+    QVERIFY(waitForWrite());
+    m_admin->run("fixture", {"machine", "remove", "the study"});
+    QVERIFY(waitForWrite());
+    QDir(paths::elsewhereDir()).removeRecursively();
+    m_house->reload();
+    settle();
 }
 
 void TestStudio::writesTheOperatorShots()
