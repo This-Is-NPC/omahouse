@@ -2,6 +2,7 @@
 
 #include "Blocked.h"
 #include "Chromium.h"
+#include "Day.h"
 #include "Focus.h"
 #include "Paths.h"
 #include "Users.h"
@@ -415,9 +416,12 @@ void Watch::observe(const Profile &profile, Watched *watched, const SeatReading 
         return;
     }
     Ledger before;
-    bool missing = false;
     QString error;
-    if (!readLedger(path, &before, &error, &missing)) {
+    // Whether today has a file of its own is not a question the loop has: an
+    // empty day and a day nobody has spent yet are the same thing to it, and
+    // `readDay` has already answered the one question the difference matters
+    // for.
+    if (!readDay(profile, now.date(), &before, nullptr, &error)) {
         // A ledger that is there and will not parse is not a day to start over:
         // counting from zero on top of a file somebody could still repair is how
         // an afternoon disappears. It is said and skipped, and the other users
@@ -428,10 +432,6 @@ void Watch::observe(const Profile &profile, Watched *watched, const SeatReading 
         // and the one that locks them out is not.
         watched->error = error;
         return;
-    }
-    if (missing) {
-        before.user = profile.user;
-        before.date = now.date();
     }
 
     if (!watched->session) {

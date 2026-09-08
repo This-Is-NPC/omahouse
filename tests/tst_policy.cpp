@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include "Policy.h"
+#include "Allocation.h"
 
 using namespace omahouse;
 
@@ -1129,6 +1130,83 @@ private slots:
         QCOMPARE(outcome.ledger.date, QDate(2026, 9, 4));
         QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("session")), 1200);
         QCOMPARE(outcome.ledger.keptSecondsFor(QStringLiteral("pot")), 2400);
+    }
+
+    // Handing over more is the only thing that refills a pot, so it has to
+    // survive as many nights as the spending does. A grant lives in the file of
+    // the day it was made -- `report` and the household both add days together
+    // out of `grants` -- so the turn folds the outgoing day's grants into a
+    // running total instead of copying them, and the fold has to be exactly
+    // once per night and then carried onward.
+    //
+    // Two nights and not one, deliberately. With one, a turn that folded the
+    // outgoing day's grants and dropped everything folded before it looks
+    // exactly like a turn that works.
+    void whatWasHandedOverToAPotSurvivesEveryNightAfterIt()
+    {
+        Profile profile = profileOf();
+        Budget pot = budget(QStringLiteral("pot"), QStringLiteral("chromium"), 60,
+                            OnExhausted::Warn);
+        pot.resets = Resets::Never;
+        profile.budgets.append(pot);
+        const AppScope browser = scope(QStringLiteral("chromium"));
+
+        Ledger monday = startOfDay();
+        monday.addKeptSeconds(QStringLiteral("pot"), 100);
+        monday.grants.append(Grant {QDateTime(monday.date, QTime(21, 0)),
+                                    QStringLiteral("howl"), QStringLiteral("pot"), 10, false});
+
+        const Ledger tuesday = carryInto(monday.date.addDays(1), monday, profile);
+        QCOMPARE(tuesday.keptSecondsFor(QStringLiteral("pot")), 100);
+        QCOMPARE(tuesday.keptGrantedFor(QStringLiteral("pot")), 600);
+        // The grants themselves stay in the day they were made, which is what
+        // keeps `report` and `collect` from counting one hand-over once per day
+        // it outlived.
+        QVERIFY(tuesday.grants.isEmpty());
+
+        // An hour is what the budget says and it is not what the pot holds: one
+        // hour plus the ten minutes handed over on Monday.
+        QCOMPARE(allowanceSeconds(profile, pot, tuesday, tuesday.date), 3600 + 600);
+
+        Ledger spent = tuesday;
+        spent.addKeptSeconds(QStringLiteral("pot"), 50);
+        spent.grants.append(Grant {QDateTime(spent.date, QTime(20, 0)),
+                                   QStringLiteral("howl"), QStringLiteral("pot"), 5, false});
+
+        const Ledger wednesday = carryInto(spent.date.addDays(1), spent, profile);
+        QCOMPARE(wednesday.keptSecondsFor(QStringLiteral("pot")), 150);
+        QCOMPARE(wednesday.keptGrantedFor(QStringLiteral("pot")), 900);
+        QCOMPARE(allowanceSeconds(profile, pot, wednesday, wednesday.date), 3600 + 900);
+
+        // And the loop agrees with the function: a tick on Wednesday spends the
+        // pot that walked in and no other.
+        const Outcome outcome = evaluate(profile, {browser}, wednesday,
+                                         QDateTime(wednesday.date, QTime(9, 0)), 30);
+        QCOMPARE(outcome.ledger.keptSecondsFor(QStringLiteral("pot")), 180);
+        QCOMPARE(outcome.ledger.keptGrantedFor(QStringLiteral("pot")), 900);
+    }
+
+    // A daily budget is not refilled by anything a pot was refilled with. The
+    // fold is asked about every budget in the profile and answers for one kind
+    // of them, and a fold that ran for all of them would put a grant into a
+    // running total that is read back tomorrow -- ten minutes handed over on
+    // Monday quietly becoming ten minutes a day forever.
+    void aDailyBudgetTakesNothingAcrossTheNight()
+    {
+        Profile profile = profileOf();
+        profile.budgets.append(budget(QStringLiteral("session"), QStringLiteral("*"), 60,
+                                      OnExhausted::Warn));
+
+        Ledger monday = startOfDay();
+        monday.addSeconds(QStringLiteral("session"), 100);
+        monday.grants.append(Grant {QDateTime(monday.date, QTime(21, 0)),
+                                    QStringLiteral("howl"), QStringLiteral("session"), 10,
+                                    false});
+
+        const Ledger tuesday = carryInto(monday.date.addDays(1), monday, profile);
+        QCOMPARE(tuesday.secondsFor(QStringLiteral("session")), 0);
+        QVERIFY(tuesday.keptGranted.isEmpty());
+        QCOMPARE(allowanceSeconds(profile, profile.budgets.last(), tuesday, tuesday.date), 3600);
     }
 
     // The turn of the date is not somebody handing over more. A pot that ran

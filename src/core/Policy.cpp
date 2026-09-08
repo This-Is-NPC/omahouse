@@ -68,6 +68,37 @@ bool anySelectorMatches(const QStringList &selectors, const AppScope &scope)
 
 } // namespace
 
+Ledger carryInto(const QDate &date, const Ledger &previous, const Profile &profile)
+{
+    Ledger fresh;
+    fresh.user = previous.user.isEmpty() ? profile.user : previous.user;
+    fresh.date = date;
+    // What a pot has spent walks into the new day with it. This is the whole of
+    // what `resets: never` is: the daily budgets start over here and these do
+    // not, so two hours are two hours until somebody hands over more -- and the
+    // turn of the date is not somebody.
+    fresh.keptSeconds = previous.keptSeconds;
+    // And so does what somebody handed over, because handing over more is the
+    // only thing that refills a pot and it is no use to a pot it cannot reach.
+    // Folded here and not carried as grants, once per day crossed: `report`,
+    // `house` and `collect` all add days together out of `grants`, and a grant
+    // copied into every day it outlived would be counted once per day there.
+    //
+    // The outgoing day's grants and no others. Every earlier day was folded by
+    // the turn that left it, so this walks the whole chain by only ever looking
+    // at one link of it.
+    fresh.keptGranted = previous.keptGranted;
+    for (const Budget &budget : profile.budgets) {
+        if (budget.carriesOver())
+            fresh.addKeptGranted(budget.id, previous.grantedSeconds(budget.id));
+    }
+    // The events do not come with it, deliberately. A budget that ran out
+    // yesterday and is still out says so again this morning before it acts,
+    // which is docs/design.md §6: nobody is cut off cold, and a person who meets
+    // a spent pot at nine has been told why.
+    return fresh;
+}
+
 Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const Ledger &ledger,
                  const QDateTime &now, int tickSeconds, const QString &siteInFront,
                  const QStringList &alsoFurniture)
@@ -81,22 +112,8 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
     // the new file. Warnings and exhaustions go with it, which is what makes a
     // fresh morning a fresh set of warnings.
     const QDate today = now.date();
-    if (outcome.ledger.date != today) {
-        Ledger fresh;
-        fresh.user = outcome.ledger.user.isEmpty() ? profile.user : outcome.ledger.user;
-        fresh.date = today;
-        // What a pot has spent walks into the new day with it. This is the
-        // whole of what `resets: never` is: the daily budgets start over here
-        // and these do not, so two hours are two hours until somebody hands
-        // over more -- and the turn of the date is not somebody.
-        //
-        // The events do not come with it, deliberately. A budget that ran out
-        // yesterday and is still out says so again this morning before it acts,
-        // which is docs/design.md §6: nobody is cut off cold, and a person who
-        // meets a spent pot at nine has been told why.
-        fresh.keptSeconds = outcome.ledger.keptSeconds;
-        outcome.ledger = fresh;
-    }
+    if (outcome.ledger.date != today)
+        outcome.ledger = carryInto(today, outcome.ledger, profile);
     if (outcome.ledger.user.isEmpty())
         outcome.ledger.user = profile.user;
 
@@ -221,8 +238,7 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
             continue;
 
         const int limit = allowanceSeconds(profile, budget, outcome.ledger, now.date());
-        const int spent = budget.carriesOver() ? outcome.ledger.keptSecondsFor(budget.id)
-                                               : outcome.ledger.secondsFor(budget.id);
+        const int spent = spentSeconds(budget, outcome.ledger);
         const int left = limit - spent;
 
         if (left > 0) {

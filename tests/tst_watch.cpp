@@ -979,6 +979,185 @@ private slots:
         QCOMPARE(readBack(after).date, after);
     }
 
+    // A budget that never resets has to survive the night, and until this test
+    // was written it did not. `evaluate` carries the pot forward when it is
+    // handed a ledger from another day -- and the loop never hands it one. It
+    // builds the path from `now.date()`, so the first tick after midnight reads
+    // a file that is not there, calls it an empty today, and the turn of the
+    // date is over before `evaluate` is asked about it. The pot went back to
+    // full every night, which is the one thing `resets: never` promises will
+    // not happen. tst_policy's midnight test passes on `evaluate` alone and
+    // could not see this: the defect is in who calls it.
+    void aPotWalksIntoTheNewDayThroughTheLoop()
+    {
+        makeSession();
+        Profile keeping = profile();
+        keeping.budgets = {
+            Budget {QStringLiteral("pot"), {QStringLiteral("chromium")}, Selects::App, 120,
+                    Resets::Never, OnExhausted::Close},
+        };
+
+        const QDate before(2026, 9, 3);
+        const QDate after(2026, 9, 4);
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        watch.tick({keeping}, QDateTime(before, QTime(23, 59, 59)));
+        QCOMPARE(readBack(before).keptSecondsFor(QStringLiteral("pot")), 2);
+
+        watch.tick({keeping}, QDateTime(after, QTime(0, 0, 1)));
+        QCOMPARE(readBack(after).keptSecondsFor(QStringLiteral("pot")), 4);
+
+        // And the daily counter beside it did what it always did: the pot
+        // walking forward is not the whole ledger walking forward.
+        QCOMPARE(readBack(after).secondsFor(QStringLiteral("pot")), 0);
+    }
+
+    // Handing over more time is the only thing that refills a pot, and it died
+    // at midnight while the spending it paid for did not. The turn of the date
+    // carried `keptSeconds` and dropped the grants, so a pot came into the
+    // morning with yesterday's spending against today's smaller allowance --
+    // strictly worse than losing both, because the operator's decision is the
+    // half that vanished.
+    void aGrantOnAPotOutlivesTheNightItWasMadeIn()
+    {
+        makeSession();
+        Profile keeping = profile();
+        keeping.enforce = true;
+        keeping.graceSeconds = 0;
+        keeping.warnAt = {};
+        keeping.budgets = {
+            Budget {QStringLiteral("pot"), {QStringLiteral("chromium")}, Selects::App, 1,
+                    Resets::Never, OnExhausted::Close},
+        };
+
+        const QDate before(2026, 9, 3);
+        const QDate after(2026, 9, 4);
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        // Seventy seconds in one tick spends the whole minute the pot holds.
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {70, false});
+        watch.tick({keeping}, QDateTime(before, QTime(23, 58, 0)));
+        QCOMPARE(readBack(before).keptSecondsFor(QStringLiteral("pot")), 70);
+
+        // Five minutes handed over, which covers the seventy seconds already
+        // spent and leaves the pot with time in it.
+        Ledger refilled = readBack(before);
+        refilled.grants.append(Grant {QDateTime(before, QTime(23, 59, 0)),
+                                      QStringLiteral("howl"), QStringLiteral("pot"), 5, false});
+        QString error;
+        QVERIFY2(writeLedger(ledgerPath(before), refilled, &error), qPrintable(error));
+
+        const Cycle cycle = watch.tick({keeping}, QDateTime(after, QTime(0, 0, 1)));
+        QCOMPARE(readBack(after).keptSecondsFor(QStringLiteral("pot")), 140);
+        QVERIFY2(unitsOf(cycle.users.first().done, Done::What::Terminate).isEmpty(),
+                 "the browser was closed on a pot the operator had refilled the night before");
+    }
+
+    // Which file is the last day is decided by reading the directory, and a
+    // directory is a place other things end up. Two of them would be taken for
+    // a day by a sort alone, and both were until this test was written.
+    //
+    // A name that is not a date sorts wherever its letters put it, and a copy
+    // somebody took of a day sorts directly above the day it was copied from.
+    // Picked up, it does not parse, and `readDay` refuses -- so one stray file
+    // stops the loop counting that person at all, which is a defect that
+    // arrives looking like a broken ledger.
+    //
+    // A day in the future is worse, because it parses. A clock that ran ahead
+    // once leaves a file dated tomorrow, and a pot carried backwards out of it
+    // is a total nobody spent.
+    void theLastDayIsADayAndNotWhateverSortsHighest()
+    {
+        makeSession();
+        Profile keeping = profile();
+        keeping.budgets = {
+            Budget {QStringLiteral("pot"), {QStringLiteral("chromium")}, Selects::App, 120,
+                    Resets::Never, OnExhausted::Close},
+        };
+
+        const QDate before(2026, 9, 3);
+        const QDate today(2026, 9, 4);
+        const QDate ahead(2026, 9, 5);
+
+        Ledger yesterday;
+        yesterday.user = m_user;
+        yesterday.date = before;
+        yesterday.addKeptSeconds(QStringLiteral("pot"), 3600);
+        QString error;
+        QVERIFY2(writeLedger(ledgerPath(before), yesterday, &error), qPrintable(error));
+
+        Ledger tomorrow;
+        tomorrow.user = m_user;
+        tomorrow.date = ahead;
+        tomorrow.addKeptSeconds(QStringLiteral("pot"), 9999);
+        QVERIFY2(writeLedger(ledgerPath(ahead), tomorrow, &error), qPrintable(error));
+
+        const QString stray = QFileInfo(ledgerPath(before)).absolutePath()
+            + QStringLiteral("/2026-09-03-backup.json");
+        QFile note(stray);
+        QVERIFY(note.open(QIODevice::WriteOnly));
+        note.write("nothing a ledger reader could make sense of");
+        note.close();
+
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const Cycle cycle = watch.tick({keeping}, QDateTime(today, QTime(9, 0)));
+
+        QVERIFY2(cycle.users.first().error.isEmpty(), qPrintable(cycle.users.first().error));
+        QCOMPARE(readBack(today).keptSecondsFor(QStringLiteral("pot")), 3602);
+    }
+
+    // The last day being unreadable is the one case this whole lookback exists
+    // to get right, and the tempting answer is the wrong one. A pot whose
+    // previous total cannot be read is not a pot with nothing in it: starting
+    // it from zero hands over everything it had ever counted, silently, to
+    // whoever happens to sit down next -- and it writes that zero into today's
+    // file, so the day that could have been repaired is gone as well.
+    //
+    // So it is said and the person is skipped, which is what the loop already
+    // does for a today it cannot read. Nothing is written and nothing is spent.
+    void aLastDayNobodyCanReadIsNotAnEmptyPot()
+    {
+        makeSession();
+        Profile keeping = profile();
+        keeping.budgets = {
+            Budget {QStringLiteral("pot"), {QStringLiteral("chromium")}, Selects::App, 120,
+                    Resets::Never, OnExhausted::Close},
+        };
+
+        const QDate before(2026, 9, 3);
+        const QDate today(2026, 9, 4);
+        QVERIFY(QDir().mkpath(QFileInfo(ledgerPath(before)).absolutePath()));
+        QFile broken(ledgerPath(before));
+        QVERIFY(broken.open(QIODevice::WriteOnly));
+        broken.write("{\"user\": \"howl\", \"date\":");
+        broken.close();
+
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const Cycle cycle = watch.tick({keeping}, QDateTime(today, QTime(9, 0)));
+
+        QVERIFY2(!cycle.users.first().error.isEmpty(),
+                 "a pot whose last day would not parse was started from zero in silence");
+        QVERIFY2(!QFile::exists(ledgerPath(today)),
+                 "today was written over a pot nobody could read");
+    }
+
     // -- the doors that make it safe to run here -----------------------------
 
     void aDryRunDecidesAndTouchesNothing()

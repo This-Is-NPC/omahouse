@@ -1,6 +1,7 @@
 #include "Paths.h"
 
 #include <QByteArray>
+#include <QDir>
 
 namespace omahouse {
 namespace paths {
@@ -139,6 +140,33 @@ QString ledgerFile(const QString &user, const QDate &date)
     // disagree about the format.
     return userStateDir(user) + QLatin1Char('/')
         + date.toString(QStringLiteral("yyyy-MM-dd")) + QStringLiteral(".json");
+}
+
+QString lastLedgerFileBefore(const QString &user, const QDate &date)
+{
+    // The same spelling the writer uses, from the same place, so that the
+    // comparison below is a comparison of dates and not of two opinions about
+    // how a date is written.
+    const QString today = date.toString(QStringLiteral("yyyy-MM-dd"));
+    QDir dir(userStateDir(user));
+    QString best;
+    const QStringList names = dir.entryList({QStringLiteral("*.json")}, QDir::Files);
+    for (const QString &name : names) {
+        const QString stem = name.chopped(5);
+        // Anything else in the directory is not a day. `<user>/` holds one file
+        // per date and nothing has ever put something else there, but a name
+        // that is not a date must not be able to become the newest day by
+        // sorting above one.
+        if (!QDate::fromString(stem, QStringLiteral("yyyy-MM-dd")).isValid())
+            continue;
+        if (stem >= today)
+            continue;
+        if (best.isEmpty() || stem > best)
+            best = stem;
+    }
+    if (best.isEmpty())
+        return {};
+    return userStateDir(user) + QLatin1Char('/') + best + QStringLiteral(".json");
 }
 
 } // namespace paths

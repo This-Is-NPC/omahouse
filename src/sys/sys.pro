@@ -32,6 +32,7 @@ INCLUDEPATH += $$PWD/../core
 HEADERS += \
     Blocked.h \
     Chromium.h \
+    Day.h \
     Enforce.h \
     FocusFile.h \
     FurnitureFile.h \
@@ -46,6 +47,7 @@ HEADERS += \
 SOURCES += \
     Blocked.cpp \
     Chromium.cpp \
+    Day.cpp \
     Enforce.cpp \
     FocusFile.cpp \
     FurnitureFile.cpp \

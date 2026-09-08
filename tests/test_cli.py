@@ -1195,6 +1195,59 @@ def check_grant_writes_the_days_ledger(box):
     assert "no budget called minecraft" in nowhere.stderr
 
 
+def check_a_pot_survives_a_day_nobody_has_written_yet(box):
+    """A budget that never resets, met on a morning before the daemon has ticked.
+
+    The running total of a pot is in the last file that touched it, and the name
+    of a ledger is its date, so the first look at a new day finds nothing. Every
+    verb that reads today had to be taught to look back, and `grant` had to be
+    taught first: it reads today, appends, and writes -- so a `grant` at nine
+    o'clock on a day with no file yet wrote a day with no pot in it, and the
+    pot's whole history was gone with one hand-over of ten minutes.
+    """
+    document = profile_document()
+    document["profiles"][0]["budgets"] = [
+        {"id": "pot", "match": ["chromium"], "dailyMinutes": 120,
+         "resets": "never", "onExhausted": "close"},
+    ]
+    box.write_profiles(document)
+
+    yesterday = TODAY - timedelta(days=1)
+    directory = box.state / USER
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{yesterday.isoformat()}.json").write_text(json.dumps({
+        "schemaVersion": 1,
+        "user": USER,
+        "date": yesterday.isoformat(),
+        "budgets": {},
+        "kept": {"pot": 3600},
+        "grants": [{"at": f"{yesterday.isoformat()}T21:00:00-03:00", "by": "howl",
+                    "budget": "pot", "minutes": 30}],
+        "events": [],
+    }))
+    assert not (directory / f"{TODAY.isoformat()}.json").exists()
+
+    # An hour spent and half an hour handed over: two and a half hours of pot,
+    # one hour of it gone. Read before anything has written today.
+    shown = box.run("status", USER)
+    assert shown.returncode == 0, shown.stderr
+    pot = row_for(shown.stdout, "pot")
+    assert pot is not None, shown.stdout
+    assert "1h30m" in " ".join(pot), pot
+
+    # And handing over ten more does not erase what came before it.
+    given = box.run("grant", USER, "--budget", "pot=10m")
+    assert given.returncode == 0, given.stderr
+    written = json.loads((directory / f"{TODAY.isoformat()}.json").read_text())
+    assert written["kept"] == {"pot": 3600}, written
+    assert written["keptGranted"] == {"pot": 1800}, written
+    assert [g["minutes"] for g in written["grants"]] == [10]
+
+    # Which is what the answer says: two and a half hours, plus ten, less the
+    # hour already spent.
+    assert "1h40m left today" in given.stdout, given.stdout
+
+
 def check_allow_warns_about_what_is_really_inside(box):
     """poc/findings.md round 4, at the moment it matters most.
 
@@ -3958,6 +4011,7 @@ def main():
         check_the_removal_covers_what_the_install_makes,
         check_the_removal_leaves_the_other_program_its_own_unit,
         check_the_reading_verbs_write_nothing,
+        check_a_pot_survives_a_day_nobody_has_written_yet,
     ]
     for case in cases:
         # A machine of its own per case: a profiles.json one case wrote is a

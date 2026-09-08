@@ -265,10 +265,46 @@ be counted once per day it crossed, and a fortnight's report would show it spent
 fourteen times. Kept apart, all of them go on being right without knowing this
 exists.
 
+A `keptGranted` object joins it, for the other half of the same subtraction.
+Handing over more is the only thing that refills a pot, and a grant lives in the
+file of the day it was made — which is right for `report` and for the household,
+both of which add days together out of `grants` and would count a carried grant
+once per day it outlived. So the turn of the date **folds** the outgoing day's
+grants for a pot into a running total, once, and reads them from there
+afterwards. Without it the night took the operator's decision away and left the
+spending it had paid for: a pot refilled at eleven came into the morning with
+yesterday's hour against today's smaller allowance, which is worse than losing
+both halves.
+
 The events do **not** come with it, and that is deliberate. A pot that ran out
 yesterday and is still out says so again this morning before it acts, which is
 §6: nobody is cut off cold, and somebody meeting a spent pot at nine has been
 told why before their window closes.
+
+**The turn is applied by whoever reads the day, and not only by whoever was
+running when it happened.** A ledger is named after its date, so the first look
+at a new day meets no file at all — and a loop that read only today started
+every pot from full each morning, which is the one thing `resets: never`
+promises will not happen. `readDay` is the reader every verb about *now* goes
+through: it reads today's file, and where there is none it finds the newest
+ledger this person has from before today and applies the turn to that. The
+newest and not yesterday's, because a machine that spent a week switched off has
+a last day a week back, and there is no arithmetic on dates in it.
+
+Two things in that directory are not days and both would win a sort. A name that
+is not a date is skipped rather than read, because a stray file that fails to
+parse would stop the loop counting that person at all. A file dated in the
+future is skipped too, and that one parses: a clock that ran ahead once leaves
+tomorrow's file behind, and a pot carried backwards out of it is a total nobody
+spent. What is *not* skipped is a last day that is there and will not parse —
+that is said out loud and the person is left uncounted for the cycle, because
+starting a pot from zero on a file somebody could still repair hands over
+everything it ever counted and writes the zero down where the evidence was.
+
+Which of the two counters a budget spends is asked in one place, `spentSeconds`,
+and that is not tidiness. It was asked in four, three of them right: `status`
+and the window read the daily map for every budget alike, so a pot showed
+nothing spent and its whole limit left, however much of it had gone.
 
 **No verb writes `resets` yet**, so a profile cannot ask for a pot from the
 command line or from the window. The model and the arithmetic are here; the rest

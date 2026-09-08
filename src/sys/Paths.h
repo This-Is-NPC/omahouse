@@ -130,6 +130,20 @@ QString userStateDir(const QString &user);
 /// `<stateDir>/<user>/<AAAA-MM-DD>.json` -- one ledger per day.
 QString ledgerFile(const QString &user, const QDate &date);
 
+/// The newest ledger this person has from before `date`, or an empty string.
+///
+/// Where a pot's running total is. A budget that never resets is carried into
+/// the file of every day it touches, so the last file that touched it holds the
+/// whole of it -- and that is not yesterday's file on a machine that spent the
+/// week switched off. Found by reading the directory and taking the largest
+/// name below this one, because the names are dates and sorting them is the
+/// same as ordering the days.
+///
+/// It says nothing about whether that file can be read. A caller that finds a
+/// name here and cannot parse what is under it has a day somebody may still be
+/// able to repair, and that is not the same answer as having no earlier day.
+QString lastLedgerFileBefore(const QString &user, const QDate &date);
+
 /// Whether that root is still the machine's own.
 ///
 /// This is what tells "writing needs root" from "writing needs whatever the

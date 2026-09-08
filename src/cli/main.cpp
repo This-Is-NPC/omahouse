@@ -15,6 +15,7 @@
 #include "Furniture.h"
 #include "FurnitureFile.h"
 #include "Pairing.h"
+#include "Day.h"
 #include "Paths.h"
 #include "Presence.h"
 #include "Proc.h"
@@ -491,13 +492,8 @@ QStringList sitesOutOfTime(const QVector<Profile> &profiles)
             continue;
         Ledger ledger;
         QString error;
-        bool missing = false;
-        if (!readLedger(paths::ledgerFile(profile.user, now.date()), &ledger, &error, &missing))
+        if (!readDay(profile, now.date(), &ledger, nullptr, &error))
             continue;
-        if (missing) {
-            ledger.user = profile.user;
-            ledger.date = now.date();
-        }
         for (const Decision &decision : evaluate(profile, {}, ledger, now, 0).decisions) {
             if (decision.kind == Decision::Kind::Block && !decision.site.isEmpty())
                 sites.append(decision.site);
@@ -521,6 +517,29 @@ bool loadLedger(const QString &user, const QDate &date, Ledger *ledger, bool *mi
         }
         return true;
     }
+    fail(QStringLiteral("omahouse: %1").arg(error));
+    *status = kUsage;
+    return false;
+}
+
+/// Today, for the person a profile is about, with what a pot holds carried in.
+///
+/// The one above reads the file whose name is that date, which is the right
+/// answer for `report` and the wrong one for every verb that is about now: a
+/// budget that never resets keeps its running total in the last file that
+/// touched it, and on a morning the daemon has not reached yet there is no file
+/// for today at all. `readDay` is where the looking back lives.
+///
+/// **Every verb that reads today goes through here, and the writers most of
+/// all.** `grant` and `leave` read today, change it and write it back; before
+/// this they wrote a day with no pot in it, so handing over ten minutes at nine
+/// in the morning erased everything a pot had ever counted.
+bool loadToday(const Profile &profile, const QDate &date, Ledger *ledger, bool *missing,
+               int *status)
+{
+    QString error;
+    if (readDay(profile, date, ledger, missing, &error))
+        return true;
     fail(QStringLiteral("omahouse: %1").arg(error));
     *status = kUsage;
     return false;
@@ -614,7 +633,7 @@ QVector<Balance> balancesOf(const Profile &profile, const Ledger &ledger)
         balance.match = budget.match;
         balance.onExhausted = budget.onExhausted;
         balance.grantedSeconds = ledger.grantedSeconds(budget.id);
-        balance.usedSeconds = ledger.secondsFor(budget.id);
+        balance.usedSeconds = spentSeconds(budget, ledger);
         if (budget.hasLimit()) {
             balance.limitSeconds = allowanceSeconds(profile, budget, ledger,
                 ledger.date.isValid() ? ledger.date : QDate::currentDate());
@@ -1154,7 +1173,7 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
     bool ledgerMissing = false;
     QVector<Balance> balances;
     if (profile) {
-        if (!loadLedger(user, today, &ledger, &ledgerMissing, &status))
+        if (!loadToday(*profile, today, &ledger, &ledgerMissing, &status))
             return status;
         balances = balancesOf(*profile, ledger);
     }
@@ -4210,7 +4229,7 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
     }
     Ledger ledger;
     bool missing = false;
-    if (!loadLedger(user, today, &ledger, &missing, &status))
+    if (!loadToday(*profile, today, &ledger, &missing, &status))
         return status;
 
     // The day's own file, so the minutes expire when the file does: docs/design.md §4
@@ -4230,7 +4249,7 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
     }
 
     const int granted = ledger.grantedSeconds(id);
-    const int used = ledger.secondsFor(id);
+    const int used = spentSeconds(*budget, ledger);
     const bool limited = budget->hasLimit();
     const int limit = limited ? allowanceSeconds(*profile, *budget, ledger, today) : 0;
     const int left = limited ? qMax(0, limit - used) : 0;
@@ -4346,11 +4365,11 @@ int cmdLeave(const Globals &g, const QStringList &positionals, const Options &op
     }
     Ledger ledger;
     bool missing = false;
-    if (!loadLedger(user, today, &ledger, &missing, &status))
+    if (!loadToday(*profile, today, &ledger, &missing, &status))
         return status;
 
     const int want = wantMinutes * 60;
-    const int used = ledger.secondsFor(id);
+    const int used = spentSeconds(*budget, ledger);
     const int granted = ledger.grantedSeconds(id);
     const int daily = budget->dailyMinutes * 60;
 
@@ -5020,7 +5039,7 @@ int cmdHouse(const Globals &g, const QStringList &positionals)
     // sitting at has not necessarily been written down.
     Ledger mine;
     bool missing = false;
-    if (!loadLedger(user, today, &mine, &missing, &status))
+    if (!loadToday(*profile, today, &mine, &missing, &status))
         return status;
     days.append({QStringLiteral("here"), mine});
 
@@ -5721,7 +5740,7 @@ int cmdAllocation(const Globals &g, const QStringList &args, const Options &opti
     QVector<QPair<QString, Ledger>> days;
     Ledger mine;
     bool missing = false;
-    if (!loadLedger(user, today, &mine, &missing, &status)) return status;
+    if (!loadToday(*profile, today, &mine, &missing, &status)) return status;
     mine.allocation = profile->allocation;
     mine.observedAt = now;
     days.append({"here", mine});

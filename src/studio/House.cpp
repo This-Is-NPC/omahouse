@@ -6,6 +6,7 @@
 #include "Catalog.h"
 #include "Duration.h"
 #include "Kind.h"
+#include "Day.h"
 #include "Ledger.h"
 #include "Paths.h"
 #include "Policy.h"
@@ -228,7 +229,7 @@ QVector<HouseBudget> houseOf(const Profile &profile, const Ledger &local,
 QVariantMap clockOf(const Profile &profile, const Budget &budget, const Ledger &ledger, bool running)
 {
     const int granted = ledger.grantedSeconds(budget.id);
-    const int spent = ledger.secondsFor(budget.id);
+    const int spent = spentSeconds(budget, ledger);
     const int allowance = budget.hasLimit() ? allowanceSeconds(profile, budget, ledger,
         ledger.date.isValid() ? ledger.date : QDate::currentDate()) : 0;
     const int left = budget.hasLimit() ? std::max(0, allowance - spent) : 0;
@@ -862,8 +863,11 @@ void House::refresh()
         Ledger ledger;
         QString ledgerError;
         bool noLedger = false;
-        const bool read = readLedger(paths::ledgerFile(profile.user, today), &ledger,
-                                     &ledgerError, &noLedger);
+        // `readDay` and not the file for today: a budget that never resets keeps
+        // its running total in the last file that touched it, and a window that
+        // read only today would draw a pot full every morning until the daemon
+        // wrote its first tick.
+        const bool read = readDay(profile, today, &ledger, &noLedger, &ledgerError);
         // A day that could not be read is only worth saying out loud about
         // somebody this face is allowed to see. Naming another household
         // member's file at somebody who cannot see their profile would be the

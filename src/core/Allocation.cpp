@@ -50,11 +50,23 @@ bool validAllocation(const QJsonObject &a, QString *error)
     return true;
 }
 
+int spentSeconds(const Budget &budget, const Ledger &ledger)
+{
+    return budget.carriesOver() ? ledger.keptSecondsFor(budget.id)
+                                : ledger.secondsFor(budget.id);
+}
+
 int allowanceSeconds(const Profile &profile, const Budget &budget,
                      const Ledger &ledger, const QDate &date)
 {
-    if (profile.allocation.isEmpty())
-        return budget.dailyMinutes * 60 + ledger.grantedSeconds(budget.id);
+    if (profile.allocation.isEmpty()) {
+        // A pot's refills are in two places and both of them count: the ones
+        // made today, still in today's grants, and the ones every night since
+        // has folded into the running total. A daily budget has only the first,
+        // because nothing of its is ever folded.
+        return budget.dailyMinutes * 60 + ledger.grantedSeconds(budget.id)
+            + (budget.carriesOver() ? ledger.keptGrantedFor(budget.id) : 0);
+    }
     if (profile.allocation.value(QStringLiteral("date")).toString() != date.toString(Qt::ISODate))
         return 0;
     // The household's credit, less what the other computers have already spent

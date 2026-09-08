@@ -107,6 +107,24 @@ struct Ledger {
     /// being spent and refilled by somebody handing over more, which is the
     /// whole of what `Resets::Never` means.
     QMap<QString, int> keptSeconds;
+
+    /// Seconds handed over to budgets that do not reset, by budget id.
+    ///
+    /// The other half of a pot, and it has to walk into the new day for the
+    /// same reason the spending does. A grant lives in the file of the day it
+    /// was made, which is right for `report` and for the household -- both add
+    /// days together and would count a carried grant once per day it crossed.
+    /// So the turn of the date folds the outgoing day's grants for a pot into
+    /// this running total, exactly once, and reads them from here afterwards.
+    ///
+    /// Without it the night took the operator's decision away and left the
+    /// spending it had paid for: a pot refilled at eleven came into the morning
+    /// with yesterday's hour against today's smaller allowance, which is worse
+    /// than losing both halves. `Resets::Never` says a pot is emptied by being
+    /// spent and refilled by somebody handing over more -- this is where the
+    /// second clause is kept.
+    QMap<QString, int> keptGranted;
+
     QJsonObject allocation;
     QDateTime observedAt;
     QVector<Grant> grants;
@@ -120,6 +138,10 @@ struct Ledger {
     /// profile and never by the shape of anything here.
     int keptSecondsFor(const QString &budgetId) const;
     void addKeptSeconds(const QString &budgetId, int amount);
+
+    /// The same two again, for what has been handed over to a pot.
+    int keptGrantedFor(const QString &budgetId) const;
+    void addKeptGranted(const QString &budgetId, int amount);
 
     int presenceSecondsFor(const QString &reason) const;
     void addPresenceSeconds(const QString &reason, int amount);

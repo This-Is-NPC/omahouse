@@ -105,4 +105,20 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
                  const QString &siteInFront = QString(),
                  const QStringList &alsoFurniture = QStringList());
 
+/// `date` started from the day `previous` belongs to.
+///
+/// The turn of the date, on its own, because two callers need it and they must
+/// not disagree about what survives a night. `evaluate` runs it on a ledger
+/// handed to it from another day -- a session open across midnight. The other
+/// is whoever reads a day off the disk: the loop builds the path from the date
+/// it is asked about, so the first look at a new day meets no file at all, and
+/// the turn has to be applied to the last file that does exist. Left to
+/// `evaluate` alone a pot went back to full every night, and `resets: never`
+/// meant nothing on a machine that had been switched off.
+///
+/// What survives is what a pot is made of and nothing else: seconds spent,
+/// seconds handed over. The profile is here to say which budgets those are, and
+/// for no other reason.
+Ledger carryInto(const QDate &date, const Ledger &previous, const Profile &profile);
+
 } // namespace omahouse

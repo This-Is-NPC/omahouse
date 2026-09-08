@@ -117,6 +117,18 @@ void Ledger::addKeptSeconds(const QString &budgetId, int amount)
     keptSeconds[budgetId] = keptSecondsFor(budgetId) + amount;
 }
 
+int Ledger::keptGrantedFor(const QString &budgetId) const
+{
+    return keptGranted.value(budgetId, 0);
+}
+
+void Ledger::addKeptGranted(const QString &budgetId, int amount)
+{
+    if (budgetId.isEmpty() || amount == 0)
+        return;
+    keptGranted[budgetId] = keptGrantedFor(budgetId) + amount;
+}
+
 int Ledger::presenceSecondsFor(const QString &reason) const
 {
     return presence.value(reason, 0);
@@ -266,6 +278,15 @@ QJsonObject Ledger::toJson() const
             kept.insert(it.key(), it.value());
         document.insert(QStringLiteral("kept"), kept);
     }
+    // And again for what was handed over to those budgets, which is written
+    // apart from `kept` because the two are a decision and an observation and
+    // one of them is allowed to be larger than the other.
+    if (!keptGranted.isEmpty()) {
+        QJsonObject granted;
+        for (auto it = keptGranted.constBegin(); it != keptGranted.constEnd(); ++it)
+            granted.insert(it.key(), it.value());
+        document.insert(QStringLiteral("keptGranted"), granted);
+    }
     if (!allocation.isEmpty()) document.insert(QStringLiteral("allocation"), allocation);
     if (observedAt.isValid()) document.insert(QStringLiteral("observedAt"), isoWithOffset(observedAt));
     return document;
@@ -382,6 +403,24 @@ bool Ledger::fromJson(const QJsonObject &object, Ledger *out, QString *error)
             return false;
         }
         ledger.keptSeconds.insert(it.key(), it.value().toInt());
+    }
+
+    const QJsonValue grantedValue = object.value(QStringLiteral("keptGranted"));
+    if (!grantedValue.isUndefined() && !grantedValue.isObject()) {
+        if (error)
+            *error = QStringLiteral("a ledger has a keptGranted field that is not an object");
+        return false;
+    }
+    const QJsonObject granted = grantedValue.toObject();
+    for (auto it = granted.constBegin(); it != granted.constEnd(); ++it) {
+        if (!it.value().isDouble()) {
+            if (error) {
+                *error = QStringLiteral("the ledger of %1 has a non-numeric kept grant for %2")
+                             .arg(ledger.user, it.key());
+            }
+            return false;
+        }
+        ledger.keptGranted.insert(it.key(), it.value().toInt());
     }
 
     const QJsonValue grantsValue = object.value(QStringLiteral("grants"));
