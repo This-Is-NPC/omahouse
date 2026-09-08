@@ -384,6 +384,17 @@ private slots:
         QVERIFY(uidForUser(QStringLiteral("daemon"), &daemonUid));
         QVERIFY2(nobodyUid != m_uid && daemonUid != m_uid && m_uid != 0,
                  "this case needs three different accounts and is being run as one of them");
+        // The half that says a fallback is *inherited* rests on `daemon` not
+        // being an administrator. If it were, this case would go red on the
+        // assertion that daemon is watched -- loudly, but pointing at the
+        // fallback when what is wrong is the fixture. Said here so the failure
+        // lands where the cause is.
+        QVERIFY2(!isAdministrator(QStringLiteral("daemon")),
+                 "this machine has `daemon` in wheel, so it cannot stand for somebody a "
+                 "fallback covers");
+        QVERIFY2(!isAdministrator(QStringLiteral("nobody")),
+                 "this machine has `nobody` in wheel, so it cannot stand for somebody with a "
+                 "profile of their own beside a fallback");
         makeSessionFor(nobodyUid);
         makeSessionFor(daemonUid);
         makeSessionFor(0);

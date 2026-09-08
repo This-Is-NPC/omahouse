@@ -1390,6 +1390,15 @@ def check_the_rules_for_anybody_are_readable_by_whoever_they_bind(box):
     # case would be asserting the absence of rules and calling it their
     # presence. The first attempt did exactly that and said so.
     covered = "nobody"
+    # And it has to not be an administrator, or `rulesFor` leaves it out of the
+    # fallback and every assertion below is about the absence of rules while
+    # claiming to be about their presence. Checked rather than assumed: the
+    # failure then names the fixture instead of the feature.
+    assert pwd.getpwnam(covered).pw_uid != 0, covered
+    try:
+        assert covered not in grp.getgrnam("wheel").gr_mem, covered
+    except KeyError:
+        pass  # No wheel group at all is a machine where nobody is in it.
 
     theirs = box.run("status", covered)
     assert theirs.returncode == 0, theirs.stderr

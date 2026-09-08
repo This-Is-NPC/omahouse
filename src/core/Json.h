@@ -61,6 +61,18 @@ bool writeJsonAtomically(const QString &path, const QJsonObject &object, QString
 /// Checks the `schemaVersion` of a document read back from disk against the one
 /// that file is on. `what` names the file in the message, because "unknown
 /// schema version 3" is only useful to somebody who is told which said it.
+///
+/// **Exactly the number, and never a range.** Somebody will propose accepting
+/// an older one, and the argument will be good: a reader that understands
+/// everything an older document can say would read it correctly, so refusing it
+/// looks like rigour for its own sake.
+///
+/// What is wrong with it is not here, it is downstream. A `profiles.json` this
+/// omahouse refuses is a `profiles.json` omahouse enforces nothing from. Any
+/// other program that read it anyway -- omastore reads this very file and works
+/// out its own verdict from it -- would be reporting rules that nothing behind
+/// them is going to carry out. The exact comparison is not strictness; it is
+/// what makes two readers agree about which file is in force.
 bool checkSchemaVersion(const QJsonObject &root, int expected, const QString &what,
                         QString *error);
 
