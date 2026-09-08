@@ -1,10 +1,14 @@
-# Profiles across a network — designed, and not built
+# Profiles across a network — designed, and mostly not built
 
-> **Nothing on this page is built.** There is no verb, no flag, no field in
-> `profiles.json` and no screen in the window for any of it. This is a record of
-> a design decided on 2026-09-08, kept so that the next person who wants
-> omahouse to govern more than one household spends an afternoon reading instead
-> of a week rediscovering the same three corners.
+> **Almost nothing on this page is built, and the exception is named here.**
+> Steps 1 to 3 of §7 shipped on 2026-09-08: a budget can be anchored at the
+> login, the ledger carries the sitting, and the engine honours both. **Nothing
+> reads logind yet and no verb writes `resets`**, so a profile cannot ask for one
+> from the command line or the window — see [`design.md`](../design.md), which
+> says so in its own words. Everything else below is a record of a design decided
+> on 2026-09-08, kept so that the next person who wants omahouse to govern more
+> than one household spends an afternoon reading instead of a week rediscovering
+> the same three corners.
 >
 > **What it is for.** The engine is already general.
 > [`design.md` §4](../design.md) says so in its own words: *"The same schema with
@@ -56,10 +60,44 @@ disk keeps the meaning it has. That is the discipline §4 already applies to
 `kind`, `presence` and `sites`: a file that already says what it means is not
 rewritten to say it differently.
 
-The ledger gains the login instant and the seconds since it, on disk rather than
-in memory, for the same reason the `exhausted` event carries its instant — a
-daemon restarted in the middle of somebody's two hours has to resume them and
-not reopen them.
+The ledger gains the sitting, on disk rather than in memory, for the same reason
+the `exhausted` event carries its instant — a daemon restarted in the middle of
+somebody's two hours has to resume them and not reopen them.
+
+**The sitting is an opaque word, not an instant, and that was measured rather
+than argued.** This page first asked for the login instant and the seconds since
+it. `loginctl show-user <uid> -p Timestamp` answers with a weekday name and a
+locale, and `TimestampMonotonic` counts from a boot the ledger outlives. Neither
+needs parsing, because the question is not *when*: the engine only needs to know
+whether this is still the same sitting, which is an identity. The word is
+compared by equality and nothing else — no parsing, no locale, no clock drift.
+
+The seconds do not come from subtracting two clocks either. They come from the
+ticks, which is what has always counted time here, and it is the right number: a
+budget counts an app running and not wall time.
+
+**A sitting crosses midnights, and that is ordinary rather than an edge.** The
+session of the machine this was measured on began three days before it was
+measured. So the session-anchored seconds live in a map of their own, beside the
+daily one and never inside it: the running total is carried into the file of
+every day the sitting touches, and everything that adds days or machines —
+`report`, `house`, `consolidate`, `collect` — reads the daily map. Sharing one
+map would count a sitting's total once per midnight crossed. Kept apart, every
+one of those readers stays correct without knowing this exists, which is how §5's
+invariant survives a second clock.
+
+### Two things the second anchor drags along
+
+**A grant belongs to a sitting.** Grants live in the day's file and the day
+outlives the sitting, so counting them all would hand the next person to log in
+the ten minutes somebody else was given. The grant carries the sitting it was
+made in. The line stays in the file either way, because it is the day's log and
+it did happen; the stamp decides only whether it still counts.
+
+**A new sitting forgets the warnings.** A session budget that ran out at ten has
+already written that it gave its last warning. Without clearing that, the person
+who sits down at eleven is cut off without hearing anything. A refusal that names
+a scope rather than a budget stays, because that one belongs to the day.
 
 ### What "not an administrator" is, and what it is not
 
@@ -351,11 +389,12 @@ from a pool against a daily clock and against a session clock are different sums
    meaning daily, so every file on disk keeps its current meaning. The reader
    already holds this discipline: `wantsNames` in `src/core/Profile.cpp` reads
    `match` written either way and a case pins it. *core*
-2. **Record the session anchor in the ledger.** The login instant and the seconds
-   since it, written, so a restarted daemon resumes a session instead of
-   reopening it. *core*
-3. **Prove the two clocks disagree.** Midnight turning inside a session: the
-   daily budget resets, the session budget does not, one tick spends both. *tests*
+2. **Record the sitting in the ledger.** An opaque word compared by equality,
+   plus the seconds the ticks counted, in a map of their own so that nothing
+   which adds days or machines has to know. *core*
+3. **Prove the two clocks disagree.** Midnight turning inside a sitting: the
+   daily budget resets, the session budget does not, one tick spends both. And an
+   empty anchor means *nobody was asked*, never *nobody is sitting there*. *tests*
 4. **Say what the account is, not only what it opens.** The profile carries
    whether the account is administrative, and omahouse creates it that way, and
    documents that it does not defend it. *core, sys*
@@ -452,6 +491,12 @@ own password while refusing a blanket `auth_self`; and that
 `/etc/sudoers.d/omahouse-node` names the omahouse binary with no verb after it,
 is written by both `machine invite` and `machine prepare`, and is removed by
 `packaging/omahouse.install`.
+
+Also measured, on this machine on the same day: that `loginctl show-user -p
+Timestamp` answers with a weekday name and a locale and that its monotonic form
+counts from a boot the ledger outlives, which is why the sitting is an opaque
+word; and that this machine's own session had been open for three days, which is
+why a sitting crossing midnight is ordinary.
 
 Also measured, in Omakure on the same day: that the Conductor opens the session
 towards the Performer, that Cue and Baseline are what cross towards a machine,
