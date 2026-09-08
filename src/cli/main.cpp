@@ -126,6 +126,15 @@ struct Options {
     /// registry an hour later.
     QString invite;
     QString pair;
+    /// Which machine's version of a profile a merge is deciding for, and which
+    /// way. `--take` brings that machine's version here; `--keep` prints the
+    /// document that makes that machine take this one. Two flags and not one
+    /// with a direction, because the two produce different things -- one writes
+    /// a file here, the other prints bytes to send -- and a flag whose output
+    /// depends on a second flag is the shape `--name` and `--as` were split to
+    /// avoid.
+    QString take;
+    QString keep;
     /// The Battery whose scripts a prepared machine will run when cued. Named
     /// rather than assumed, because it is the widest thing pairing turns on.
     QString battery;
@@ -228,6 +237,8 @@ bool parseOptions(const QStringList &args, Options *options, QStringList *positi
         {"--for", &Options::forSeconds, "a number of seconds, like 60"},
         {"--invite", &Options::invite, "the line the operator's machine printed"},
         {"--pair", &Options::pair, "the line the prepared machine printed"},
+        {"--take", &Options::take, "a machine whose version to bring here"},
+        {"--keep", &Options::keep, "a machine to send this version to"},
         {"--battery", &Options::battery, "a Battery name, like omahouse"},
         {"--date", &Options::date, "a date like 2026-09-06"},
     };
@@ -516,6 +527,21 @@ bool loadLedger(const QString &user, const QDate &date, Ledger *ledger, bool *mi
 }
 
 // -- what a budget looks like right now --------------------------------------
+
+/// Who last wrote a profile down and when, in one phrase.
+///
+/// The three things somebody choosing between two versions needs -- what
+/// changed, who wrote each, when -- and two of them are this. It says "not
+/// recorded" rather than nothing for a profile written before there were
+/// stamps, because a blank column reads as an answer.
+QString spellWhoWrote(const Profile &profile)
+{
+    if (!profile.writtenAt.isValid())
+        return QStringLiteral("not recorded");
+    return QStringLiteral("%1, by %2")
+        .arg(profile.writtenAt.toString(Qt::ISODate),
+             profile.writtenBy.isEmpty() ? QStringLiteral("somebody") : profile.writtenBy);
+}
 
 /// An account name as it has to be typed back, for the lines this program
 /// prints that somebody will copy.
@@ -3523,9 +3549,10 @@ int cmdProfileDefault(const Globals &g, const QStringList &positionals, const Op
                            .arg(profile->rules.size() == 1 ? QString() : QStringLiteral("s")));
 }
 
-/// Defined further down, beside `collect`: it needs the household's machine
-/// list, and the two verbs are the same act about two different documents.
+/// Defined further down, beside `collect`: they need the household's machine
+/// list, and the three are one act about documents going different ways.
 int cmdProfileCollect(const Globals &g, const QStringList &positionals);
+int cmdProfileMerge(const Globals &g, const QStringList &positionals, const Options &options);
 
 int cmdProfile(const Globals &g, const QStringList &positionals, const Options &options)
 {
@@ -3555,6 +3582,12 @@ int cmdProfile(const Globals &g, const QStringList &positionals, const Options &
                               QStringLiteral("profile add")))
             return kUsage;
         return cmdProfileAdd(g, positionals.mid(1), options);
+    }
+    if (subcommand == QLatin1String("merge")) {
+        if (!onlyTheseOptions(options, {QStringLiteral("--take"), QStringLiteral("--keep")},
+                              QStringLiteral("profile merge")))
+            return kUsage;
+        return cmdProfileMerge(g, positionals.mid(1), options);
     }
     if (subcommand == QLatin1String("collect")) {
         if (!onlyTheseOptions(options, {}, QStringLiteral("profile collect")))
@@ -4531,10 +4564,49 @@ int cmdProfileCollect(const Globals &g, const QStringList &positionals)
         fail(QStringLiteral("%1: %2").arg(verb, error));
         return kUsage;
     }
-    if (arrived.size() != 1) {
-        fail(QStringLiteral("%1: %2 sent %3 profiles and this takes one")
+    if (arrived.size() > 1) {
+        fail(QStringLiteral("%1: %2 sent %3 profiles and this takes one, or none")
                  .arg(verb, machine).arg(arrived.size()));
         return kUsage;
+    }
+    // **None is an answer, and it is the one the ordinary shape cannot give.**
+    //
+    // An administrator with the central unreachable may *remove* a profile --
+    // it is the bluntest thing the emergency exit is for, and the one a
+    // household most needs to find out about. From here that shows up as the
+    // machine having nothing to send, which on the manager is indistinguishable
+    // from that machine not having reported at all. Absence saying two things
+    // is the shape this project keeps cutting, and treating it as "nothing
+    // happened" is the silent half: it erases a deliberate removal and nobody
+    // notices.
+    //
+    // So an empty list is taken and filed, and it means *this machine says it
+    // has none*. It is the same document with nothing in the array -- no second
+    // shape to learn -- and it is what lets a merge tell a removal from a
+    // silence, which is the posture `collect` already keeps about a missing
+    // day.
+    if (arrived.isEmpty()) {
+        const QString path = paths::elsewhereProfileFile(machine, user);
+        if (!mayWrite(verb, path, paths::stateDirIsTheSystems(), g))
+            return kUsage;
+        if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
+            fail(QStringLiteral("%1: cannot make %2").arg(verb, QFileInfo(path).absolutePath()));
+            return kUsage;
+        }
+        if (!writeJsonAtomically(path, profilesToJson({}), &error)) {
+            fail(QStringLiteral("%1: %2").arg(verb, error));
+            return kUsage;
+        }
+        if (g.json) {
+            printJson(QJsonObject {{QStringLiteral("machine"), machine},
+                                   {QStringLiteral("user"), user},
+                                   {QStringLiteral("has"), QJsonValue()},
+                                   {QStringLiteral("path"), path}});
+            return kOk;
+        }
+        out() << QStringLiteral("%1: says it has no profile for %2, and that is written "
+                                "down.\n").arg(machine, user);
+        return kOk;
     }
     // Checked against what was asked for rather than trusted, exactly as a day
     // is: a profile filed under the wrong name is somebody else's rules in a
@@ -4565,6 +4637,221 @@ int cmdProfileCollect(const Globals &g, const QStringList &positionals)
     }
     out() << QStringLiteral("%1: %2's profile is in, and nothing has been decided about "
                             "it.\n").arg(machine, user);
+    return kOk;
+}
+
+/// What each computer says about one person's profile, against what this one
+/// says, and what to do about the difference.
+///
+/// The second half of the emergency exit. omahouse is installed whole on every
+/// machine so that somebody can sit down and fix it with the manager
+/// unreachable; `apply-staged` stands back from what they did, and this is
+/// where a person is finally asked about it.
+///
+/// **Three kinds of answer and not one**, because "it differs" would put three
+/// different decisions under one word:
+///
+///  - **new** -- that machine has a profile for somebody this one has never
+///    heard of. There is nothing to conflict with; the decision is whether to
+///    take it in.
+///  - **changed** -- both have one and they are not the same. This is the only
+///    one that is a conflict.
+///  - **gone** -- that machine says it has none and this one has one. Somebody
+///    removed it there, which is the bluntest thing the exit is for.
+///
+/// And a fourth thing that is not an answer: a machine nothing has been
+/// collected from. It is said out loud and never folded into "no differences",
+/// which is `omahouse house`'s posture about a day nobody sent and the same
+/// reason -- a total quietly missing a computer reads exactly like agreement.
+int cmdProfileMerge(const Globals &g, const QStringList &positionals, const Options &options)
+{
+    const QString verb = QStringLiteral("profile merge");
+    if (positionals.size() != 1) {
+        fail(QStringLiteral("%1: whose profile? (try omahouse --help)").arg(verb));
+        return kUsage;
+    }
+    const QString user = positionals.first();
+
+    int status = kOk;
+    Profiles profiles;
+    if (!loadProfiles(&profiles, &status))
+        return status;
+    Fleet fleet;
+    if (!loadMachines(&fleet, &status))
+        return status;
+    const Profile *mine = profileFor(profiles, user);
+
+    struct Says {
+        QString machine;
+        bool collected = false;
+        bool has = false;
+        Profile profile;
+    };
+    QVector<Says> heard;
+    for (const Machine &machine : fleet.all) {
+        Says said;
+        said.machine = machine.name;
+        QJsonObject document;
+        QString error;
+        bool absent = false;
+        if (!readJsonObject(paths::elsewhereProfileFile(machine.name, user), &document, &error,
+                            &absent)) {
+            fail(QStringLiteral("%1: %2").arg(verb, error));
+            return kUsage;
+        }
+        if (!absent) {
+            QVector<Profile> read;
+            if (!profilesFromJson(document, &read, &error)) {
+                fail(QStringLiteral("%1: what %2 sent will not read: %3")
+                         .arg(verb, machine.name, error));
+                return kUsage;
+            }
+            said.collected = true;
+            said.has = !read.isEmpty();
+            if (said.has)
+                said.profile = read.constFirst();
+        }
+        heard.append(said);
+    }
+
+    const auto kindOf = [&](const Says &said) -> QString {
+        if (!said.collected)
+            return QStringLiteral("not collected");
+        if (said.has && !mine)
+            return QStringLiteral("new");
+        if (!said.has && mine)
+            return QStringLiteral("gone");
+        if (said.has && mine && said.profile.toJson() != mine->toJson())
+            return QStringLiteral("changed");
+        return QStringLiteral("same");
+    };
+
+    // -- the second pass: one decision, about one machine ---------------------
+    //
+    // What is applied is what was listed, and that is not discipline here, it
+    // is mechanism: `--keep` puts the machine's collected version into the
+    // document as `supersedes`, and the machine refuses it if that is not still
+    // what it has. So a household that decided against something that changed
+    // in the meantime is told, rather than landing its decision on a version
+    // nobody looked at.
+    if (!options.take.isEmpty() && !options.keep.isEmpty()) {
+        fail(QStringLiteral("%1: --take brings a version here and --keep sends this one "
+                            "there. One decision at a time.").arg(verb));
+        return kUsage;
+    }
+    const QString about = options.take.isEmpty() ? options.keep : options.take;
+    if (!about.isEmpty()) {
+        const Says *said = nullptr;
+        for (const Says &one : heard) {
+            if (one.machine == about)
+                said = &one;
+        }
+        if (!said) {
+            fail(QStringLiteral("%1: no machine called %2 in %3")
+                     .arg(verb, about, paths::machinesFile()));
+            return kMissing;
+        }
+        if (!said->collected) {
+            fail(QStringLiteral("%1: nothing has been collected from %2, so there is no "
+                                "version of it to decide about.").arg(verb, about));
+            return kUsage;
+        }
+
+        if (!options.take.isEmpty()) {
+            if (!said->has && !mine) {
+                fail(QStringLiteral("%1: neither %2 nor this machine has one.")
+                         .arg(verb, about));
+                return kUsage;
+            }
+            QVector<Profile> kept;
+            for (const Profile &one : profiles.all) {
+                if (one.user != user)
+                    kept.append(one);
+            }
+            // Taking a machine's *absence* is taking a removal: somebody with
+            // the manager unreachable decided this account has no rules, and
+            // agreeing with them means the same here.
+            if (said->has)
+                kept.append(said->profile);
+            profiles.all = kept;
+            if (!saveProfiles(verb, profiles.all))
+                return kUsage;
+            out() << (said->has
+                          ? QStringLiteral("%1's profile from %2 is now this machine's.\n")
+                                .arg(user, about)
+                          : QStringLiteral("%1 has no profile here either, as %2 has it.\n")
+                                .arg(user, about));
+            return kOk;
+        }
+
+        // `--keep`: the document that makes that machine take this one.
+        if (!mine) {
+            fail(QStringLiteral("%1: this machine has no profile for %2, so there is nothing "
+                                "to send. A push carries a profile and cannot carry its "
+                                "absence.").arg(verb, user));
+            return kUsage;
+        }
+        QJsonObject document = profilesToJson({*mine});
+        // What the manager believes is over there, whole. The machine compares
+        // it with what it actually has, so a decision made against a version
+        // that has since changed lands nowhere rather than on the wrong one.
+        if (said->has)
+            document.insert(QStringLiteral("supersedes"), said->profile.toJson());
+        printJson(document);
+        return kOk;
+    }
+
+    if (g.json) {
+        QJsonArray rows;
+        for (const Says &said : heard) {
+            QJsonObject row {{QStringLiteral("machine"), said.machine},
+                             {QStringLiteral("is"), kindOf(said)}};
+            // The two versions, whole. Whoever is being asked to choose needs
+            // what changed, who wrote each and when, and all three are already
+            // in the documents -- so this shows them rather than summarising.
+            row.insert(QStringLiteral("theirs"),
+                       said.has ? QJsonValue(said.profile.toJson()) : QJsonValue());
+            rows.append(row);
+        }
+        printJson(QJsonObject {
+            {QStringLiteral("user"), user},
+            {QStringLiteral("mine"), mine ? QJsonValue(mine->toJson()) : QJsonValue()},
+            {QStringLiteral("machines"), rows},
+        });
+        return kOk;
+    }
+
+    out() << QStringLiteral("%1 across the household\n\n").arg(user);
+    out() << QStringLiteral("here: %1\n")
+                 .arg(mine ? spellWhoWrote(*mine) : QStringLiteral("no profile"));
+
+    QVector<QStringList> rows;
+    int toDecide = 0;
+    int silent = 0;
+    for (const Says &said : heard) {
+        const QString kind = kindOf(said);
+        if (kind == QLatin1String("not collected"))
+            ++silent;
+        else if (kind != QLatin1String("same"))
+            ++toDecide;
+        rows.append({said.machine, kind,
+                     said.has ? spellWhoWrote(said.profile) : QStringLiteral("—")});
+    }
+    out() << '\n';
+    printTable({QStringLiteral("MACHINE"), QStringLiteral("IS"), QStringLiteral("WRITTEN")},
+               rows, {false, false, false});
+
+    if (silent > 0) {
+        out() << QStringLiteral("\n%1 of them has sent nothing, which is not the same as "
+                                "agreeing.\n").arg(silent);
+    }
+    if (toDecide == 0) {
+        out() << QStringLiteral("\nNothing to decide.\n");
+        return kOk;
+    }
+    out() << QStringLiteral("\n%1 to decide. `--take <machine>` puts that machine's version "
+                            "here;\n`--keep <machine>` prints the document that makes that "
+                            "machine take this one.\n").arg(toDecide);
     return kOk;
 }
 
@@ -5714,6 +6001,10 @@ Writing, and root needed — the studio gets there by pkexec:
                            omahouse day julia | ssh study omahouse collect …
   profile add '*'          rules for whoever sits here without their own.
                            Quote it: bare, the shell eats it
+  profile merge <user> [--take <machine>] [--keep <machine>]
+                           what each computer says about one profile: new,
+                           changed, gone, or nothing collected. --take brings
+                           a version here, --keep prints the one to send
   profile collect <machine> <user>
                            take in the profile another computer says it has,
                            on stdin. Several profiles are reconciled here;

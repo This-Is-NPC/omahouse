@@ -743,6 +743,37 @@ the answer is to split them then**, and never a condition inside one of them.
 taken by `apply-staged`.** The two say so about each other, because the way to
 get this wrong is to use the push in a loop.
 
+### Deciding between two versions of one profile
+
+The other half of the emergency exit. A push stands back from what somebody did
+here, and `omahouse profile merge <user>` is where a person is finally asked
+about it: what each computer says, against what the manager says.
+
+**Three kinds of answer and not one.** *It differs* would put three different
+decisions under one word — somebody asked to choose would read "conflict" where
+there is nothing to conflict with:
+
+- **new** — that machine has a profile for somebody this one has never heard of.
+  An administrator created it with the manager unreachable, which is exactly
+  what the exit is for. The decision is whether to take it in.
+- **changed** — both have one and they are not the same. The only real conflict.
+- **gone** — that machine says it has none and this one has one. Somebody
+  removed it there.
+
+And a fourth thing that is **not an answer**: a machine nothing has been
+collected from. It is said out loud and never folded into *no differences*, for
+the reason `house` names a computer that has not reported — silence and
+agreement read the same and only one of them is a fact. That is also why a
+collected document with no profile in it is kept rather than discarded: without
+it, a removal and a machine that never answered are the same absence.
+
+`--take` brings a machine's version here, and taking an *absence* takes the
+removal. `--keep` prints the document that makes that machine take this one,
+carrying what the manager believes is over there inside it as `supersedes`.
+**What is applied is what was listed**, and that is mechanism rather than
+discipline: a decision made against a version that has since changed lands
+nowhere instead of on the wrong one.
+
 ### A profile that arrives without anybody at the keyboard
 
 Every other write to `profiles.json` has a person behind it: a terminal with

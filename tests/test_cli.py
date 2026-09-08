@@ -1745,6 +1745,101 @@ def check_a_profile_travels_out_and_back_as_the_same_bytes(box):
     assert "no machine called" in stranger.stderr, stranger.stderr
 
 
+def check_the_merge_tells_the_four_answers_apart(box):
+    """What each computer says about one profile, and what to do about it.
+
+    Three kinds of answer and not one. *It differs* would put three different
+    decisions under a single word, and somebody asked to choose would read
+    "conflict" where there is nothing to conflict with.
+
+    And a fourth thing that is not an answer at all: a machine nothing has been
+    collected from. Folded into "no differences" it would make silence and
+    agreement read the same, which is the shape `house` already refuses about a
+    day nobody sent.
+    """
+    box.write_profiles({"schemaVersion": 2, "profiles": []})
+    box.run("profile", "add", "kid", "--name", "Here")
+    for machine in ("the study", "the kitchen", "the attic", "silent"):
+        assert box.run("machine", "add", machine).returncode == 0
+
+    def collected(machine, document):
+        where = box.state / "elsewhere" / machine / "kid"
+        where.mkdir(parents=True, exist_ok=True)
+        (where / "profile.json").write_text(json.dumps(document))
+
+    theirs = {"user": "kid", "displayName": "Changed there",
+              "writtenBy": "ana", "writtenAt": "2026-09-08T14:00:00-03:00"}
+    mine = json.loads(box.run("--json", "profile", "show", "kid").stdout)
+    collected("the study", {"schemaVersion": 2, "profiles": [theirs]})
+    collected("the kitchen", {"schemaVersion": 2, "profiles": []})
+    collected("the attic", mine)
+
+    seen = json.loads(box.run("--json", "profile", "merge", "kid").stdout)
+    says = {row["machine"]: row["is"] for row in seen["machines"]}
+    assert says == {"the study": "changed", "the kitchen": "gone",
+                    "the attic": "same", "silent": "not collected"}, says
+    # Both versions are shown whole, because whoever is choosing needs what
+    # changed and who wrote each -- and all of that is already in the documents.
+    assert seen["mine"]["displayName"] == "Here", seen
+    study = [r for r in seen["machines"] if r["machine"] == "the study"][0]
+    assert study["theirs"]["writtenBy"] == "ana", study
+
+    # A machine that has sent nothing is named, not folded into agreement.
+    plain = box.run("profile", "merge", "kid")
+    assert "has sent nothing" in plain.stdout, plain.stdout
+    assert "2 to decide" in plain.stdout, plain.stdout
+
+    # `--keep` prints what makes that machine take this one, carrying what the
+    # manager believes is over there. That is what makes the second pass apply
+    # what was listed: the machine refuses it if that is not still what it has.
+    keep = json.loads(box.run("profile", "merge", "kid", "--keep", "the study").stdout)
+    assert keep["profiles"][0]["displayName"] == "Here", keep
+    assert keep["supersedes"]["displayName"] == "Changed there", keep
+
+    # `--take` brings a version here.
+    took = box.run("profile", "merge", "kid", "--take", "the study")
+    assert took.returncode == 0, took.stderr
+    here = json.loads((box.config / "profiles.json").read_text())["profiles"]
+    assert here[0]["displayName"] == "Changed there", here
+
+    # And taking an absence takes a removal: somebody with the manager
+    # unreachable decided this account has no rules, and agreeing means the
+    # same here. Without this, the bluntest thing the exit does is the one
+    # thing the household cannot act on.
+    gone = box.run("profile", "merge", "kid", "--take", "the kitchen")
+    assert gone.returncode == 0, gone.stderr
+    assert json.loads((box.config / "profiles.json").read_text())["profiles"] == []
+
+    # And now the answer for the study has *changed its kind*, which is the
+    # distinction this case exists for: with nothing here to conflict with, its
+    # profile is not a conflict, it is one to take in. The first version of
+    # this case never reached `new` at all -- the manager always had a profile
+    # -- so collapsing `new` into `changed` changed nothing and the mutation
+    # sailed through.
+    after = json.loads(box.run("--json", "profile", "merge", "kid").stdout)
+    assert after["mine"] is None, after
+    kinds = {row["machine"]: row["is"] for row in after["machines"]}
+    assert kinds["the study"] == "new", kinds
+    assert kinds["the attic"] == "new", kinds
+    assert kinds["the kitchen"] == "same", kinds
+
+    # The refusals. Nothing collected is not a version to decide about.
+    quiet = box.run("profile", "merge", "kid", "--take", "silent")
+    assert quiet.returncode == 1, quiet.stdout
+    assert "nothing has been collected" in quiet.stderr, quiet.stderr
+
+    # A push carries a profile and cannot carry its absence.
+    nothing = box.run("profile", "merge", "kid", "--keep", "the study")
+    assert nothing.returncode == 1, nothing.stdout
+    assert "cannot carry its absence" in nothing.stderr, nothing.stderr
+
+    # One decision at a time.
+    both = box.run("profile", "merge", "kid", "--take", "the study",
+                   "--keep", "the attic")
+    assert both.returncode == 1, both.stdout
+    assert "One decision at a time" in both.stderr, both.stderr
+
+
 def check_it_refuses_a_profile_for_an_administrator(box):
     """docs/design.md §1: the operator is whoever is in wheel.
 
@@ -3811,6 +3906,7 @@ def main():
         check_a_pushed_profile_comes_in_through_the_stage,
         check_a_push_stands_back_from_a_hand_made_profile,
         check_a_profile_travels_out_and_back_as_the_same_bytes,
+        check_the_merge_tells_the_four_answers_apart,
         check_it_refuses_a_profile_for_an_administrator,
         check_it_refuses_to_write_without_privilege,
         check_create_user_is_built_but_never_run_here,

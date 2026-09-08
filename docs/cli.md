@@ -130,6 +130,22 @@ Only one profile per account: two would be two sets of rules nobody could point 
 
   An account that is already there is left alone and said so; a useradd that fails is the profile not being written.
 
+## `omahouse profile merge`
+
+- **Usage:** `omahouse profile merge`
+
+What each computer says about one profile, against what this one says, and what to do about the difference.
+
+The second half of the emergency exit. omahouse is installed whole on every machine so somebody can sit down and fix it with the manager unreachable; a push stands back from what they did, and this is where a person is finally asked about it.
+
+**Three kinds of answer and not one**, because *it differs* would put three different decisions under one word. **new** is a profile for somebody this machine has never heard of -- nothing to conflict with, and the decision is whether to take it in. **changed** is both having one and not the same, which is the only real conflict. **gone** is that machine saying it has none while this one has one, which is somebody having removed it there and is the bluntest thing the exit is for.
+
+A fourth thing is not an answer: a machine nothing has been collected from. It is said out loud and never folded into *no differences*, for the reason `house` says which computer has not reported -- agreement and silence read the same and only one of them is a fact.
+
+`--take <machine>` puts that machine's version here, and taking a machine's *absence* takes a removal: agreeing that the account has no rules there means it has none here. `--keep <machine>` prints the document that makes that machine take this one, with what the manager believes is over there carried inside it as `supersedes` -- so a decision made against a version that has since changed lands nowhere instead of on the wrong one. **What is applied is what was listed**, and that is mechanism rather than discipline.
+
+Both flags at once is refused: one decision at a time. So is a machine nothing was collected from, because there is no version of it to decide about, and `--keep` where this machine has no profile, because a push carries a profile and cannot carry its absence.
+
 ## `omahouse profile collect`
 
 - **Usage:** `omahouse profile collect`
@@ -140,7 +156,7 @@ The other half of `profile show --json`, and the same shape as `omahouse collect
 
     ssh arch@192.168.1.20 omahouse profile show kid --json | sudo omahouse profile collect 'the kitchen laptop' kid
 
-It lands beside that machine's days, under `/var/lib/omahouse/elsewhere/<machine>/<user>/profile.json`, in the directory a household has already learned the meaning of. **Nothing is decided by taking it in** -- what arrives is what that machine says, filed where the deciding can read it, exactly as a collected day is filed without being added to anything yet.
+It lands beside that machine's days, under `/var/lib/omahouse/elsewhere/<machine>/<user>/profile.json`, in the directory a household has already learned the meaning of. **A document with no profile in it is an answer and is kept**: it means that machine says it has none, which is what an administrator removing one with the manager unreachable looks like from here. Without it, a removal and a machine that never reported are the same absence, and treating that as nothing happening is what quietly erases a deliberate removal. **Nothing is decided by taking it in** -- what arrives is what that machine says, filed where the deciding can read it, exactly as a collected day is filed without being added to anything yet.
 
 A document is accepted only for a computer the household has written down, and only for the account it was asked about: a profile filed under the wrong name is somebody else's rules in the place a merge will read them as this person's.
 
