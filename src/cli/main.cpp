@@ -1076,8 +1076,14 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
                           scope.dominantExe.isEmpty()
                               ? QJsonValue()
                               : QJsonValue(exeCorroboratesId(scope.id, scope.dominantExe)));
-            if (profile)
-                object.insert(QStringLiteral("verdict"), verdictName(profile->verdictFor(scope.id)));
+            // The verdict the daemon would reach, which is the id *and* the
+            // executable under it -- a scope the Omarchy menu named
+            // `gtk-launch` is judged by the program inside it, so `status` and
+            // `watch` cannot disagree about what is about to be closed.
+            if (profile) {
+                object.insert(QStringLiteral("verdict"),
+                              verdictName(profile->verdictFor(scope.id, scope.dominantExe)));
+            }
             scopesJson.append(object);
         }
         QJsonArray unnamedJson;
@@ -1226,8 +1232,9 @@ int cmdStatus(const Globals &g, const QStringList &positionals)
                 // Furniture has no verdict, and saying `allow` would be a lie in
                 // the direction that matters: it is not allowed, it is not asked
                 // about.
-                row.append(furniture ? QStringLiteral("the session's")
-                                     : verdictName(profile->verdictFor(scope.id)));
+                row.append(furniture
+                               ? QStringLiteral("the session's")
+                               : verdictName(profile->verdictFor(scope.id, scope.dominantExe)));
             }
             row.append(scope.unit);
             rows.append(row);

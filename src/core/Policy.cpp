@@ -35,7 +35,7 @@ Event stamp(EventKind kind, const QDateTime &now)
 bool anyLiveScopeMatches(const QVector<AppScope> &live, const QString &selector)
 {
     for (const AppScope &scope : live) {
-        if (selectorMatches(selector, scope.id))
+        if (selectorMatches(selector, scope.id, scope.dominantExe))
             return true;
     }
     return false;
@@ -95,7 +95,11 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
         // `Furniture.h` for why unknown is never furniture.
         if (isFurniture(scope.id, alsoFurniture))
             continue;
-        if (profile.verdictFor(scope.id) != Verdict::Deny)
+        // The executable beside the id, never instead of it -- Profile.h's
+        // three-argument `selectorMatches`. The Omarchy menu names every scope
+        // it opens `gtk-launch`, so without this a released program is closed
+        // before its window appears and the notification accuses the launcher.
+        if (profile.verdictFor(scope.id, scope.dominantExe) != Verdict::Deny)
             continue;
         // Said once per scope. A refused app that is closed and opened again
         // gets a new unit name from systemd and so is worth saying again, which
@@ -284,7 +288,11 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
         // because closing is a write to one scope's cgroup.kill and a budget
         // can be holding several of them.
         for (const AppScope &scope : live) {
-            if (!selectorMatches(budget.match, scope.id))
+            // The same match the debit above was made on, or a budget would
+            // count a launcher's scope all day and close nothing at the end of
+            // it. The unit named is the launcher's, because that is the cgroup
+            // the program is really in.
+            if (!selectorMatches(budget.match, scope.id, scope.dominantExe))
                 continue;
             Decision decision;
             decision.kind = Decision::Kind::Close;

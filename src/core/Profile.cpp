@@ -1,3 +1,4 @@
+#include "AppScope.h"
 #include "Profile.h"
 #include "Allocation.h"
 
@@ -239,6 +240,23 @@ bool selectorMatches(const QString &selector, const QString &scopeId)
     return !scopeId.isEmpty() && selector == scopeId;
 }
 
+bool selectorMatches(const QString &selector, const QString &scopeId, const QString &exePath)
+{
+    if (selectorMatches(selector, scopeId))
+        return true;
+    // `*` has already matched above; anything else that got here is a name, and
+    // a name needs something to compare against.
+    if (selector.isEmpty() || exePath.isEmpty())
+        return false;
+    // The gate. `exeCorroboratesId` answers true for an empty id, so a scope
+    // nothing can name closes this door on its own and never reaches the line
+    // below -- which is the rule Profile.h states and this must not quietly
+    // undo.
+    if (exeCorroboratesId(scopeId, exePath))
+        return false;
+    return exeCorroboratesId(selector, exePath);
+}
+
 Verdict Web::verdictFor(const QString &domain) const
 {
     for (const Rule &rule : rules) {
@@ -250,8 +268,13 @@ Verdict Web::verdictFor(const QString &domain) const
 
 Verdict Profile::verdictFor(const QString &scopeId) const
 {
+    return verdictFor(scopeId, QString());
+}
+
+Verdict Profile::verdictFor(const QString &scopeId, const QString &exePath) const
+{
     for (const Rule &rule : rules) {
-        if (selectorMatches(rule.match, scopeId))
+        if (selectorMatches(rule.match, scopeId, exePath))
             return rule.verdict;
     }
     return defaultVerdict;

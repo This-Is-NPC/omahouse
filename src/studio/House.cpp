@@ -83,7 +83,11 @@ Live liveFor(const QVector<AppScope> &scopes, const QString &id)
     Live live;
     int best = -1;
     for (const AppScope &scope : scopes) {
-        if (scope.id != id || !scope.isLive())
+        // The same match the rules and the budgets are made on -- Profile.h's
+        // three-argument `selectorMatches`. A row whose clock is ticking and
+        // whose line says nothing is running is the window disagreeing with the
+        // daemon about the one program somebody is looking at.
+        if (!scope.isLive() || !selectorMatches(id, scope.id, scope.dominantExe))
             continue;
         live.pids += scope.pidCount;
         if (scope.pidCount > best && !scope.dominantExe.isEmpty()) {
@@ -98,7 +102,7 @@ Live liveFor(const QVector<AppScope> &scopes, const QString &id)
 bool anythingMatching(const QVector<AppScope> &scopes, const QString &selector)
 {
     for (const AppScope &scope : scopes) {
-        if (scope.isLive() && selectorMatches(selector, scope.id))
+        if (scope.isLive() && selectorMatches(selector, scope.id, scope.dominantExe))
             return true;
     }
     return false;
@@ -301,7 +305,8 @@ QVariantList programsOf(const Profile &profile, const Ledger &ledger,
         row.insert(QStringLiteral("id"), id);
         row.insert(QStringLiteral("budgetId"), budget ? budget->id : QString());
         row.insert(QStringLiteral("hasBudget"), budget != nullptr);
-        row.insert(QStringLiteral("released"), profile.verdictFor(id) == Verdict::Allow);
+        row.insert(QStringLiteral("released"),
+                   profile.verdictFor(id, live.exe) == Verdict::Allow);
         row.insert(QStringLiteral("name"), catalogue.value(id).name);
         row.insert(QStringLiteral("pids"), live.pids);
         row.insert(QStringLiteral("running"), live.pids > 0);

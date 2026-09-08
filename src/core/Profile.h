@@ -56,6 +56,34 @@ bool selectsFromName(const QString &name, Selects *out);
 /// certainly not on the list of what was released.
 bool selectorMatches(const QString &selector, const QString &scopeId);
 
+/// The same question asked of a scope that has an executable read out of it,
+/// which is the only way a program opened from the Omarchy menu can be named.
+///
+/// The menu launches everything through `gtk-launch`, so systemd names the scope
+/// after the shim and every entry collapses into that one id. A rule about the
+/// program cannot match it, and under `default: deny` the program is closed
+/// before its window appears -- with the notification accusing the launcher.
+///
+/// So the executable is allowed to answer, under two conditions that are the
+/// whole of the care this needs:
+///
+///  - **Only where the id is not already the name of what is running.** An id
+///    the executable corroborates is a scope that has said what it is, and
+///    letting a second name in there would make the path a selector of its own:
+///    `chromium` would be matched by a rule about anything living near it on the
+///    disk.
+///  - **Never instead of the id.** This only ever adds a match. That is what
+///    keeps the flatpak case right -- `org.freedesktop.Platform` is the correct
+///    name and `/usr/bin/bwrap` is the executable of every flatpak alike, so a
+///    rule naming the flatpak goes on matching it and bwrap overrules nothing.
+///
+/// An empty `exePath` is nobody having looked, and having no opinion is not an
+/// allowance: the scope is judged by its id exactly as before. An empty
+/// `scopeId` is a scope nothing can name, and a named selector never matches
+/// one -- an executable read out of a `tmux-spawn` scope would otherwise be a
+/// hole through an allowlist that nothing in the profile names.
+bool selectorMatches(const QString &selector, const QString &scopeId, const QString &exePath);
+
 struct Rule {
     QString match;
     Verdict verdict = Verdict::Allow;
@@ -169,6 +197,10 @@ struct Profile {
     /// operator wrote them, and the first line about a program is the one they
     /// would point at when asked why it is allowed.
     Verdict verdictFor(const QString &scopeId) const;
+
+    /// The same, for a scope whose executable was read. See `selectorMatches`
+    /// above for what the second name is allowed to do and what it is not.
+    Verdict verdictFor(const QString &scopeId, const QString &exePath) const;
 
     QJsonObject toJson() const;
     static bool fromJson(const QJsonObject &object, Profile *out, QString *error);
