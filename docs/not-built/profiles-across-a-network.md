@@ -179,17 +179,23 @@ being offline, and that property is why it was chosen.
 
 ### The rule this page takes instead
 
-**The pool is the person's, and any machine may serve from it.** An hour is an
-hour wherever they sit. Forty minutes at one computer leaves twenty at the next.
+**The pool is the person's, the record of it lives at the manager, and a machine
+asks.** An hour is an hour wherever they sit. Forty minutes at one computer leave
+twenty at the next.
 
-A machine does not receive a portion in the morning. It borrows a short piece
-when somebody sits down and renews it while they use it. **A machine that dies
-loses one unrenewed loan, not the session**, which is the case that decides the
-shape: the computer holding the record of forty spent minutes is the computer
-that broke.
+A machine does not receive a portion in the morning and does not hold the
+authoritative count. It counts what is being spent, reports it, and reads the
+remaining balance back. The cadence is the one the counter already runs at, so
+the manager is never more than a few seconds behind: a machine that dies loses
+those few seconds and nothing more.
 
-The cadence already exists. Allocation today refuses to plan on any observation
-older than 120 seconds, so machines already report at that rate.
+That answers the case that decides the shape. Somebody spends forty minutes at
+one computer, it breaks, and they sit at another: the forty minutes are already
+at the manager, because they left the machine while they were being spent rather
+than when the session ended. The second computer asks and is told twenty.
+
+**The local file is a cache, and a machine uses it only when it cannot reach the
+manager.** It is not a second record to be reconciled.
 
 ### Reversing the decision is part of the work
 
@@ -223,25 +229,21 @@ the profile, and the machine holds it as a cache carrying the written-at stamp o
 §5. A login reads the cache and waits on nothing. No login ever blocks on the
 network, which is the property that matters at eight in the evening.
 
-### The cache has a freshness limit, and it is not the double-spend defence
+### The cache is a fallback, not a second source
 
-A cache older than the household's limit does not open a new session. That bounds
-how stale a **policy** may be before a machine stops acting on it.
+A machine asks the manager. The cached profile is what it uses when the manager
+cannot be reached, and nothing else. There is no reconciliation between two live
+copies, because only one of them is ever live.
 
-**It does not bound double spending, and the earlier draft leaned on it as though
-it did.** With the network up, two machines both holding a fresh cache would each
-let the same person in, and each would spend. The login was never the gate.
+An earlier draft made the cache carry more than that: it had the login reading
+the cache as a matter of course and a short loan taken against the pool to stop
+the same minutes being spent twice. Both were invented. With the manager holding
+the count and every machine reporting at the counter's own cadence, two machines
+spending at once are two machines the manager can see, and the balance each of
+them reads is already right.
 
-**The loan is the gate.** Phase C's short borrow, taken when somebody sits down
-and renewed while they use the machine, is the only thing that stops the same
-minutes being spent twice, because it is the only thing that talks to the pool
-while the spending happens.
-
-That gives the honest shape of a machine that cannot reach the manager: the cache
-may still say who the person is and what they may open, and no loan can be taken,
-so there is no time to spend. Whether that reads to the person as *refused at the
-login screen* or as *logged in with nothing left* is a product choice and is not
-made here.
+What a machine out of contact may still do is the one thing left in this area,
+and it is written in §7 as a number rather than a mechanism.
 
 ### What it costs, and the way out
 
@@ -404,8 +406,9 @@ refuse to allocate one** rather than divide it into portions that mean nothing.
 
 ## 7. The order of the work
 
-Phase B does not depend on A or C. Phase C depends on step 1, because lending
-from a pool against a daily clock and against a session clock are different sums.
+Phase B does not depend on A or C. Phase C depends on the reset being decided
+first, because a balance that refills at midnight and one that never refills are
+different sums to report and to read back.
 
 ### Phase A — the profile can say the three shapes
 
@@ -444,21 +447,23 @@ from a pool against a daily clock and against a session clock are different sums
 10. **Reverse the written decision.** The household page says `house` is a total
     and not an authorisation. Change the behaviour and the page together, with
     the reason. *docs*
-11. **Replace division with lending.** No morning portion. A short loan when
-    somebody sits down, renewed while they use it. *core, cli*
-12. **Renew while spending.** The watch loop that already debits per tick renews
-    in the same pass; a refused renewal is the end of time, down the path that
-    already handles an exhausted budget. *sys*
-13. **The Battery changes job.** From dividing once a day to serving requests:
-    grant, renew, expire, return. The largest conceptual change outside omahouse.
-    *omahouse-battery*
-14. **The downstream readers follow.** omastore learns the fallback profile; the
+11. **Replace division with asking.** No morning portion. The manager holds the
+    balance and a machine reads it. *core, cli*
+12. **Report while spending.** The watch loop that already debits per tick sends
+    what it spent in the same pass, so the manager is a few seconds behind and
+    never a day. *sys*
+13. **The Battery changes job.** From dividing once a day to carrying the report
+    and the balance at the counter's cadence. Check what that rate costs the
+    scheduler's run history before choosing it. *omahouse-battery*
+14. **Say what a machine out of contact may do.** A number, not a mechanism: how
+    long it may go on spending against a cache before it stops. *core, docs*
+15. **The downstream readers follow.** omastore learns the fallback profile; the
     Battery refuses a credit that never resets instead of dividing it wrongly.
     *omastore, omahouse-battery*
 
 **Omakure does not change.** It is the wire, and `collect` already travels on it.
 **The browser extension does not change.** A site budget uses the same machinery
-as an app budget, so the anchor reaches it for free.
+as an app budget, so a credit reaches it for free.
 
 ---
 
