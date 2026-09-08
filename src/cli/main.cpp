@@ -2734,7 +2734,24 @@ int cmdProfileShow(const Globals &g, const QStringList &positionals)
     }
 
     if (g.json) {
-        printJson(profile->toJson());
+        // Wrapped the way `profiles.json` wraps, and not the bare profile.
+        //
+        // What that buys is that **the bytes one machine emits are the bytes
+        // another can take in**: this output goes into `/etc/omahouse/staged`
+        // and `profile apply-staged` reads it, unchanged. One document shape
+        // for a profile that travels, in either direction, instead of two --
+        // and the `schemaVersion` comes with it, so a machine newer than the
+        // one reading is refused rather than misread.
+        //
+        // It does mean this verb now does two jobs: showing a person their
+        // profile, and handing it to another computer. The project has split
+        // that pair before -- `day` is separate from `report` because the human
+        // view of a ledger is aggregated differently -- and it is not split
+        // here because the only difference is the envelope. **If the two ever
+        // need to differ, split them then**: a field one job wants and the
+        // other must not carry is a reason for a second verb, and never for a
+        // condition inside this one.
+        printJson(profilesToJson({*profile}));
         return kOk;
     }
 
@@ -3447,6 +3464,10 @@ int cmdProfileDefault(const Globals &g, const QStringList &positionals, const Op
                            .arg(profile->rules.size() == 1 ? QString() : QStringLiteral("s")));
 }
 
+/// Defined further down, beside `collect`: it needs the household's machine
+/// list, and the two verbs are the same act about two different documents.
+int cmdProfileCollect(const Globals &g, const QStringList &positionals);
+
 int cmdProfile(const Globals &g, const QStringList &positionals, const Options &options)
 {
     const QString subcommand = positionals.value(0);
@@ -3475,6 +3496,11 @@ int cmdProfile(const Globals &g, const QStringList &positionals, const Options &
                               QStringLiteral("profile add")))
             return kUsage;
         return cmdProfileAdd(g, positionals.mid(1), options);
+    }
+    if (subcommand == QLatin1String("collect")) {
+        if (!onlyTheseOptions(options, {}, QStringLiteral("profile collect")))
+            return kUsage;
+        return cmdProfileCollect(g, positionals.mid(1));
     }
     if (subcommand == QLatin1String("apply-staged")) {
         if (!onlyTheseOptions(options, {}, QStringLiteral("profile apply-staged")))
@@ -4372,6 +4398,114 @@ int cmdDay(const Globals &g, const QStringList &positionals, const Options &opti
     // would be a second answer to what a day was.
     printJson(ledger.toJson());
     Q_UNUSED(g);
+    return kOk;
+}
+
+/// Takes in the profile another computer says it has.
+///
+/// The other half of `profile show --json`, and the same shape as `collect`:
+/// the machine's name, whose profile, and the document on standard input. It
+/// lands beside that machine's days, in the directory a household has already
+/// learned the meaning of.
+///
+/// **This is where several profiles are reconciled, and `apply-staged` is
+/// where one is taken.** They point at each other on purpose: a push carries
+/// one profile from the manager to a machine, and somebody who tried to use it
+/// in a loop to reconcile a household would be building the merge out of the
+/// wrong verb. The loop is here.
+///
+/// Nothing is decided by taking it in. What arrives is what that machine says,
+/// filed where the deciding can read it -- exactly as a collected day is filed
+/// without being added to anything yet.
+int cmdProfileCollect(const Globals &g, const QStringList &positionals)
+{
+    const QString verb = QStringLiteral("profile collect");
+    if (positionals.size() != 2) {
+        fail(QStringLiteral("%1: which machine, and whose profile? (try omahouse --help)")
+                 .arg(verb));
+        return kUsage;
+    }
+    const QString machine = positionals.at(0);
+    const QString user = positionals.at(1);
+
+    int status = kOk;
+    Fleet fleet;
+    if (!loadMachines(&fleet, &status))
+        return status;
+    if (indexOfMachine(fleet.all, machine) < 0) {
+        // The same refusal `collect` makes, and the whole of what stands
+        // between the household's own record and a stranger: a document is
+        // accepted only for a computer the household has written down.
+        fail(QStringLiteral("%1: no machine called %2 in %3")
+                 .arg(verb, machine, paths::machinesFile()));
+        return kMissing;
+    }
+
+    QFile input;
+    if (!input.open(stdin, QIODevice::ReadOnly)) {
+        fail(QStringLiteral("%1: cannot read the profile on standard input").arg(verb));
+        return kUsage;
+    }
+    const QByteArray raw = input.readAll();
+    input.close();
+    if (raw.trimmed().isEmpty()) {
+        fail(QStringLiteral("%1: nothing came in on standard input. The profile goes in by "
+                            "pipe: omahouse profile show %2 --json | omahouse %1 %3 %2")
+                 .arg(verb, user, machine));
+        return kUsage;
+    }
+
+    QJsonParseError parsing {};
+    const QJsonDocument document = QJsonDocument::fromJson(raw, &parsing);
+    if (!document.isObject()) {
+        fail(QStringLiteral("%1: what came in is not a profile: %2")
+                 .arg(verb, parsing.errorString()));
+        return kUsage;
+    }
+
+    // Read by the reader `profiles.json` gets, so a machine newer than this one
+    // is refused rather than misread -- which is the whole reason
+    // `profile show --json` carries the envelope.
+    QVector<Profile> arrived;
+    QString error;
+    if (!profilesFromJson(document.object(), &arrived, &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+    if (arrived.size() != 1) {
+        fail(QStringLiteral("%1: %2 sent %3 profiles and this takes one")
+                 .arg(verb, machine).arg(arrived.size()));
+        return kUsage;
+    }
+    // Checked against what was asked for rather than trusted, exactly as a day
+    // is: a profile filed under the wrong name is somebody else's rules in a
+    // place the merge will read them as this person's.
+    if (arrived.constFirst().user != user) {
+        fail(QStringLiteral("%1: that profile belongs to %2, and it was offered as %3's")
+                 .arg(verb, arrived.constFirst().user, user));
+        return kUsage;
+    }
+
+    const QString path = paths::elsewhereProfileFile(machine, user);
+    if (!mayWrite(verb, path, paths::stateDirIsTheSystems(), g))
+        return kUsage;
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
+        fail(QStringLiteral("%1: cannot make %2").arg(verb, QFileInfo(path).absolutePath()));
+        return kUsage;
+    }
+    if (!writeJsonAtomically(path, profilesToJson({arrived.constFirst()}), &error)) {
+        fail(QStringLiteral("%1: %2").arg(verb, error));
+        return kUsage;
+    }
+
+    if (g.json) {
+        printJson(QJsonObject {{QStringLiteral("machine"), machine},
+                               {QStringLiteral("user"), user},
+                               {QStringLiteral("path"), path}});
+        return kOk;
+    }
+    out() << QStringLiteral("%1: %2's profile is in, and nothing has been decided about "
+                            "it.\n").arg(machine, user);
     return kOk;
 }
 
@@ -5521,6 +5655,10 @@ Writing, and root needed — the studio gets there by pkexec:
                            omahouse day julia | ssh study omahouse collect …
   profile add '*'          rules for whoever sits here without their own.
                            Quote it: bare, the shell eats it
+  profile collect <machine> <user>
+                           take in the profile another computer says it has,
+                           on stdin. Several profiles are reconciled here;
+                           one is taken by apply-staged
   profile apply-staged     take in the profile the household left in
                            /etc/omahouse/staged/profile.json. No arguments,
                            on purpose: the sudoers line names all of them

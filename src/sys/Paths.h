@@ -82,6 +82,18 @@ QString stagedProfileFile();
 /// `<configDir>/staged` -- the directory above, which the pairing creates.
 QString stagedDir();
 
+/// `<stateDir>/elsewhere/<machine>/<user>/profile.json` -- the profile another
+/// computer says it has, beside the days it says it spent.
+///
+/// The same directory and the same shape of question as a collected day, on
+/// purpose: what arrives from another machine lives in one place, and a
+/// household that learned where its days are has learned where this is too.
+///
+/// It is what a merge reads. A profile an administrator wrote on a machine the
+/// manager could not reach is the reason a merge exists, and it has to be here
+/// before anybody can decide about it.
+QString elsewhereProfileFile(const QString &machine, const QString &user);
+
 /// `<stateDir>/elsewhere` -- where every other machine's days are collected.
 QString elsewhereDir();
 /// `<configDir>/furniture` -- what this machine starts for itself, one name per

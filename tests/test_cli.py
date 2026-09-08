@@ -999,9 +999,14 @@ def check_profile_show(box):
     assert row_for(shown.stdout, "session") == ["session", "*", "2h00m", "logs out"]
     assert row_for(shown.stdout, "code") == ["code", "code", "—", "never runs out"]
 
+    # Wrapped the way profiles.json wraps, and not the bare profile: these are
+    # the bytes another machine takes in, and the envelope is what carries the
+    # schema version with them.
     document = json.loads(box.run("--json", "profile", "show", USER).stdout)
-    assert document["user"] == USER
-    assert document["budgets"][0]["id"] == "session"
+    assert document["schemaVersion"] == 2, document
+    assert len(document["profiles"]) == 1, document
+    assert document["profiles"][0]["user"] == USER
+    assert document["profiles"][0]["budgets"][0]["id"] == "session"
 
     absent = box.run("profile", "show", "somebody-else")
     assert absent.returncode == 2, (absent.returncode, absent.stderr)
@@ -1117,7 +1122,8 @@ def check_a_profile_from_nothing_to_read_back(box):
     assert shown.returncode == 0, shown.stderr
     assert row_for(shown.stdout, "session") == ["session", "*", "2h00m", "logs out"]
     assert row_for(shown.stdout, "chromium") == ["chromium", "chromium", "45m", "closes"]
-    assert json.loads(box.run("--json", "profile", "show", "julia").stdout) == profile
+    assert json.loads(box.run("--json", "profile", "show", "julia").stdout)["profiles"] \
+        == [profile]
     assert row_for(box.run("profile", "list").stdout, "julia")[:5] == \
         ["julia", "Júlia", "yes", "yes", "deny"]
 
@@ -1467,7 +1473,7 @@ def check_the_verb_writes_the_profile_for_anybody(box):
     # looking for an account spelled with quotation marks in it. Nobody pipes
     # JSON into a shell, so the hazard the quoting exists for is not there.
     shown = json.loads(box.run("profile", "show", anybody(), "--json").stdout)
-    assert shown["user"] == anybody(), shown
+    assert shown["profiles"][0]["user"] == anybody(), shown
 
     # A second one is refused, and the refusal quotes it too.
     again = box.run("profile", "add", anybody())
@@ -1593,6 +1599,66 @@ def check_a_pushed_profile_comes_in_through_the_stage(box):
     linked = box.run("profile", "apply-staged", extra_env={"SUDO_UID": "2"})
     assert linked.returncode == 1, linked.stdout
     assert "symbolic link" in linked.stderr, linked.stderr
+
+
+def check_a_profile_travels_out_and_back_as_the_same_bytes(box):
+    """What one machine emits is what another takes in, unchanged.
+
+    That is the reason `profile show --json` carries the envelope rather than
+    the bare profile, and without a case it is a hope: the two shapes would
+    drift the first time somebody added a field to one side, and nothing would
+    say so until a household tried to reconcile and found a document its
+    manager could not read.
+
+    So the case does the trip. It takes the bytes the verb prints, puts them in
+    the stage without touching them, and asks the machine to take them in.
+    """
+    box.write_profiles({"schemaVersion": 2, "profiles": []})
+    box.run("profile", "add", "nobody", "--name", "Kid")
+    box.run("allow", "nobody", "code", "--limit", "45m")
+
+    emitted = box.run("--json", "profile", "show", "nobody")
+    assert emitted.returncode == 0, emitted.stderr
+
+    # Not re-serialised, not reshaped: the bytes.
+    stage = box.config / "staged"
+    stage.mkdir(parents=True, exist_ok=True)
+    (stage / "profile.json").write_text(emitted.stdout)
+
+    box.write_profiles({"schemaVersion": 2, "profiles": []})
+    taken = box.run("profile", "apply-staged", extra_env={"SUDO_UID": "2"})
+    assert taken.returncode == 0, taken.stderr
+
+    arrived = json.loads((box.config / "profiles.json").read_text())["profiles"]
+    assert len(arrived) == 1, arrived
+    # Everything but the stamp, which is about who wrote it here and is
+    # expected to differ: it came in through the household's account.
+    was = json.loads(emitted.stdout)["profiles"][0]
+    for side in (arrived[0], was):
+        side.pop("writtenBy", None)
+        side.pop("writtenAt", None)
+    assert arrived[0] == was, (arrived[0], was)
+
+    # And the same bytes are what the manager's side takes, so the envelope
+    # serves both directions rather than one.
+    box.run("machine", "add", "the study")
+    collected = box.run("profile", "collect", "the study", "nobody",
+                        stdin=emitted.stdout)
+    assert collected.returncode == 0, collected.stderr
+    filed = box.state / "elsewhere" / "the study" / "nobody" / "profile.json"
+    assert filed.exists(), list((box.state / "elsewhere").rglob("*"))
+    assert json.loads(filed.read_text())["profiles"][0]["user"] == "nobody"
+
+    # A profile offered under the wrong name is refused: filed wrongly, a merge
+    # would read somebody else's rules as this person's.
+    wrong = box.run("profile", "collect", "the study", "daemon", stdin=emitted.stdout)
+    assert wrong.returncode == 1, wrong.stdout
+    assert "belongs to nobody" in wrong.stderr, wrong.stderr
+
+    # And only for a computer the household has written down.
+    stranger = box.run("profile", "collect", "nowhere", "nobody", stdin=emitted.stdout)
+    assert stranger.returncode == 2, stranger.stdout
+    assert "no machine called" in stranger.stderr, stranger.stderr
 
 
 def check_it_refuses_a_profile_for_an_administrator(box):
@@ -3659,6 +3725,7 @@ def main():
         check_the_rules_for_anybody_are_readable_by_whoever_they_bind,
         check_the_verb_writes_the_profile_for_anybody,
         check_a_pushed_profile_comes_in_through_the_stage,
+        check_a_profile_travels_out_and_back_as_the_same_bytes,
         check_it_refuses_a_profile_for_an_administrator,
         check_it_refuses_to_write_without_privilege,
         check_create_user_is_built_but_never_run_here,

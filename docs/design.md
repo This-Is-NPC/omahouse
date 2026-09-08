@@ -706,6 +706,43 @@ entry, the icon and the `.install`. The install script creates `/etc/omahouse` a
 `/var/lib/omahouse`, adds the PAM line of §2, enables `omahouse.service`, and
 takes all of it out again on removal.
 
+### A profile travelling the other way, and one document shape for both
+
+A profile an administrator wrote on a machine the manager could not reach is
+the reason a merge exists, and it has to reach the manager before anybody can
+decide about it. It travels the way a day travels and by no new road: a verb
+that emits on standard output, a verb that takes in on standard input, and the
+manager's cued script carrying the bytes.
+
+```
+ssh arch@192.168.1.20 omahouse profile show kid --json \
+    | sudo omahouse profile collect 'the kitchen laptop' kid
+```
+
+It lands beside that machine's days, under
+`/var/lib/omahouse/elsewhere/<machine>/<user>/profile.json`, and **nothing is
+decided by taking it in** — the same posture a collected day keeps.
+
+`profile show --json` therefore emits the document wrapped the way
+`profiles.json` wraps, and not the bare profile. What that buys is that **the
+bytes one machine emits are the bytes another takes in**: the same output goes
+into `/etc/omahouse/staged` and `profile apply-staged` reads it unchanged. One
+shape for a profile that travels, in either direction, and the `schemaVersion`
+comes with it — so a machine newer than the one reading is refused rather than
+misread.
+
+It does mean that verb now does two jobs, showing a person their profile and
+handing it to another computer. This project has split that pair before: `day`
+is separate from `report` because the human view of a ledger is aggregated
+differently. It is not split here because the only difference is the envelope,
+and a whole verb for an envelope is more house than the tenant needs. **If the
+two ever need to differ — a field one should carry and the other should not —
+the answer is to split them then**, and never a condition inside one of them.
+
+**Several profiles are reconciled by `profile collect` and a merge; one is
+taken by `apply-staged`.** The two say so about each other, because the way to
+get this wrong is to use the push in a loop.
+
 ### A profile that arrives without anybody at the keyboard
 
 Every other write to `profiles.json` has a person behind it: a terminal with

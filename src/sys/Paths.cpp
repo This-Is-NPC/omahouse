@@ -114,6 +114,12 @@ QString elsewhereDir()
     return stateDir() + QStringLiteral("/elsewhere");
 }
 
+QString elsewhereProfileFile(const QString &machine, const QString &user)
+{
+    return elsewhereDir() + QLatin1Char('/') + machine + QLatin1Char('/') + user
+        + QStringLiteral("/profile.json");
+}
+
 QString elsewhereLedgerFile(const QString &machine, const QString &user, const QDate &date)
 {
     return elsewhereDir() + QLatin1Char('/') + machine + QLatin1Char('/') + user

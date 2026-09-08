@@ -130,6 +130,24 @@ Only one profile per account: two would be two sets of rules nobody could point 
 
   An account that is already there is left alone and said so; a useradd that fails is the profile not being written.
 
+## `omahouse profile collect`
+
+- **Usage:** `omahouse profile collect`
+
+Take in the profile another computer says it has.
+
+The other half of `profile show --json`, and the same shape as `omahouse collect`: the machine's name, whose profile, and the document on standard input.
+
+    ssh arch@192.168.1.20 omahouse profile show kid --json | sudo omahouse profile collect 'the kitchen laptop' kid
+
+It lands beside that machine's days, under `/var/lib/omahouse/elsewhere/<machine>/<user>/profile.json`, in the directory a household has already learned the meaning of. **Nothing is decided by taking it in** -- what arrives is what that machine says, filed where the deciding can read it, exactly as a collected day is filed without being added to anything yet.
+
+A document is accepted only for a computer the household has written down, and only for the account it was asked about: a profile filed under the wrong name is somebody else's rules in the place a merge will read them as this person's.
+
+**Reconciling several profiles is this, and taking one is `apply-staged`.** A push carries one profile from the manager to a machine; somebody using that in a loop to reconcile a household would be building this out of the wrong verb.
+
+It is read by the reader `profiles.json` gets, so a machine newer than this one is refused rather than misread -- which is why `profile show --json` carries the schema version around the profile.
+
 ## `omahouse profile apply-staged`
 
 - **Usage:** `omahouse profile apply-staged`
@@ -140,7 +158,7 @@ The machine's half of a profile arriving from a central omahouse. The manager cu
 
 **It takes no arguments, and that is the whole design.** The sudoers entry that lets the node account run this names every argument, because a rule ending in a wildcard lets the caller append what it likes to whatever the pattern matched. A rule with nothing after the verb can only be that command or a refusal, which makes what the household may push a question somebody answers by reading a file. The price is that the path cannot be given on the command line, so it is fixed.
 
-The document is shaped like `profiles.json` with exactly one profile in it, and is read by the same reader that file gets: the schema version, the verdicts, an action that cannot happen to that kind of budget, and a budget that never resets on a profile for anybody are all refused here exactly as they are there. A refusal that lived only in the verbs would have this as its back door. Reconciling several profiles at once is a merge and is not this.
+The document is shaped like `profiles.json` with exactly one profile in it, and is read by the same reader that file gets: the schema version, the verdicts, an action that cannot happen to that kind of budget, and a budget that never resets on a profile for anybody are all refused here exactly as they are there. A refusal that lived only in the verbs would have this as its back door. Reconciling several profiles at once is `profile collect` and a merge, and is not this: somebody using this verb in a loop to reconcile a household would be building the merge out of the wrong one.
 
 A symbolic link in the way is refused before anything is opened, the directory as well as the file. Nothing is to be gained by one today -- whoever can write the stage is the account that already has its own line to root -- and that is exactly why nobody would look at it later, when that line is narrower and this is the door.
 
