@@ -365,6 +365,19 @@ private slots:
         // and it is root rather than a wheel member for the same reason: uid 0
         // is an administrator on every machine there is, and a case that needed
         // a wheel group would be a case that skips where there is none.
+        //
+        // **What that costs, said here so nobody reads this case as wider than
+        // it is.** `isAdministrator` answers `true` for uid 0 and returns
+        // before it looks at any group, so what is proved below is that *root*
+        // is left out of the fallback, and not that a member of `wheel` is. The
+        // group half is a `getgrnam_r` and a membership walk, and it is reached
+        // here by nothing.
+        //
+        // It is left that way on purpose. Reaching it needs a real `wheel` with
+        // a real member in it, which is a fact about the machine the suite
+        // happens to run on -- and a case that skipped where there is no wheel
+        // group would trade one vacuity for another, in a suite whose whole
+        // discipline is not accepting green it has not seen red for.
         uid_t nobodyUid = 0;
         uid_t daemonUid = 0;
         QVERIFY(uidForUser(QStringLiteral("nobody"), &nobodyUid));
