@@ -1,11 +1,17 @@
 # Profiles across a network — designed, and mostly not built
 
-> **Nothing on this page works on any machine, and one thing on it was built
-> wrong.** On 2026-09-08 a budget anchored at the *login* shipped into `core`,
-> with the sitting in the ledger. §1 records why that model was wrong and what
-> replaces it: the allowance belongs to the person and never resets on a new
-> login. No verb and no screen reaches any of it, so no machine behaves
-> differently, and the code has to be undone rather than extended. Everything else below is a record of a design decided
+> **Phase A and most of phase B shipped on 2026-09-08. Phase C did not, and
+> §7 marks each step.** A budget can be `daily` or `never`, a profile can name
+> no account and rule whoever sits at the machine, and every profile records who
+> wrote it and when. What no verb reaches yet is the writing of a profile for
+> anybody, so the rules for it are read and honoured and cannot be created from
+> the command line. Phase C — one pool, reported and read back — is designed here
+> and not built.
+>
+> The page also records a model that was built **wrong** and replaced the same
+> day: a budget anchored at the *login*, with a sitting in the ledger. §1 keeps
+> why it was wrong, because the allowance belongs to the person and does not
+> come back on a new login. Everything else below is a record of a design decided
 > on 2026-09-08, kept so that the next person who wants omahouse to govern more
 > than one household spends an afternoon reading instead of a week rediscovering
 > the same three corners.
@@ -143,6 +149,32 @@ is what "administered on the machine rather than on the person" means in
 concrete terms: the machine carries rules for whoever sits at it.
 
 This has a consequence downstream that is easy to miss and is written in §6.
+
+### The rules the fallback shipped with
+
+Four decisions were taken while it was written, and they are here because none
+of them is visible from the field alone.
+
+**A profile of its own always wins**, and the whole list is walked by name before
+the fallback is considered. The fallback can be written above the account's own
+profile in the file, and *first match wins* would then answer with the wrong one.
+
+**An administrator never inherits it.** `profile add` already refuses to write a
+profile for somebody in wheel, saying an administrator does not fiscalise
+themselves by accident; a fallback that caught them would do through the back
+door what the verb refuses at the front. **This is a live filter and not a fact
+about the file**: somebody put in wheel tomorrow has to fall out of a fallback
+that was already written and is still correct, so it is evaluated every cycle
+and cannot be moved into validation.
+
+**The kind of machine is not a condition.** A fallback applies because somebody
+wrote one. Making it depend on whether the machine is managed would add a second,
+unwritten condition to a written thing — the exact shape of the house line that
+one page promised and the code required more of.
+
+**It answers under the real account name and never under `*`.** The reason is
+not symmetry: the `omahouse allow` line a reader prints beside a verdict would
+otherwise write a rule for an account that cannot exist.
 
 **A fallback profile and a budget that never resets must not be used together.**
 The pool belongs to the person and the fallback belongs to nobody in particular,
@@ -415,15 +447,15 @@ different sums to report and to read back.
 
 ### Phase A — the profile can say the three shapes
 
-1. **Swap the sitting for no reset.** Three pieces go: the anchor, the sitting
+1. **Done.** **Swap the sitting for no reset.** Three pieces go: the anchor, the sitting
    stamped on a grant, and the clearing of warning marks. **The separate map
    stays** — see below, because removing it reintroduces double counting that no
    test would catch. *core, tests*
-2. **Give `Budget` an explicit reset.** `resets: "daily" | "never"`, absent
-   meaning daily, so every file on disk keeps its current meaning. The reader
-   already holds this discipline: `wantsNames` in `src/core/Profile.cpp` reads
-   `match` written either way and a case pins it. *core*
-3. **Prove that `never` does not refill.** Midnight turns and the daily budget
+2. **Done.** **Give `Budget` an explicit reset.** `resets: "daily" | "never"`,
+   absent meaning daily — not for the files of a product with no users, but
+   because most budgets have no opinion about it and writing the default into
+   every one of them is noise in a file people read. *core*
+3. **Done.** **Prove that `never` does not refill.** Midnight turns and the daily budget
    goes back to zero while the credit does not; a second login spends the same
    balance the first one left. *tests*
 4. **Say what the account is, not only what it opens.** The profile carries
@@ -432,14 +464,21 @@ different sums to report and to read back.
 
 ### Phase B — the profile arrives from somewhere else
 
-5. **A profile that names no account.** A fallback applying to any account
-   without one of its own, so a machine can carry rules for whoever sits at it.
-   *core, cli, studio*
+5. **Read and honoured; the verb and the screens are not written.** **A profile
+   that names no account**, marked `*`, applying to any account without one of
+   its own. `sys` is in this step and the page first missed it: the watch walks
+   profiles and asks which account each names, and a profile that names none has
+   no way into that loop, so the cycle must also walk **accounts with a live
+   session** and ask which have no profile of their own — a capability `Proc` did
+   not have. *core, sys, cli, studio*
 6. **Push from the manager, cache locally.** A cued script writes the profile;
    the local file is the last version this machine was told; a cache past the
    freshness limit opens no new session. *core, sys, cli, omahouse-battery*
-7. **Written-at and written-by on the profile.** The tiebreak needs it and the
-   merge screen needs it, and it is one field for both. *core*
+7. **Done.** **Written-at and written-by on the profile.** The tiebreak needs it
+   and the merge screen needs it, and it is one field for both. Stamped in
+   `saveProfiles` and only on the profiles that actually differ, because a stamp
+   each verb has to remember is a stamp the next verb will not, and stamping all
+   of them turns *who changed a rule* into *who ran a command last*. *core*
 8. **Merge of locally created profiles.** The central omahouse lists what an
    administrator created on a machine and offers to take it in. *core, cli, studio*
 9. **The window says the three shapes without three screens.** The studio has the
@@ -537,6 +576,15 @@ be a second gate, weaker than the one there, in front of the same door.
 ---
 
 ## What on this page is measured, and what is argued
+
+One more decision belongs with these, and it was forced by a reader in another
+program. `profiles.json`, the day's ledger, `machine.json` and `machines.json`
+all carried **one** schema version. The effect of one number for four files is
+that it never rises: raising it is always too expensive for whatever is at hand,
+so the check that exists to refuse a misread document sits there and never fires.
+That is how a fallback profile reached omastore in silence — structurally valid,
+semantically ignored, and no version to say otherwise. The four now carry their
+own numbers and only the profile's rose.
 
 **Measured**, by reading the source and the pages on 2026-09-08: that the profile
 lookup is an exact string match — `profile.user == user`, which is a different
