@@ -1,11 +1,11 @@
 # Profiles across a network — designed, and mostly not built
 
-> **Almost nothing on this page is built, and the exception is named here.**
-> Steps 1 to 3 of §7 shipped on 2026-09-08: a budget can be anchored at the
-> login, the ledger carries the sitting, and the engine honours both. **Nothing
-> reads logind yet and no verb writes `resets`**, so a profile cannot ask for one
-> from the command line or the window — see [`design.md`](../design.md), which
-> says so in its own words. Everything else below is a record of a design decided
+> **Nothing on this page works on any machine, and one thing on it was built
+> wrong.** On 2026-09-08 a budget anchored at the *login* shipped into `core`,
+> with the sitting in the ledger. §1 records why that model was wrong and what
+> replaces it: the allowance belongs to the person and never resets on a new
+> login. No verb and no screen reaches any of it, so no machine behaves
+> differently, and the code has to be undone rather than extended. Everything else below is a record of a design decided
 > on 2026-09-08, kept so that the next person who wants omahouse to govern more
 > than one household spends an afternoon reading instead of a week rediscovering
 > the same three corners.
@@ -36,107 +36,70 @@
 
 ## 1. The three shapes a profile has to express
 
-Three examples decide the model, and they differ in one thing only: **when the
-clock resets.**
+Three examples decide the model, and they differ in one thing only: **whether the
+clock goes back to zero, and when.**
 
 | the shape | resets | exists today |
 |---|---|---|
 | five hours a day | at the turn of the local date | yes |
-| unlimited, everything installed, counted | never | yes |
-| two hours from the moment of login | at login | **no** |
+| unlimited, everything installed, counted | never runs out | yes |
+| two hours, and when they are gone they are gone | **never resets** | **no** |
 
 The first is a session budget with `dailyMinutes: 300`. The second is
 `default: allow` with a budget whose limit is zero, which `Profile.h` already
-describes: *"Zero or less is a budget with no limit: it counts, and it never
-runs out."* Both are expressible in the file that exists.
+describes: *"Zero or less is a budget with no limit: it counts, and it never runs
+out."* Both are expressible in the file that exists.
 
-The third is not, and it is the only new arithmetic on this page. The ledger is
-`/var/lib/omahouse/<user>/<YYYY-MM-DD>.json` and the balance turns with the local
-date ([`design.md` §4](../design.md)). Two hours from login is a second anchor,
-not a second engine.
+The third is not, and it is the only new arithmetic on this page.
 
-**`Budget` gains `resets`, and an absent `resets` means `daily`.** Every file on
-disk keeps the meaning it has. That is the discipline §4 already applies to
-`kind`, `presence` and `sites`: a file that already says what it means is not
-rewritten to say it differently.
+### The allowance belongs to the person, not to the sitting
 
-The ledger gains the sitting, on disk rather than in memory, for the same reason
-the `exhausted` event carries its instant — a daemon restarted in the middle of
-somebody's two hours has to resume them and not reopen them.
+**Two hours means two hours until somebody grants more.** Logging out and back
+in does not return them. Moving to another machine does not return them. The
+turn of the date does not return them. They are spent, and the operator grants
+again or does not.
 
-**The sitting is an opaque word, not an instant, and that was measured rather
-than argued.** This page first asked for the login instant and the seconds since
-it. `loginctl show-user <uid> -p Timestamp` answers with a weekday name and a
-locale, and `TimestampMonotonic` counts from a boot the ledger outlives. Neither
-needs parsing, because the question is not *when*: the engine only needs to know
-whether this is still the same sitting, which is an identity. The word is
-compared by equality and nothing else — no parsing, no locale, no clock drift.
+That is what a lan house sells and what an office allocates, and it is a
+different thing from the household's daily allowance rather than a variation on
+it. The household refills at midnight because tomorrow is a new day for a child.
+A purchased hour has no tomorrow in it.
 
-The seconds do not come from subtracting two clocks either. They come from the
-ticks, which is what has always counted time here, and it is the right number: a
-budget counts an app running and not wall time.
+**So the field is `resets`, and its values are `daily` and `never`.** An absent
+`resets` means `daily`, so every file on disk keeps the meaning it has. That is
+the discipline §4 of `design.md` already applies to `kind`, `presence` and
+`sites`: a file that already says what it means is not rewritten to say it
+differently.
 
-**A sitting crosses midnights, and that is ordinary rather than an edge.** The
-session of the machine this was measured on began three days before it was
-measured. So the session-anchored seconds live in a map of their own, beside the
-daily one and never inside it: the running total is carried into the file of
-every day the sitting touches, and everything that adds days or machines —
-`report`, `house`, `consolidate`, `collect` — reads the daily map. Sharing one
-map would count a sitting's total once per midnight crossed. Kept apart, every
-one of those readers stays correct without knowing this exists, which is how §5's
-invariant survives a second clock.
+Both values are available in any installation. A household that wants a
+purchased-credit budget beside its daily one may have it, and a lan house that
+wants a daily cap beside its credit may have that. Nothing in the engine chooses
+between them.
 
-### Where the sitting has to come from, measured
+### The idea this replaces, and why it was wrong
 
-The obvious source is wrong, and it was measured rather than reasoned about.
+An earlier version of this page asked for a budget **anchored at the login**: a
+clock that starts when somebody sits down and starts again when the next person
+does. That was wrong, and the correction is recorded rather than removed because
+the wrong version shipped before it was caught.
 
-**`loginctl show-user <name> -p Timestamp` does not move between sittings.** On a
-disposable guest, the same account's graphical session was ended twice and left
-to log in again — sessions `2`, then `265`, then `268`. The user's timestamp
-answered `Mon 2026-09-07 19:16:16 UTC` all three times, with the same monotonic
-value. **Three sittings, one anchor**, and the second and third would inherit the
-first one's clock, which is the failure the anchor exists to prevent and in the
-direction that hands out free time.
+It was wrong because **the allowance is the person's**. A clock that restarts per
+sitting hands two hours to anybody who logs out and logs back in, which is the
+opposite of a limit. Nothing in the product ever wanted to count sittings.
 
-**It does not depend on lingering.** Lingering was turned off between the second
-and the third and the timestamp still did not move, because the account's
-`manager` session stays alive either way.
+The measurement that was made while chasing it is kept here because it is true
+and because it is the reason the mistake was visible: `loginctl show-user
+-p Timestamp` **does not move** when the same account logs out and logs in again.
+Three sittings on a disposable guest, with lingering on and with it off, all
+answered `Mon 2026-09-07 19:16:16 UTC`. That was read as a defect at the time. It
+is the correct behaviour for the model this page now takes, and reading it as a
+defect is what exposed the model as wrong.
 
-What moves is `show-user -p Display`, which names the graphical session and went
-`2` → `265` → `268`, and `show-session` on that id answers real, different
-timestamps. So the sitting comes from the session, never from the user.
+**What has to be undone.** `resets: "daily" | "session"` shipped on 2026-09-08,
+with the sitting in the ledger, grants stamped with a sitting, and warning marks
+cleared at a new one. All of it serves an anchor this page no longer asks for.
+None of it reaches a verb or a screen, so nothing on any machine behaves
+differently yet.
 
-**And the session id alone is not enough, because the ledger outlives the boot
-and the id does not.** logind keeps its session bookkeeping in
-`/run/systemd/sessions`, which is `tmpfs` — measured on two machines — so the
-state the counter is allocated from cannot survive a restart by construction. A
-machine switched off at night hands session `1` to somebody who would inherit
-session `1` of yesterday. That is not an unlikely collision inside one second; it
-is every machine that gets turned off.
-
-`/proc/sys/kernel/random/boot_id` is `0444` and unique per boot. **The boot id
-with the graphical session's id is an opaque word with no collision available to
-it**: unique per boot by construction, and unique within the boot by the counter.
-It is still compared only by equality, and it still never reaches `evaluate`,
-which takes the anchor and does not know where it came from.
-
-That also buys a property nobody asked for. A sitting cannot be confused with one
-that was open before a restart, so whatever the ledger carried into today's file
-is discarded on the first tick after the boot — which is the right answer, because
-the machine went off and the person got up.
-
-### Two things the second anchor drags along
-
-**A grant belongs to a sitting.** Grants live in the day's file and the day
-outlives the sitting, so counting them all would hand the next person to log in
-the ten minutes somebody else was given. The grant carries the sitting it was
-made in. The line stays in the file either way, because it is the day's log and
-it did happen; the stamp decides only whether it still counts.
-
-**A new sitting forgets the warnings.** A session budget that ran out at ten has
-already written that it gave its last warning. Without clearing that, the person
-who sits down at eleven is cut off without hearing anything. A refusal that names
-a scope rather than a budget stays, because that one belongs to the day.
 
 ### What "not an administrator" is, and what it is not
 
@@ -424,16 +387,16 @@ from a pool against a daily clock and against a session clock are different sums
 
 ### Phase A — the profile can say the three shapes
 
-1. **Give `Budget` an explicit reset.** `resets: "daily" | "session"`, absent
+1. **Undo the sitting.** The anchor, its map in the ledger, the stamp on a grant
+   and the clearing of warning marks all serve a model §1 no longer takes. Remove
+   them before anything is built on top. *core, tests*
+2. **Give `Budget` an explicit reset.** `resets: "daily" | "never"`, absent
    meaning daily, so every file on disk keeps its current meaning. The reader
    already holds this discipline: `wantsNames` in `src/core/Profile.cpp` reads
    `match` written either way and a case pins it. *core*
-2. **Record the sitting in the ledger.** An opaque word compared by equality,
-   plus the seconds the ticks counted, in a map of their own so that nothing
-   which adds days or machines has to know. *core*
-3. **Prove the two clocks disagree.** Midnight turning inside a sitting: the
-   daily budget resets, the session budget does not, one tick spends both. And an
-   empty anchor means *nobody was asked*, never *nobody is sitting there*. *tests*
+3. **Prove that `never` does not refill.** Midnight turns and the daily budget
+   goes back to zero while the credit does not; a second login spends the same
+   balance the first one left. *tests*
 4. **Say what the account is, not only what it opens.** The profile carries
    whether the account is administrative, and omahouse creates it that way, and
    documents that it does not defend it. *core, sys*
@@ -467,7 +430,7 @@ from a pool against a daily clock and against a session clock are different sums
     grant, renew, expire, return. The largest conceptual change outside omahouse.
     *omahouse-battery*
 14. **The downstream readers follow.** omastore learns the fallback profile; the
-    Battery refuses a session-anchored budget instead of dividing it wrongly.
+    Battery refuses a credit that never resets instead of dividing it wrongly.
     *omastore, omahouse-battery*
 
 **Omakure does not change.** It is the wire, and `collect` already travels on it.
@@ -519,7 +482,8 @@ be a second gate, weaker than the one there, in front of the same door.
 lookup is an exact string match — `profile.user == user`, which is a different
 question from the rule matching of `selectorMatches`, and only the first is
 what §2 changes; that a budget of zero counts without running out;
-that the ledger is keyed by date with no session anchor; that the household
+that the ledger is keyed by date, so a balance that does not
+reset has nowhere to live in it; that the household
 divides equally, caps absolutely, and does not transfer during the day; that
 `collect` replaces a machine's snapshot and `consolidate` is what adds up; that
 `collect`'s two guards are monotonicity checks that run only when the stored
@@ -531,20 +495,10 @@ own password while refusing a blanket `auth_self`; and that
 is written by both `machine invite` and `machine prepare`, and is removed by
 `packaging/omahouse.install`.
 
-Also measured, on this machine and on a disposable guest on the same day: that
-`loginctl show-user -p Timestamp` answers with a weekday name and a locale, that
-its monotonic form counts from a boot the ledger outlives, and that it does not
-move across three sittings with lingering on or off; that `show-user -p Display`
-does move and `show-session` on that id answers different timestamps; that
-`/run/systemd/sessions` is `tmpfs` and `/proc/sys/kernel/random/boot_id` is
-`0444`; and that this machine's own session had been open for three days, which
-is why a sitting crossing midnight is ordinary.
-
-**Inferred, and worth marking as such:** that session ids number from low again
-after a restart. Nobody rebooted a machine to watch it. The evidence is the tmpfs
-and two machines whose numbers run the wrong way for a lifetime counter — the one
-up for three days holds `1` and `2`, the guest holds `265` and `268` — and that
-evidence is strong without being a measurement.
+Also measured, on a disposable guest on the same day, and kept because it is what
+exposed a wrong model rather than because the model needs it: that `loginctl
+show-user -p Timestamp` does not move when the same account logs out and logs in
+again, across three sittings, with lingering on and with it off.
 
 Also measured, in Omakure on the same day: that the Conductor opens the session
 towards the Performer, that Cue and Baseline are what cross towards a machine,

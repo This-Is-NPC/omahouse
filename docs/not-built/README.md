@@ -102,17 +102,17 @@ measured the meter end to end deliberately did not exercise either.
 
 [**Profiles across a network**](profiles-across-a-network.md) is what it would
 take for one omahouse to govern many machines and many people: a lan house, an
-office, a lab. It was decided on 2026-09-08, and **all of it is unbuilt except
-the second clock**: a budget can now be anchored at the login and the ledger
-carries the sitting, while nothing reads logind and no verb writes `resets`.
+office, a lab. It was decided on 2026-09-08 and **none of it works on any
+machine**. One piece was built wrong on the way — a budget anchored at the login,
+which its §1 records and replaces — and no verb or screen reaches it.
 
 The engine is already general — [`design.md` §4](../design.md) says the same
 schema with `default: "allow"` is a focus profile for an adult — so the page is
 about four gaps and not about a new product:
 
-- **a budget whose clock starts at login**, beside the daily one. Two hours from
-  the moment somebody sits down is a second anchor, not a second engine, and it
-  is the only new arithmetic on the page;
+- **a budget that never resets**, beside the daily one. Two hours that are gone
+  when they are gone, whatever the clock says and however often somebody logs in,
+  because the allowance belongs to the person;
 - **a profile that names no account**, so a machine can carry rules for whoever
   logs in without naming forty people one at a time. It has a consequence in
   another program: *no profile* stops meaning *no rules*, and omastore reads that
