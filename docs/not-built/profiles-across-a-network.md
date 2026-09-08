@@ -456,8 +456,8 @@ different sums to report and to read back.
     what it spent in the same pass, so the manager is a few seconds behind and
     never a day. *sys*
 13. **The Battery changes job.** From dividing once a day to carrying the report
-    and the balance at the counter's cadence. Check what that rate costs the
-    scheduler's run history before choosing it. *omahouse-battery*
+    and the balance at the counter's cadence, through a wrapper that holds the
+    schedule. The scripts themselves need no change. *omahouse-battery*
 14. **Spend the cache down.** A machine out of contact keeps spending the balance
     it last read, to zero, and reports when it can. No timeout and no ceiling.
     *core, sys*
@@ -468,6 +468,34 @@ different sums to report and to read back.
 **Omakure does not change.** It is the wire, and `collect` already travels on it.
 **The browser extension does not change.** A site budget uses the same machinery
 as an app budget, so a credit reaches it for free.
+
+---
+
+### The report rides the schedule that exists
+
+The reporting half needs no new mechanism. `omahouse-day.sh` and
+`omahouse-collect.sh` are already in the Battery and neither carries a
+`Schedule` of its own, deliberately: the schedule lives in a wrapper the
+operator configures. So the cadence is a local file and not a change to
+anything shipped.
+
+Three things were measured in Omakure on 2026-09-08 and they decide the shape:
+
+- `omakure serve` scans the workspace **every five seconds** and accepts
+  six-field cron, so `*/5 * * * * *` is exactly its floor rather than an
+  arbitrary choice;
+- **a fire is skipped when the previous run of the same schedule is still
+  alive**, so a slow report is dropped rather than queued, and nothing piles up
+  behind a machine that is struggling;
+- what crosses the wire is still whatever the script arranges for itself, since
+  Omakure carries the instruction to run and not the result.
+
+That last one is the price, and it is why a fourth Omakure plane was designed on
+2026-09-08 and then deliberately not waited for. It would put the report in the
+authenticated envelope and take root out of the reporting path. Both are real
+and neither blocks anything here, so this page takes the schedule that exists
+and treats the plane as an improvement that can arrive later without changing
+what omahouse sends.
 
 ---
 
