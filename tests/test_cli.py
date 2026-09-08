@@ -1436,6 +1436,72 @@ def check_the_rules_for_anybody_are_readable_by_whoever_they_bind(box):
     assert "default allow" in after.stdout, after.stdout
 
 
+def check_the_verb_writes_the_profile_for_anybody(box):
+    """`omahouse profile add '*'` and nothing new to learn.
+
+    The mark is `*` in the file, so it is `*` on the command line too: a verb
+    that took `anybody` and wrote `*` would be a second word for one thing,
+    which is what the budget's `match` had and lost.
+
+    What it refuses, it refuses *as well as* the file reader and never instead
+    of it. A pot on a shared profile is turned away where the file is read,
+    because a profile that arrives by being pushed never passes through a verb.
+    """
+    written = box.run("profile", "add", anybody(), "--name", "Whoever sits here")
+    assert written.returncode == 0, written.stderr
+    assert "profile for anybody" in written.stderr, written.stderr
+
+    profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+    assert profile["user"] == anybody(), profile
+    assert profile["enforce"] is False and profile["default"] == "allow", profile
+
+    # Every command it prints back is one that can be pasted. `*` is the
+    # shell's wildcard, and an unquoted `omahouse profile enforce * --on` turns
+    # into the contents of whatever directory it is run in.
+    for line in written.stdout.splitlines():
+        if "omahouse " in line:
+            assert "'*'" in line or anybody() not in line, line
+
+    # A second one is refused, and the refusal quotes it too.
+    again = box.run("profile", "add", anybody())
+    assert again.returncode == 1, again.stdout
+    assert "already has a profile" in again.stderr, again.stderr
+    assert "profile show '*'" in again.stderr, again.stderr
+
+    # `--create-user` makes an account, and this names none.
+    made = box.run("profile", "add", anybody(), "--create-user")
+    assert made.returncode == 1, made.stdout
+    assert "not one" in made.stderr, made.stderr
+
+    # Somebody can still be given a profile of their own beside it. This is the
+    # error that costs the most and shows up last: if the verb answered "does
+    # this account have a profile" with the fallback, nobody could ever be given
+    # their own, and `omahouse allow` would edit everybody's rules at once.
+    own = box.run("profile", "add", "nobody", "--name", "Kid")
+    assert own.returncode == 0, own.stderr
+    users = [p["user"] for p in
+             json.loads((box.config / "profiles.json").read_text())["profiles"]]
+    assert sorted(users) == sorted([anybody(), "nobody"]), users
+
+    # And a verb that changes rules changes the one it was given, not the shared
+    # one. `allow nobody` must not appear in the profile for anybody.
+    allowed = box.run("allow", "nobody", "code")
+    assert allowed.returncode == 0, allowed.stderr
+    profiles = {p["user"]: p for p in
+                json.loads((box.config / "profiles.json").read_text())["profiles"]}
+    assert profiles["nobody"]["rules"] == [{"match": "code", "verdict": "allow"}], profiles
+    assert profiles[anybody()]["rules"] == [], profiles
+
+    # The refusal that lives in the reader, reached through the verb as well: a
+    # pot on a shared login empties once and is never refilled.
+    box.write_profiles({"schemaVersion": 2, "profiles": [
+        {"user": anybody(),
+         "budgets": [{"id": "pot", "match": ["*"], "dailyMinutes": 60,
+                      "resets": "never"}]}]})
+    refused = box.run("status", "nobody")
+    assert refused.returncode != 0 or "never resets" in refused.stderr, refused.stderr
+
+
 def check_it_refuses_a_profile_for_an_administrator(box):
     """docs/design.md §1: the operator is whoever is in wheel.
 
@@ -3498,6 +3564,7 @@ def main():
         check_one_budget_covers_a_browsers_two_ids,
         check_a_profile_records_who_changed_it_and_when,
         check_the_rules_for_anybody_are_readable_by_whoever_they_bind,
+        check_the_verb_writes_the_profile_for_anybody,
         check_it_refuses_a_profile_for_an_administrator,
         check_it_refuses_to_write_without_privilege,
         check_create_user_is_built_but_never_run_here,

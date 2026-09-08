@@ -517,6 +517,18 @@ bool loadLedger(const QString &user, const QDate &date, Ledger *ledger, bool *mi
 
 // -- what a budget looks like right now --------------------------------------
 
+/// An account name as it has to be typed back, for the lines this program
+/// prints that somebody will copy.
+///
+/// Only `*` needs it, and it needs it badly: the profile for anybody is named
+/// with the shell's own wildcard, so `omahouse profile enforce * --on` printed
+/// bare is a line that turns into the contents of whatever directory it is
+/// pasted into. Quoted, it is the command that was meant.
+QString spellUser(const QString &user)
+{
+    return user == anybody() ? QStringLiteral("'%1'").arg(user) : user;
+}
+
 /// Every name a budget is about, in one line for a person to read. A budget
 /// holding `chromium` and `org.chromium.Chromium` is one browser and one clock,
 /// and a table that showed only the first would be hiding half of what the
@@ -3029,9 +3041,27 @@ int cmdProfileAdd(const Globals &g, const QStringList &positionals, const Option
         return kUsage;
     }
 
+    // The profile for anybody without one of their own -- Profile.h's `anybody`.
+    // It names no account, so everything below about accounts is skipped and
+    // said differently.
+    const bool forAnybody = user == anybody();
+    if (forAnybody && options.createUser) {
+        fail(QStringLiteral("profile add: --create-user makes an account, and `*` is not "
+                            "one. It is the profile for whoever sits at this machine "
+                            "without a profile of their own."));
+        return kUsage;
+    }
+
     uid_t uid = 0;
-    const bool exists = uidForUser(user, &uid);
-    if (options.createUser) {
+    const bool exists = !forAnybody && uidForUser(user, &uid);
+    if (forAnybody) {
+        // Not the "no account named `*`" note below: that would be true and
+        // useless, and would read as a typo where it is the point.
+        note(QStringLiteral("omahouse: this is the profile for anybody who sits at this "
+                            "machine without one of their own."));
+        note(QStringLiteral("          Somebody who has their own keeps it, and an "
+                            "administrator is never covered by this."));
+    } else if (options.createUser) {
         if (exists) {
             note(QStringLiteral("omahouse: %1 already has an account; --create-user had "
                                 "nothing to do")
@@ -3060,8 +3090,8 @@ int cmdProfileAdd(const Globals &g, const QStringList &positionals, const Option
     if (!loadProfiles(&profiles, &status))
         return status;
     if (profileFor(profiles, user)) {
-        fail(QStringLiteral("profile add: %1 already has a profile; omahouse profile show %1")
-                 .arg(user));
+        fail(QStringLiteral("profile add: %1 already has a profile; omahouse profile show %2")
+                 .arg(user, spellUser(user)));
         return kUsage;
     }
 
@@ -3094,11 +3124,11 @@ int cmdProfileAdd(const Globals &g, const QStringList &positionals, const Option
     out() << QStringLiteral("  observing — it counts and reports and closes nothing. Watch a "
                             "day of\n"
                             "  `omahouse report %1`, then `omahouse profile enforce %1 --on`.\n")
-                 .arg(user);
+                 .arg(spellUser(user));
     out() << QStringLiteral("  every app is allowed: `omahouse profile default %1 --deny` turns "
                             "the\n"
                             "  rules into a list of what is allowed instead.\n")
-                 .arg(user);
+                 .arg(spellUser(user));
     return kOk;
 }
 
@@ -3860,9 +3890,9 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
         // Refused rather than invented: a grant against a budget nobody wrote is
         // time added to a counter the daemon will never look at, and it would
         // read on the report as though it had been given.
-        fail(QStringLiteral("grant: %1 has no budget called %2; omahouse profile show %1 "
+        fail(QStringLiteral("grant: %1 has no budget called %2; omahouse profile show %3 "
                             "lists them")
-                 .arg(user, id));
+                 .arg(user, id, spellUser(user)));
         return kMissing;
     }
 
@@ -3986,9 +4016,9 @@ int cmdLeave(const Globals &g, const QStringList &positionals, const Options &op
     }
     const Budget *budget = budgetFor(profile, id);
     if (!budget) {
-        fail(QStringLiteral("leave: %1 has no budget called %2; omahouse profile show %1 "
+        fail(QStringLiteral("leave: %1 has no budget called %2; omahouse profile show %3 "
                             "lists them")
-                 .arg(user, id));
+                 .arg(user, id, spellUser(user)));
         return kMissing;
     }
     if (!budget->hasLimit()) {
@@ -5300,6 +5330,8 @@ Writing, and root needed — the studio gets there by pkexec:
                            fetches its days
   collect <machine> <user> take in a day another computer spent, on stdin:
                            omahouse day julia | ssh study omahouse collect …
+  profile add '*'          rules for whoever sits here without their own.
+                           Quote it: bare, the shell eats it
   profile remove <user> [--keep-account]
   profile enforce <user> --on | --off
   profile default <user> --allow | --deny
