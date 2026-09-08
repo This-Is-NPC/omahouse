@@ -175,18 +175,43 @@ back, and mergeable there. This is the model a phone address book has used for
 twenty years, and it works for the same reason: **every record knows where it came
 from.**
 
-### One question this raises and does not answer
+### The gate a push goes through, and what that gate does not check
 
 Every write to `profiles.json` today happens with a person at the keyboard, and
 polkit is the gate: `packaging/org.omarchy.omahouse.rules` asks a named
 administrator for their own password, and the file's own comment says that
 action is the only gate in front of the CLI running as root.
 
-**A profile pushed from the centre is a write with nobody at the keyboard.** No
-polkit prompt stands in front of it, so what authorises it is the wire, and the
-wire is Omakure's. Whether that is enough, and what the machine may refuse from a
-manager it no longer recognises, is not decided here. It has to be answered
-before step 6 is written.
+**A profile pushed from the centre is a write with nobody at the keyboard, and
+that door is already open.** It is not the wire that authorises it.
+`letTheNodeReachOmahouse` in `src/cli/main.cpp` writes
+`/etc/sudoers.d/omahouse-node`, mode 0440, holding one line:
+
+```
+<the node's account> ALL=(root) NOPASSWD: <path to the omahouse binary>
+```
+
+Both `machine invite` and `machine prepare` write it, on the manager and on the
+managed machine, because the account that runs a Battery script has no shell and
+no sudo while the writing verbs need root.
+
+**The line names a binary and constrains no argument.** That is deliberate, and
+its own comment gives the reason: *"The checks are omahouse's own, and a rule
+naming `ALL` here would turn one script into a route to everything."*
+
+The reasoning holds exactly as long as what travels is `collect`, which only adds
+to a ledger. **The moment policy travels, the same line authorises `profile add`,
+`allow` and `enforce`** — the writes §5 says have one correct version — and
+omahouse's own check for those is the polkit gate, which is not in this path.
+
+So the question is sharper than whether the wire is enough. It is: **once policy
+travels, is a sudoers line that names a binary and no verb still the right
+gate?** And what may a machine refuse from a manager it no longer recognises?
+Neither is decided here, and both have to be answered before step 6 is written.
+
+One part is settled already and needs no inventing. The line is treated as a
+restraint and not as configuration: `packaging/omahouse.install` lists
+`/etc/sudoers.d/omahouse-node` under `take`, and the removal message names it.
 
 ---
 
@@ -371,7 +396,10 @@ what §2 changes; that a budget of zero counts without running out;
 that the ledger is keyed by date with no session anchor; that the household
 divides equally, caps absolutely, and does not transfer during the day; that
 `collect` sums rather than replaces; that omastore reimplements the verdict and
-reads the same file; and that the polkit rule asks a named administrator for
-their own password while refusing a blanket `auth_self`.
+reads the same file; that the polkit rule asks a named administrator for their
+own password while refusing a blanket `auth_self`; and that
+`/etc/sudoers.d/omahouse-node` names the omahouse binary with no verb after it,
+is written by both `machine invite` and `machine prepare`, and is removed by
+`packaging/omahouse.install`.
 
 **Argued**, and nothing more: everything in §3 through §5. No line of it has run.
