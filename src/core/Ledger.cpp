@@ -223,7 +223,7 @@ QJsonObject Ledger::toJson() const
     }
 
     QJsonObject document{
-        {QStringLiteral("schemaVersion"), kSchemaVersion},
+        {QStringLiteral("schemaVersion"), kLedgerSchema},
         {QStringLiteral("user"), user},
         {QStringLiteral("date"), date.toString(Qt::ISODate)},
         {QStringLiteral("budgets"), budgetObject},
@@ -274,7 +274,7 @@ QJsonObject Ledger::toJson() const
 bool Ledger::fromJson(const QJsonObject &object, Ledger *out, QString *error)
 {
     const QString what = QStringLiteral("a ledger");
-    if (!checkSchemaVersion(object, what, error))
+    if (!checkSchemaVersion(object, kLedgerSchema, what, error))
         return false;
 
     Ledger ledger;

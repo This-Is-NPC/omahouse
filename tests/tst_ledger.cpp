@@ -22,7 +22,7 @@ namespace {
 // through a writer and a reader that agree with each other and with nothing else
 // is a round trip that proves nothing about the file on disk.
 const char *kSpecProfiles = R"({
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "profiles": [
     {
       "user": "julia",
@@ -448,11 +448,24 @@ private slots:
     void refusesASchemaVersionItDoesNotKnow()
     {
         QJsonObject profiles = parse(kSpecProfiles);
-        profiles.insert(QStringLiteral("schemaVersion"), 2);
+        profiles.insert(QStringLiteral("schemaVersion"), 3);
         QVector<Profile> parsed;
         QString error;
         QVERIFY2(!profilesFromJson(profiles, &parsed, &error), "it read a profiles.json from the future");
-        QVERIFY(error.contains(QStringLiteral("schema version 2")));
+        QVERIFY(error.contains(QStringLiteral("schema version 3")));
+
+        // And the number is per file. The day's ledger is on 1 while
+        // profiles.json is on 2, so a ledger carrying the profile's number is
+        // as much from the future as one carrying 99 -- which is the property
+        // the split exists for: a profile gaining a meaning must not throw away
+        // the day a machine is in the middle of.
+        QJsonObject sameNumber = parse(kSpecLedger);
+        sameNumber.insert(QStringLiteral("schemaVersion"), 2);
+        Ledger mixed;
+        error.clear();
+        QVERIFY2(!Ledger::fromJson(sameNumber, &mixed, &error),
+                 "the ledger took the profile's schema number");
+        QVERIFY2(Ledger::fromJson(parse(kSpecLedger), &mixed, &error), qPrintable(error));
 
         QJsonObject ledger = parse(kSpecLedger);
         ledger.insert(QStringLiteral("schemaVersion"), 99);

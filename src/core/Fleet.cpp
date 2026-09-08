@@ -61,14 +61,14 @@ QJsonObject machinesToJson(const QVector<Machine> &machines)
     for (const Machine &machine : machines)
         array.append(machine.toJson());
     return QJsonObject {
-        {QStringLiteral("schemaVersion"), kSchemaVersion},
+        {QStringLiteral("schemaVersion"), kMachinesSchema},
         {QStringLiteral("machines"), array},
     };
 }
 
 bool machinesFromJson(const QJsonObject &root, QVector<Machine> *out, QString *error)
 {
-    if (!checkSchemaVersion(root, QStringLiteral("machines.json"), error))
+    if (!checkSchemaVersion(root, kMachinesSchema, QStringLiteral("machines.json"), error))
         return false;
 
     const QJsonValue value = root.value(QStringLiteral("machines"));

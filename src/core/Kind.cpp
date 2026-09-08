@@ -58,7 +58,7 @@ QString kindSaid(Kind kind)
 QJsonObject ThisMachine::toJson() const
 {
     QJsonObject object {
-        {QStringLiteral("schemaVersion"), kSchemaVersion},
+        {QStringLiteral("schemaVersion"), kMachineSchema},
         {QStringLiteral("kind"), kindName(kind)},
     };
     if (!name.isEmpty())
@@ -72,7 +72,7 @@ QJsonObject ThisMachine::toJson() const
 
 bool ThisMachine::fromJson(const QJsonObject &object, ThisMachine *out, QString *error)
 {
-    if (!checkSchemaVersion(object, QStringLiteral("machine.json"), error))
+    if (!checkSchemaVersion(object, kMachineSchema, QStringLiteral("machine.json"), error))
         return false;
 
     ThisMachine machine;

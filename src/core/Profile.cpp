@@ -653,14 +653,14 @@ QJsonObject profilesToJson(const QVector<Profile> &profiles)
     for (const Profile &profile : profiles)
         array.append(profile.toJson());
     return QJsonObject{
-        {QStringLiteral("schemaVersion"), kSchemaVersion},
+        {QStringLiteral("schemaVersion"), kProfilesSchema},
         {QStringLiteral("profiles"), array},
     };
 }
 
 bool profilesFromJson(const QJsonObject &root, QVector<Profile> *out, QString *error)
 {
-    if (!checkSchemaVersion(root, QStringLiteral("profiles.json"), error))
+    if (!checkSchemaVersion(root, kProfilesSchema, QStringLiteral("profiles.json"), error))
         return false;
 
     const QJsonValue value = root.value(QStringLiteral("profiles"));

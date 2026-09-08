@@ -181,6 +181,21 @@ nobody find out.
 
 Two files, both JSON, both read and written by `core`.
 
+Each file carries its **own** `schemaVersion`, and that is not decoration. It
+was one number for four -- profiles, the day's ledger, `machine.json` and
+`machines.json` -- which meant a change to any of them invalidated all the
+others: a profile gaining a meaning would throw away the day a machine was in
+the middle of, and nobody would connect the upgrade to the loss. The effect of
+one number for four is that it is never raised, so the check that exists to
+refuse a document this code would misread sat there never firing. Separately,
+each is cheap and moves when it should.
+
+What the number means is unchanged, and **it is about meaning and not only about
+fields**. `profiles.json` went to 2 when a profile's `user` could be `*`: no
+field was added, and an older reader parses such a file happily, binds an account
+that cannot exist and enforces nothing. A reader that quietly ignores rules is
+worse than one that stops.
+
 `/etc/omahouse/profiles.json` (0644, root writes, everybody reads) holds the
 profiles: `enabled`, `enforce`, `default`, `warnAt`, `grace`, `rules`,
 `budgets`. `user` is the only required field.

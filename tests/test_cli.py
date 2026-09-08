@@ -129,7 +129,7 @@ def build_cgroup_tree(root, proc_root):
 
 def profile_document():
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "profiles": [
             {
                 "user": USER,
@@ -873,7 +873,7 @@ def check_a_broken_profiles_file_is_not_an_empty_one(box):
     Fiscalising somebody by guessing what a half-written file meant is the one
     thing worse than refusing to start.
     """
-    (box.config / "profiles.json").write_text('{"schemaVersion": 1, "profiles": [{}]}')
+    (box.config / "profiles.json").write_text('{"schemaVersion": 2, "profiles": [{}]}')
     broken = box.run("status", USER)
     assert broken.returncode == 1, (broken.returncode, broken.stderr)
     assert broken.stdout == ""
@@ -1067,7 +1067,9 @@ def check_a_profile_from_nothing_to_read_back(box):
     assert "no account named julia" in made.stderr
 
     written = json.loads((box.config / "profiles.json").read_text())
-    assert written["schemaVersion"] == 1
+    # The profile file's own number, which moved when a profile could mean
+    # anybody. The ledger's did not: a machine in the middle of a day keeps it.
+    assert written["schemaVersion"] == 2
     fresh = dict(written["profiles"][0])
     # Who wrote it down and when, lifted out and checked separately: the whole
     # of the rest is fixed and worth comparing as one object, and these two are
@@ -1198,7 +1200,7 @@ def check_allow_warns_about_what_is_really_inside(box):
     # fake tree belong to whoever runs the suite and that account is usually in
     # wheel -- which `profile add` refuses, and rightly. The warning is about
     # what is open in a session, so it has to be that account's session.
-    box.write_profiles({"schemaVersion": 1, "profiles": [{"user": USER}]})
+    box.write_profiles({"schemaVersion": 2, "profiles": [{"user": USER}]})
 
     warned = box.run("allow", USER, "gtk-launch")
     assert warned.returncode == 0, warned.stderr
@@ -1236,7 +1238,7 @@ def check_one_budget_covers_a_browsers_two_ids(box):
     leaves half the browser with no limit at all -- which is a thing nothing in
     the file says out loud. One command, one budget, both names.
     """
-    box.write_profiles({"schemaVersion": 1, "profiles": [{"user": USER}]})
+    box.write_profiles({"schemaVersion": 2, "profiles": [{"user": USER}]})
 
     done = box.run("allow", USER, "chromium", "org.chromium.Chromium", "--limit", "45m")
     assert done.returncode == 0, done.stderr
@@ -1310,7 +1312,7 @@ def check_a_profile_records_who_changed_it_and_when(box):
     # second's resolution, so a case that made two changes and compared the
     # times would compare two identical numbers and prove nothing; old stamps
     # from different years are what makes "was this one touched" answerable.
-    box.write_profiles({"schemaVersion": 1, "profiles": [
+    box.write_profiles({"schemaVersion": 2, "profiles": [
         {"user": USER, "displayName": "Kid",
          "writtenBy": "ana", "writtenAt": "2020-01-01T10:00:00-03:00"},
         {"user": "daemon", "displayName": "Other",
@@ -1342,7 +1344,7 @@ def check_a_profile_records_who_changed_it_and_when(box):
     assert "Last changed:" in shown.stdout, shown.stdout
     assert changed["writtenBy"] in shown.stdout, shown.stdout
 
-    box.write_profiles({"schemaVersion": 1, "profiles": [{"user": USER}]})
+    box.write_profiles({"schemaVersion": 2, "profiles": [{"user": USER}]})
     unstamped = box.run("profile", "show", USER)
     assert "Last changed: not recorded" in unstamped.stdout, unstamped.stdout
 
@@ -1355,7 +1357,7 @@ def check_a_profile_records_who_changed_it_and_when(box):
     # grant. `daemon` is used as the stand-in because it exists everywhere and
     # is nobody, so the case does not depend on who is running it.
     for door in ("PKEXEC_UID", "SUDO_UID"):
-        box.write_profiles({"schemaVersion": 1, "profiles": [{"user": USER}]})
+        box.write_profiles({"schemaVersion": 2, "profiles": [{"user": USER}]})
         signed = box.run("allow", USER, "code", extra_env={door: "2"})
         assert signed.returncode == 0, signed.stderr
         wrote = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
@@ -1377,7 +1379,7 @@ def check_the_rules_for_anybody_are_readable_by_whoever_they_bind(box):
     the machine. *What applies to this person* is asked by everything that
     reports.
     """
-    box.write_profiles({"schemaVersion": 1, "profiles": [
+    box.write_profiles({"schemaVersion": 2, "profiles": [
         {"user": anybody(), "displayName": "Whoever sits here", "default": "deny",
          "budgets": [{"id": "session", "match": ["*"], "dailyMinutes": 60,
                       "onExhausted": "logout"}]},
@@ -1674,7 +1676,7 @@ def check_web_composes_profiles_that_disagree(box):
     which was overruled is told rather than left to find out.
     """
     box.write_profiles({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "profiles": [
             {"user": "julia", "web": {"default": "allow",
                                    "rules": [{"match": "youtube.com", "verdict": "allow"}]}},
@@ -1783,7 +1785,7 @@ def check_status_says_the_policy_is_for_the_whole_machine(box):
     wheel.
     """
     box.write_profiles({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "profiles": [{
             "user": USER, "enabled": True, "enforce": False, "default": "allow",
             "rules": [], "budgets": [],
@@ -1815,7 +1817,7 @@ def check_status_says_the_policy_is_for_the_whole_machine(box):
     # rather than printing an empty table, which is the same choice `No
     # budgets` makes above it.
     box.write_profiles({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "profiles": [{"user": USER, "rules": [], "budgets": []}],
     })
     quiet = box.run("profile", "show", USER)
@@ -1838,7 +1840,7 @@ def watching_profile(enforce=False, default="deny"):
     """A profile over the fake session: two hours of it, forty-five minutes of
     Chromium, and an editor that is counted and never runs out."""
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "profiles": [{
             "user": USER,
             "displayName": "Júlia",
@@ -1875,7 +1877,7 @@ def check_watch_says_when_there_is_nobody_to_watch(box):
     assert "nothing to watch" in nobody.stderr
     assert nobody.stdout == ""
 
-    box.write_profiles({"schemaVersion": 1, "profiles": []})
+    box.write_profiles({"schemaVersion": 2, "profiles": []})
     empty = box.run("watch")
     assert empty.returncode == 0, empty.stderr
     assert "holds no profiles" in empty.stderr
