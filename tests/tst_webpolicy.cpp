@@ -445,8 +445,11 @@ private slots:
         const QJsonValue one = budgets.at(1).toObject().value(QStringLiteral("match"));
         QVERIFY2(two.isArray(), "two names did not come out as a list");
         QCOMPARE(two.toArray().size(), 2);
-        QVERIFY2(one.isString(),
-                 "one name came out as a list, which rewrites every profiles.json there is");
+        // And one name is a list of one. There is no second spelling: a bare
+        // string was accepted while there were files to keep reading, and there
+        // are none.
+        QVERIFY2(one.isArray(), "one name came out as something other than a list");
+        QCOMPARE(one.toArray().size(), 1);
 
         Profile read;
         QString error;
@@ -457,31 +460,25 @@ private slots:
         QCOMPARE(read.budgets.at(1).match, QStringList{QStringLiteral("code")});
     }
 
-    // A one-element list and a plain string are the same budget. Both spellings
-    // are in the wild the moment this ships -- the writer makes strings and a
-    // person editing the file by hand makes lists -- and a reader that told
-    // them apart would be a reader that disagrees with itself.
-    void oneNameReadsTheSameWrittenEitherWay()
+    // A bare string is refused rather than read as a list of one.
+    //
+    // Two spellings of one value is a reader with a branch in it, a writer with
+    // a choice to make and a case pinning that they agree. What was buying all
+    // three was not rewriting the profiles.json files that exist, and there are
+    // none: nothing is released and every file is on a machine that can be
+    // rebuilt.
+    void aBareNameIsNotASpellingOfAListOfOne()
     {
-        const auto profileWith = [](const QJsonValue &match) {
-            return QJsonObject {
-                {QStringLiteral("user"), QStringLiteral("julia")},
-                {QStringLiteral("budgets"),
-                 QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("code")},
-                                          {QStringLiteral("match"), match},
-                                          {QStringLiteral("dailyMinutes"), 45}}}}};
-        };
-
-        Profile plain;
-        Profile listed;
+        const QJsonObject written {
+            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("budgets"),
+             QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("code")},
+                                      {QStringLiteral("match"), QStringLiteral("code")},
+                                      {QStringLiteral("dailyMinutes"), 45}}}}};
+        Profile read;
         QString error;
-        QVERIFY2(Profile::fromJson(profileWith(QJsonValue(QStringLiteral("code"))), &plain,
-                                   &error), qPrintable(error));
-        QVERIFY2(Profile::fromJson(profileWith(QJsonArray{QStringLiteral("code")}), &listed,
-                                   &error), qPrintable(error));
-        QCOMPARE(plain.budgets.at(0).match, QStringList{QStringLiteral("code")});
-        QCOMPARE(listed.budgets.at(0).match, plain.budgets.at(0).match);
-        QCOMPARE(listed.toJson(), plain.toJson());
+        QVERIFY(!Profile::fromJson(written, &read, &error));
+        QVERIFY2(error.contains(QStringLiteral("list of names")), qPrintable(error));
     }
 
     // And what is refused. A budget that matches nothing is a clock nobody can
@@ -545,7 +542,7 @@ private slots:
             {QStringLiteral("user"), QStringLiteral("julia")},
             {QStringLiteral("budgets"),
              QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("pot")},
-                                      {QStringLiteral("match"), QStringLiteral("chromium")},
+                                      {QStringLiteral("match"), QJsonArray{QStringLiteral("chromium")}},
                                       {QStringLiteral("resets"), QStringLiteral("weekly")}}}}};
         QVERIFY(!Profile::fromJson(wrong, &read, &error));
         QVERIFY2(error.contains(QStringLiteral("weekly")), qPrintable(error));
@@ -603,7 +600,7 @@ private slots:
             {QStringLiteral("user"), QStringLiteral("julia")},
             {QStringLiteral("budgets"),
              QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("youtube.com")},
-                                      {QStringLiteral("match"), QStringLiteral("youtube.com")},
+                                      {QStringLiteral("match"), QJsonArray{QStringLiteral("youtube.com")}},
                                       {QStringLiteral("kind"), QStringLiteral("site")},
                                       {QStringLiteral("dailyMinutes"), 30}}}},
         };
@@ -621,7 +618,7 @@ private slots:
     {
         const auto budgetSaying = [](const QString &kind, const QString &action) {
             QJsonObject entry {{QStringLiteral("id"), QStringLiteral("thing")},
-                               {QStringLiteral("match"), QStringLiteral("thing")},
+                               {QStringLiteral("match"), QJsonArray{QStringLiteral("thing")}},
                                {QStringLiteral("onExhausted"), action}};
             if (!kind.isEmpty())
                 entry.insert(QStringLiteral("kind"), kind);

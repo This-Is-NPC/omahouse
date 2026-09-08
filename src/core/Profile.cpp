@@ -83,28 +83,26 @@ bool wantsInt(const QJsonObject &object, const QString &key, const QString &what
     return true;
 }
 
-/// A budget's `match`, which is one name or several.
+/// A budget's `match`: the list of names it is about, however many.
 ///
-/// A string and a one-element array read the same, because they mean the same
-/// thing and a file is allowed to have been written either way. What is refused
-/// is a list with nothing in it and a list with something that is not a name in
-/// it: a budget that matches nothing is a clock nobody can spend and nobody can
-/// see is unspendable, and repairing it into one that matches everything would
-/// be the worst possible guess.
+/// A bare string is refused rather than read as a list of one. Two spellings of
+/// one value is a reader with a branch in it, a writer with a choice to make and
+/// a case to pin that they agree, and what was buying all three was not
+/// rewriting files that do not exist.
+///
+/// Also refused: a list with nothing in it, and a list with something that is
+/// not a name in it. A budget that matches nothing is a clock nobody can spend
+/// and nobody can see is unspendable, and repairing it into one that matches
+/// everything would be the worst possible guess.
 bool wantsNames(const QJsonObject &object, const QString &key, const QString &what,
                 QStringList *value, QString *error)
 {
     const QJsonValue found = object.value(key);
-    if (found.isString()) {
-        *value = QStringList{found.toString()};
-        return true;
-    }
     if (!found.isArray()) {
         if (error) {
             *error = found.isUndefined() || found.isNull()
                 ? QStringLiteral("%1 has no %2").arg(what, key)
-                : QStringLiteral("%1 has a %2 that is neither a name nor a list of names")
-                      .arg(what, key);
+                : QStringLiteral("%1 has a %2 that is not a list of names").arg(what, key);
         }
         return false;
     }
@@ -354,29 +352,27 @@ QJsonObject Profile::toJson() const
     QJsonArray budgetArray;
     for (const Budget &budget : budgets) {
         QJsonObject object{{QStringLiteral("id"), budget.id}};
-        // One name is written as a plain string, and only two or more become an
-        // array. `["chromium"]` and `"chromium"` mean the same thing to the
-        // reader below, and writing the first would rewrite every profiles.json
-        // there is to say what it already said -- the discipline `kind`,
-        // `presence` and `sites` keep for the same reason.
-        if (budget.match.size() == 1) {
-            object.insert(QStringLiteral("match"), budget.match.constFirst());
-        } else {
-            QJsonArray names;
-            for (const QString &name : budget.match)
-                names.append(name);
-            object.insert(QStringLiteral("match"), names);
-        }
-        // Written only when it is `site`. Absent is `app`, which is every budget
-        // written before sites had one, and putting `"kind": "app"` into all of
-        // them would rewrite every profiles.json there is to say what it already
-        // said -- the same discipline `presence` and `sites` keep in the ledger.
+        // Always a list, however many names are in it.
+        //
+        // It was a plain string for one name and a list for two, and the reason
+        // written here was not rewriting the profiles.json files that exist.
+        // There are none: nothing is released and every file is on a machine
+        // that can be rebuilt. So the second spelling bought nothing and cost a
+        // reader that handles two types, a writer that chooses between them and
+        // a case pinning that they agree. One shape.
+        QJsonArray names;
+        for (const QString &name : budget.match)
+            names.append(name);
+        object.insert(QStringLiteral("match"), names);
+        // Written only when it is `site`. Absent is `app`, and this is not
+        // about old files: it is a field most budgets have no opinion about,
+        // and a default written into every one of them is noise in a file
+        // people read.
         if (budget.isSite())
             object.insert(QStringLiteral("kind"), selectsName(budget.selects));
-        // Written only when it is `never`, for the reason `kind` is: absent is
-        // `daily`, which is every budget written before a pot could be one, and
-        // putting `"resets": "daily"` into all of them would rewrite every
-        // profiles.json there is to say what it already said.
+        // Written only when it is `never`, for the reason `kind` is: `daily` is
+        // what a budget means when it says nothing, and saying it anyway would
+        // put a word on every budget on every machine to no end.
         if (budget.carriesOver())
             object.insert(QStringLiteral("resets"), resetsName(budget.resets));
         // A budget with no limit leaves the field out rather than writing a
@@ -415,9 +411,10 @@ QJsonObject Profile::toJson() const
     }
     if (!allocation.isEmpty())
         object.insert(QStringLiteral("allocation"), allocation);
-    // The same discipline the rest of this file keeps: absent until something
-    // writes it, so every profiles.json already on a machine reads back byte
-    // for byte until the day somebody changes it.
+    // Absent until something writes it, which is the same reason `kind` and
+    // `resets` are absent: a profile nobody has changed has nothing to say
+    // here, and `"writtenBy": ""` would be a field claiming an answer it does
+    // not have.
     if (!writtenBy.isEmpty())
         object.insert(QStringLiteral("writtenBy"), writtenBy);
     if (writtenAt.isValid()) {

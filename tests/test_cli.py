@@ -135,11 +135,11 @@ def profile_document():
                     {"match": "code", "verdict": "allow"},
                 ],
                 "budgets": [
-                    {"id": "session", "match": "*", "dailyMinutes": 120,
+                    {"id": "session", "match": ["*"], "dailyMinutes": 120,
                      "onExhausted": "logout"},
-                    {"id": "chromium", "match": "chromium", "dailyMinutes": 45,
+                    {"id": "chromium", "match": ["chromium"], "dailyMinutes": 45,
                      "onExhausted": "close"},
-                    {"id": "code", "match": "code"},
+                    {"id": "code", "match": ["code"]},
                 ],
             }
         ],
@@ -1096,9 +1096,9 @@ def check_a_profile_from_nothing_to_read_back(box):
     # `allow --limit` is sugar for the rule and the budget at once, docs/design.md §7.
     # The session is the budget whose selector is `*` and nothing else, §2.
     assert profile["budgets"] == [
-        {"id": "chromium", "match": "chromium", "dailyMinutes": 45, "onExhausted": "close"},
-        {"id": "session", "match": "*", "dailyMinutes": 120, "onExhausted": "logout"},
-        {"id": "code", "match": "code", "dailyMinutes": 90, "onExhausted": "close"},
+        {"id": "chromium", "match": ["chromium"], "dailyMinutes": 45, "onExhausted": "close"},
+        {"id": "session", "match": ["*"], "dailyMinutes": 120, "onExhausted": "logout"},
+        {"id": "code", "match": ["code"], "dailyMinutes": 90, "onExhausted": "close"},
     ]
 
     # And it reads back through the verbs that were written before it existed.
@@ -1120,7 +1120,7 @@ def check_a_profile_from_nothing_to_read_back(box):
     # when it runs out was decided once.
     assert box.run("limit", "julia", "--budget", "chromium=30m").returncode == 0
     edited = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
-    assert edited["budgets"][0] == {"id": "chromium", "match": "chromium",
+    assert edited["budgets"][0] == {"id": "chromium", "match": ["chromium"],
                                     "dailyMinutes": 30, "onExhausted": "close"}
 
     # Taken off the books again, and what was counted is left where it is.
@@ -1251,13 +1251,13 @@ def check_one_budget_covers_a_browsers_two_ids(box):
     budgets = {one["id"]: one for one in shown["budgets"]}
     assert budgets["chromium"]["match"] == ["chromium", "org.chromium.Chromium"], budgets
 
-    # One name still writes a plain string. Every profiles.json on every machine
-    # already says it that way, and rewriting all of them to say it differently
-    # is a diff nobody asked for.
+    # One name is a list of one. There is no second spelling of it: a bare
+    # string was accepted while there were files to keep reading, and there are
+    # none.
     box.run("allow", USER, "code", "--limit", "45m")
     profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
     code = [one for one in profile["budgets"] if one["id"] == "code"][0]
-    assert code["match"] == "code", code
+    assert code["match"] == ["code"], code
 
     # Run again over the budget that is there, it replaces the names as well as
     # the number -- or a command that says it covers the browser would cover
@@ -1265,7 +1265,7 @@ def check_one_budget_covers_a_browsers_two_ids(box):
     box.run("allow", USER, "chromium", "--limit", "30m")
     profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
     browser = [one for one in profile["budgets"] if one["id"] == "chromium"][0]
-    assert browser["match"] == "chromium", browser
+    assert browser["match"] == ["chromium"], browser
     assert browser["dailyMinutes"] == 30, browser
 
     # `deny` takes several too, for the same reason: a browser half denied is a
@@ -1780,11 +1780,11 @@ def watching_profile(enforce=False, default="deny"):
                 {"match": "code", "verdict": "allow"},
             ],
             "budgets": [
-                {"id": "session", "match": "*", "dailyMinutes": 120,
+                {"id": "session", "match": ["*"], "dailyMinutes": 120,
                  "onExhausted": "logout"},
-                {"id": "chromium", "match": "chromium", "dailyMinutes": 45,
+                {"id": "chromium", "match": ["chromium"], "dailyMinutes": 45,
                  "onExhausted": "close"},
-                {"id": "code", "match": "code"},
+                {"id": "code", "match": ["code"]},
             ],
         }],
     }
@@ -2413,7 +2413,7 @@ def check_limit_writes_a_budget_about_a_site(box):
     profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
     budgets = {one["id"]: one for one in profile["budgets"]}
     assert budgets["youtube.com"]["kind"] == "site", budgets
-    assert budgets["youtube.com"]["match"] == "youtube.com", budgets
+    assert budgets["youtube.com"]["match"] == ["youtube.com"], budgets
     assert budgets["youtube.com"]["dailyMinutes"] == 30, budgets
     assert budgets["youtube.com"]["onExhausted"] == "block", budgets
 
@@ -2475,7 +2475,7 @@ def check_a_site_that_ran_out_is_blocked_and_comes_back_on_its_own(box):
     # its one minute mark at the instant the tab opened, which is the thing that
     # stopped happening. Two minutes leaves the 1 minute mark real.
     document["profiles"][0]["budgets"].append(
-        {"id": "youtube.com", "match": "youtube.com", "kind": "site",
+        {"id": "youtube.com", "match": ["youtube.com"], "kind": "site",
          "dailyMinutes": 2, "onExhausted": "block"})
     box.write_profiles(document)
     box.write_day(TODAY, {"youtube.com": 116})
@@ -2546,7 +2546,7 @@ def check_a_site_budget_composes_with_the_web_rules(box):
                   {"match": "wikipedia.org", "verdict": "allow"}],
     }
     document["profiles"][0]["budgets"].append(
-        {"id": "youtube.com", "match": "youtube.com", "kind": "site",
+        {"id": "youtube.com", "match": ["youtube.com"], "kind": "site",
          "dailyMinutes": 1, "onExhausted": "block"})
     box.write_profiles(document)
     box.write_day(TODAY, {"youtube.com": 60})
@@ -2645,7 +2645,7 @@ def check_the_time_per_site_stops_denying_the_budget_above_it(box):
     # these: naming it would put the claim back the other way around.
     only = watching_profile()
     only["profiles"][0]["budgets"].append(
-        {"id": "wikipedia.org", "match": "wikipedia.org", "kind": "site"})
+        {"id": "wikipedia.org", "match": ["wikipedia.org"], "kind": "site"})
     box.write_profiles(only)
     none = below(box.run("status", USER).stdout, "TIME PER SITE")
     assert "never billed to a" in none, none

@@ -29,10 +29,10 @@ enum class OnExhausted { Warn, Close, Logout, Block };
 /// is a separate list; `budgets` is one list, and a budget that guessed which
 /// namespace it was in would eventually guess wrong about somebody's flatpak.
 ///
-/// Absent is `app`, and `app` is not written into the file -- docs/design.md §4's
-/// discipline for `presence` and `sites`, for the same reason: writing
-/// `"kind": "app"` into every budget on every machine would rewrite every
-/// profile there is to say what they already said.
+/// Absent is `app`, and `app` is not written into the file. Not for the sake of
+/// files that already exist -- there are none -- but because most budgets have
+/// no opinion about this, and a default spelled out on every one of them is
+/// noise in a file people read and edit.
 enum class Selects { App, Site };
 
 /// When a budget's clock goes back to zero.
@@ -51,9 +51,9 @@ enum class Selects { App, Site };
 /// window and the action are the machinery that was already there, and the one
 /// thing that differs is that the turn of the date leaves the counter alone.
 ///
-/// Absent from the file is `Daily`, and `daily` is never written into it. That
-/// is docs/design.md §4's discipline for `kind`, `presence` and `sites`:
-/// writing what every file already means would rewrite every profile there is.
+/// Absent from the file is `Daily`, and `daily` is never written into it, for
+/// the reason `Selects` gives: it is what a budget means when it says nothing,
+/// and saying it anyway puts a word on every budget on every machine to no end.
 enum class Resets { Daily, Never };
 
 QString verdictName(Verdict verdict);
@@ -173,10 +173,10 @@ struct Budget {
     /// the same rule as before: `anyLiveScopeMatches` asks whether *anything*
     /// matches, and 21 processes in one Chromium never spent 21 seconds either.
     ///
-    /// Written as a plain string when there is one of them, and only then as an
-    /// array. That is docs/design.md §4's discipline for `kind`, `presence` and
-    /// `sites`: a file that already says what it means is not rewritten to say
-    /// it differently.
+    /// Always a list in the file, even for one name. A bare string was accepted
+    /// for a while and is not: two spellings of one value is a reader with a
+    /// branch, a writer with a choice and a case pinning that they agree, and
+    /// nothing was buying those but files that do not exist.
     QStringList match;
     /// Whether `match` is a list of app scope ids or of registrable domains.
     ///
@@ -196,8 +196,7 @@ struct Budget {
     ///
     /// `dailyMinutes` keeps its name under either, because what it holds is the
     /// size of the allowance and not the length of the day: a budget of 120
-    /// that never resets is two hours, full stop. Renaming the field would
-    /// rewrite every profiles.json on every machine to say what it already says.
+    /// that never resets is two hours, full stop.
     Resets resets = Resets::Daily;
     OnExhausted onExhausted = OnExhausted::Warn;
 

@@ -492,12 +492,10 @@ QString namesSpelled(const QStringList &names)
     return names.join(QStringLiteral(", "));
 }
 
-/// The same for a machine, in the shape the file uses: a name on its own, or a
-/// list once there are two. One rule to remember rather than two.
+/// The same for a machine, in the shape the file uses: always a list, however
+/// many names are in it. One shape to parse rather than two.
 QJsonValue namesToJson(const QStringList &names)
 {
-    if (names.size() == 1)
-        return QJsonValue(names.constFirst());
     QJsonArray array;
     for (const QString &name : names)
         array.append(name);

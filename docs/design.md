@@ -77,7 +77,7 @@ Budget { id, match, kind, dailyMinutes, resets, onExhausted }
                 warn     says something, and records it               (either)
 ```
 
-`match` is one name or several, and several is one clock between them. One
+`match` is a list of names, and several names is one clock between them. One
 program is not always one id: a single Chromium window produces `chromium`,
 holding the child processes, and `org.chromium.Chromium`, holding the one that
 owns the window. Two budgets of forty-five minutes is not a browser limited to

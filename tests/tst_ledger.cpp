@@ -38,9 +38,9 @@ const char *kSpecProfiles = R"({
         { "match": "gcompris",           "verdict": "allow" }
       ],
       "budgets": [
-        { "id": "session",   "match": "*",                   "dailyMinutes": 120, "onExhausted": "logout" },
-        { "id": "minecraft", "match": "minecraft-launcher",  "dailyMinutes": 45,  "onExhausted": "close" },
-        { "id": "firefox",   "match": "firefox",             "dailyMinutes": 60,  "onExhausted": "close" }
+        { "id": "session",   "match": ["*"],                  "dailyMinutes": 120, "onExhausted": "logout" },
+        { "id": "minecraft", "match": ["minecraft-launcher"], "dailyMinutes": 45,  "onExhausted": "close" },
+        { "id": "firefox",   "match": ["firefox"],            "dailyMinutes": 60,  "onExhausted": "close" }
       ]
     }
   ]
