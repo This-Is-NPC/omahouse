@@ -30,6 +30,23 @@ AppScope unnamedScope(const QString &uuid, int pidCount = 1)
     return entry;
 }
 
+// A scope whose name is a launcher's and whose processes are something else.
+//
+// poc/findings.md round 4 measured seven of these on one machine: the Omarchy
+// menu launches everything through `gtk-launch`, so systemd names the scope
+// after the shim and every program opened that way collapses into one id.
+AppScope shim(const QString &id, const QString &exe, int pidCount = 3)
+{
+    AppScope entry;
+    entry.id = id;
+    entry.unit = QStringLiteral("app-Hyprland-%1-91ab7c02.scope").arg(id);
+    entry.cgroupPath = QStringLiteral("/app.slice/app-graphical.slice/") + entry.unit;
+    entry.pidCount = pidCount;
+    entry.dominantExe = exe;
+    entry.dominantExeCount = pidCount;
+    return entry;
+}
+
 // The clock the whole suite runs on. Nobody reads the real one: `now` is an
 // argument, so a budget that takes two hours to run out takes two lines.
 QDateTime at(int hour, int minute, int second = 0)
@@ -817,6 +834,165 @@ private slots:
             evaluate(profile, {}, out, at(19, 30), 2, QStringLiteral("youtube.com"));
         QCOMPARE(count(outcome.decisions, Decision::Kind::Block), 0);
         QCOMPARE(count(outcome.decisions, Decision::Kind::Warn), 1);
+    }
+
+    // -- what is really inside a launcher's scope ---------------------------
+    //
+    // The Omarchy menu opens everything through `gtk-launch`, so under
+    // `default: deny` the program is closed before its window appears and the
+    // notification accuses the launcher. A rule can name the program only if
+    // the executable is allowed to answer for the scope -- and only where the
+    // id is not the name of what is running, which is the whole of the care
+    // this needs.
+
+    void releasesTheProgramInsideALauncherScope()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("code"), Verdict::Allow});
+        const AppScope menu = shim(QStringLiteral("gtk-launch"),
+                                   QStringLiteral("/usr/share/code/code"));
+
+        const Outcome outcome = evaluate(profile, {menu}, startOfDay(), at(19, 0), 2);
+
+        QVERIFY2(outcome.decisions.isEmpty(),
+                 "the program the menu opened was refused under the launcher's name");
+    }
+
+    // The same scope with nothing read out of it. An empty executable is nobody
+    // having looked, and having no opinion must not be an allowance: this is
+    // the case that would make the release above true of every scope on the
+    // machine whose id happens to be unnamed by any rule.
+    void aScopeNothingCouldBeReadOutOfIsStillJudgedByItsName()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("code"), Verdict::Allow});
+        AppScope menu = shim(QStringLiteral("gtk-launch"), QString());
+        menu.dominantExeCount = 0;
+
+        const Outcome outcome = evaluate(profile, {menu}, startOfDay(), at(19, 0), 2);
+
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
+    }
+
+    // The other half of the disagreement, and the reason the executable is
+    // never allowed to answer *instead of* the id. Every flatpak on a machine
+    // runs `/usr/bin/bwrap`, and there the id is the one that is right.
+    void aFlatpakIsStillItsOwnIdAndNotItsRunner()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("org.freedesktop.Platform"), Verdict::Allow});
+        const AppScope flatpak = shim(QStringLiteral("org.freedesktop.Platform"),
+                                      QStringLiteral("/usr/bin/bwrap"));
+
+        const Outcome outcome = evaluate(profile, {flatpak}, startOfDay(), at(19, 0), 2);
+
+        QVERIFY2(outcome.decisions.isEmpty(),
+                 "a rule naming the flatpak stopped matching once bwrap could answer");
+    }
+
+    void aRunnerSharedByEveryFlatpakReleasesNobodyElse()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("code"), Verdict::Allow});
+        const AppScope flatpak = shim(QStringLiteral("org.freedesktop.Platform"),
+                                      QStringLiteral("/usr/bin/bwrap"));
+
+        const Outcome outcome = evaluate(profile, {flatpak}, startOfDay(), at(19, 0), 2);
+
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
+    }
+
+    // A scope whose id already names what is running answers to that name and
+    // to no other, even when the executable would happily corroborate a second
+    // name: `/usr/lib/chromium/chromium` backs up `org.chromium.Chromium` as
+    // readily as it backs up `chromium`.
+    //
+    // Which is defect 4's territory, and the reason it is a `match` list rather
+    // than this: one Chromium window really does produce both ids, and an
+    // operator who wants both covered says so. Inferring it here would make the
+    // path a selector of its own, and then `code-oss` would be released by a
+    // rule about `code` -- an allowlist quietly wider than what is written in it
+    // is the one direction this project never takes.
+    void anIdThatAgreesWithItsExecutableIsNotAskedTwice()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("org.chromium.Chromium"), Verdict::Allow});
+        const AppScope browser = shim(QStringLiteral("chromium"),
+                                      QStringLiteral("/usr/lib/chromium/chromium"));
+
+        const Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(19, 0), 2);
+
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
+    }
+
+    // And the scope nothing can name at all. Profile.h is explicit that a named
+    // selector never matches one, so its verdict is the profile's default --
+    // an executable read out of it does not change that, or a `tmux-spawn`
+    // scope with a released program inside it would become a hole through the
+    // allowlist that nothing in the profile names.
+    void aScopeNothingCanNameIsStillTheDefaultVerdict()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("code"), Verdict::Allow});
+        AppScope tmux = unnamedScope(QStringLiteral("8d371e9b-645e"), 4);
+        tmux.dominantExe = QStringLiteral("/usr/share/code/code");
+        tmux.dominantExeCount = 4;
+
+        const Outcome outcome = evaluate(profile, {tmux}, startOfDay(), at(19, 0), 2);
+
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
+    }
+
+    // The budget half. A rule that releases the program and a clock that never
+    // ticks is worse than the refusal it replaced: the limit is on the screen,
+    // it is being enforced by nothing, and nobody finds out until the evening.
+    void aBudgetCountsTheProgramInsideALauncherScope()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("code"), Verdict::Allow});
+        profile.budgets.append(budget(QStringLiteral("code"), QStringLiteral("code"), 45,
+                                      OnExhausted::Close));
+        const AppScope menu = shim(QStringLiteral("gtk-launch"),
+                                   QStringLiteral("/usr/share/code/code"));
+
+        const Outcome outcome = evaluate(profile, {menu}, startOfDay(), at(19, 0), 120);
+
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("code")), 120);
+    }
+
+    // And it closes the scope it counted. The Close names a unit, and the unit
+    // it has to name is the launcher's -- that is the cgroup the program is
+    // really in, and killing a scope called `code` that nobody opened would be
+    // a budget that runs out and does nothing.
+    void aBudgetThatRunsOutClosesTheLauncherScopeItCounted()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("code"), Verdict::Allow});
+        profile.budgets.append(budget(QStringLiteral("code"), QStringLiteral("code"), 2,
+                                      OnExhausted::Close));
+        const AppScope menu = shim(QStringLiteral("gtk-launch"),
+                                   QStringLiteral("/usr/share/code/code"));
+
+        // A minute of a two minute budget, so the first tick proves the close
+        // below is the budget running out and not the verdict refusing it.
+        Outcome outcome = evaluate(profile, {menu}, startOfDay(), at(19, 0), 60);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 0);
+        outcome = evaluate(profile, {menu}, outcome.ledger, at(19, 1), 60);
+
+        const int closes = count(outcome.decisions, Decision::Kind::Close);
+        QCOMPARE(closes, 1);
+        for (const Decision &decision : outcome.decisions) {
+            if (decision.kind == Decision::Kind::Close)
+                QCOMPARE(decision.scopeUnit, menu.unit);
+        }
     }
 };
 
