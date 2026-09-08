@@ -308,7 +308,13 @@ void TestStudio::init()
     root()->setProperty("cursorPrograms", 0);
     root()->setProperty("cursorSites", 0);
     root()->setProperty("cursorToday", 0);
-    root()->setProperty("filter", QString());
+    // Every list's own needle, because each of them keeps it now: a case that
+    // left one typed would hand the next one a narrowed list it never asked
+    // for.
+    for (const char *needle : {"filterPeople", "filterPrograms", "filterToday",
+                               "filterSites", "filterFleet"}) {
+        root()->setProperty(needle, QString());
+    }
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
     settle();
 }
@@ -1602,12 +1608,13 @@ void TestStudio::fleetPanelShowsMissingMachinesAndUsesTheKeyboard()
     }
     QVERIFY(missing);
     QVERIFY(awaitItem("fleetColumns"));
-    root()->setProperty("filter", QStringLiteral("station-02"));
+    QMetaObject::invokeMethod(root(), "setFilter",
+                              Q_ARG(QVariant, QVariant(QStringLiteral("station-02"))));
     settle();
     QVERIFY(!root()->property("rows").toList().isEmpty());
     for (const auto &row : root()->property("rows").toList())
         QCOMPARE(row.toMap().value("name").toString(), QStringLiteral("station-02"));
-    root()->setProperty("filter", QStringLiteral(""));
+    QMetaObject::invokeMethod(root(), "setFilter", Q_ARG(QVariant, QVariant(QString())));
     settle();
     key('j');
     QCOMPARE(root()->property("cursor").toInt(), 1);
@@ -1641,6 +1648,15 @@ void TestStudio::theTodayViewAddsUpTheHouse()
 
     const QString who = QStringLiteral("nobody");
     const QDate today = QDate::currentDate();
+
+    // This case's own household. An earlier case that failed before its own
+    // clean-up would otherwise leave a computer in the list, and the sum below
+    // would be about a machine this one never wrote down.
+    QString fleetError;
+    QVERIFY2(writeMachines(paths::machinesFile(), {}, &fleetError), qPrintable(fleetError));
+    QDir(paths::elsewhereDir()).removeRecursively();
+    m_house->reload();
+    settle();
 
     // The session budget's id, out of what the verbs wrote. Not a literal: the
     // id is the CLI's to choose and a test that hard-codes it is a test that
@@ -1802,9 +1818,10 @@ void TestStudio::writesTheOperatorShots()
     QVERIFY(writeLedger(paths::elsewhereLedgerFile(station.name, remote.user, remote.date), remote, &fleetError));
     m_house->reload();
     key('f');
-    root()->setProperty("filter", QStringLiteral("session"));
+    QMetaObject::invokeMethod(root(), "setFilter",
+                              Q_ARG(QVariant, QVariant(QStringLiteral("session"))));
     shoot(QStringLiteral("31-operator-machines"));
-    root()->setProperty("filter", QStringLiteral(""));
+    QMetaObject::invokeMethod(root(), "setFilter", Q_ARG(QVariant, QVariant(QString())));
     QVERIFY(writeProfiles(paths::profilesFile(), originalProfiles, &fleetError));
     QVERIFY(writeMachines(paths::machinesFile(), {}, &fleetError));
     m_house->reload();
@@ -1820,13 +1837,10 @@ void TestStudio::writesTheOperatorShots()
     shoot(QStringLiteral("05-operator-commands"));
     key(Qt::Key_Escape);
 
-    // Filtered on `o`, which is a needle that also matches the profile's own
-    // name -- and it has to be, which is worth knowing before reading this
-    // picture. One `filter` is applied to all four lists at once, so a needle
-    // that misses the person under the cursor on the people list empties the
-    // people list, and then the programs list has nobody to be about and draws
-    // "nobody is under rules yet" over a household that is right there. The key
-    // sheet says `/ filter this list`; this is not that.
+    // Filtered on `o`, which narrows the programs list and nothing else: each
+    // list keeps a needle of its own now, so this one leaves the people list
+    // whole and the window still has somebody to be about. The needle is kept
+    // as it was so the picture is comparable with the ones before it.
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
     key('/');
     typeInto(QStringLiteral("filterField"), QStringLiteral("o"));

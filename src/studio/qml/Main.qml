@@ -47,8 +47,46 @@ Window {
     property int cursorSites: 0
     property int cursorToday: 0
     property int cursorFleet: 0
-    property string filter: ""
+    // One needle per list, and never one for the window.
+    //
+    // The key sheet says `/ filter this list`, and for a long time it was one
+    // string applied to all five at once. What that cost was not a narrower
+    // list: the profile the window is about follows the cursor of the people
+    // list, so a needle that missed the person emptied the people list, and
+    // then the programs view had nobody to be about and drew *nobody is under
+    // rules yet* over a household that was right there.
+    //
+    // Each list keeps its own, across going somewhere else and coming back --
+    // which is what "this list" means, and the status bar always shows the one
+    // belonging to the view on screen, so nothing is narrowed by something
+    // invisible. `Esc` clears the one in front of you.
+    property string filterPeople: ""
+    property string filterPrograms: ""
+    property string filterToday: ""
+    property string filterSites: ""
+    property string filterFleet: ""
     property bool filtering: false
+
+    /// The needle of the list on screen. Read-only: writing it would be writing
+    /// one of five and the binding could not say which, so `setFilter` says it.
+    readonly property string filter: win.view === 1 ? win.filterPeople
+                                    : win.view === 2 ? win.filterPrograms
+                                    : win.view === 5 ? win.filterFleet
+                                    : win.view === 4 ? win.filterSites
+                                                     : win.filterToday
+
+    function setFilter(text) {
+        if (win.view === 1)
+            win.filterPeople = text
+        else if (win.view === 2)
+            win.filterPrograms = text
+        else if (win.view === 5)
+            win.filterFleet = text
+        else if (win.view === 4)
+            win.filterSites = text
+        else
+            win.filterToday = text
+    }
     /// What `minutes`, `grant` and `drop` are about, kept from the moment the
     /// prompt opens: the cursor is free to move while a sheet is up, and an
     /// answer that read the cursor back would land on whatever row is under it
@@ -97,27 +135,33 @@ Window {
     readonly property var allToday: win.subject === "" ? []
         : (House.snapshot.today[win.subject] || [])
     readonly property var fleetRows: win.subject === "" ? []
-        : ((House.snapshot.fleet || {})[win.subject] || []).filter(win.matches)
+        : win.narrow((House.snapshot.fleet || {})[win.subject] || [], win.filterFleet)
     readonly property int fleetCursor: win.clamp(win.cursorFleet, win.fleetRows.length)
     readonly property var catalogue: win.subject === "" ? []
         : (House.snapshot.catalog[win.subject] || [])
 
-    function matches(row) {
-        const needle = win.filter.trim().toLowerCase()
-        if (needle === "")
-            return true
-        const parts = [row.id || "", row.name || "", row.user || "", row.text || ""]
-        for (let i = 0; i < parts.length; i++) {
-            if (String(parts[i]).toLowerCase().indexOf(needle) >= 0)
-                return true
-        }
-        return false
+    /// The rows of one list that answer to one needle. The needle is a
+    /// parameter and never read off the window, which is the whole of the fix:
+    /// a function that reached for `win.filter` would narrow every list by
+    /// whichever one happens to be on screen.
+    function narrow(rows, needle) {
+        const wanted = String(needle).trim().toLowerCase()
+        if (wanted === "")
+            return rows
+        return rows.filter(function (row) {
+            const parts = [row.id || "", row.name || "", row.user || "", row.text || ""]
+            for (let i = 0; i < parts.length; i++) {
+                if (String(parts[i]).toLowerCase().indexOf(wanted) >= 0)
+                    return true
+            }
+            return false
+        })
     }
 
-    readonly property var peopleRows: win.view === 5 ? win.people : win.people.filter(win.matches)
-    readonly property var programRows: win.allPrograms.filter(win.matches)
-    readonly property var siteRows: win.allSites.filter(win.matches)
-    readonly property var todayRows: win.allToday.filter(win.matches)
+    readonly property var peopleRows: win.narrow(win.people, win.filterPeople)
+    readonly property var programRows: win.narrow(win.allPrograms, win.filterPrograms)
+    readonly property var siteRows: win.narrow(win.allSites, win.filterSites)
+    readonly property var todayRows: win.narrow(win.allToday, win.filterToday)
 
     readonly property var rows: win.view === 1 ? win.peopleRows
                               : win.view === 2 ? win.programRows
@@ -336,7 +380,10 @@ Window {
     function go(which) {
         if (which === 5 && !win.operating) return
         win.view = which
-        win.filter = ""
+        // The needle of the list being left is left with it. Each list keeps
+        // its own, and the status bar shows the one in front of you, so coming
+        // back to a narrowed list is a thing you can see rather than a thing
+        // that happens to you.
         win.filtering = false
         win.takeFocus()
     }
@@ -378,7 +425,7 @@ Window {
 
     function finishFilter(clear) {
         if (clear)
-            win.filter = ""
+            win.setFilter("")
         win.filtering = false
         win.setCursor(win.cursor)
         win.takeFocus()
@@ -615,7 +662,7 @@ Window {
         // chance to have an opinion.
         if (event.key === Qt.Key_Escape) {
             if (win.filter !== "")
-                win.filter = ""
+                win.setFilter("")
             else if (!root.activeFocus)
                 win.takeFocus()
             else
@@ -925,7 +972,7 @@ Window {
                         focused: win.filtering
                         lead: "/"
                         placeholder: "filter"
-                        onTextChanged: if (win.filtering) win.filter = filterField.text
+                        onTextChanged: if (win.filtering) win.setFilter(filterField.text)
                         onAccepted: win.finishFilter(false)
                         onCancelled: win.finishFilter(true)
                     }
