@@ -1585,6 +1585,39 @@ number: the household's allowance stays the household's to give, and a machine
 that has lost contact must not start issuing it. That cannot leak time, because
 the only thing that raises it is an operator deciding to.
 
+**And a budget that never resets never reaches any of this.** A pot has no day
+and a statement is made of nothing else — a date, a revision, and seconds spent
+since midnight — so `allowanceSeconds` answers a pot out of the profile and the
+ledger before the allocation is looked at. The guard above is right about a
+daily budget, where the turn of the date is exactly when the household should
+have spoken again; a pot does not recharge at midnight, so there is no new
+allowance to issue and what is left of it was decided once and already belongs
+to whoever it was given to. Sending a pot past that guard confused *the
+household has not spoken about today* with *the credit is finished*, and the
+second cannot happen to a pot by the passage of time. It did not merely take the
+balance away: with the spending still carried and the allowance gone, an hour
+and a half left over came out as an hour and a half **overdrawn**, so the line
+dropping at midnight locked somebody out of a pot they had not finished.
+
+**The household cannot carry a pot, and that is a gap and not a decision.**
+`planAllocations` sums `secondsFor`, which is zero for every pot there has ever
+been, so `elsewhere` comes out zero on every machine and `credit` is rebuilt
+from the daily number each morning. What that produced was worse than no
+household at all: refills crossed between computers and spending did not, so two
+machines were each told the whole pot and every top-up of it. A pot is therefore
+this machine's until a statement can carry one — said plainly in
+`allowanceSeconds` rather than half-shared somewhere nobody would look. The data
+is already here: a collected day is a whole ledger and carries `kept`, so what
+crosses is a question about the plan and not about what is known.
+
+So `omahouse house` and the machines panel print what each computer has spent of
+its own pot — one day per machine, which is why they may read `kept` where
+`report` walks a range and must not — and no household capacity over it.
+`HouseBudget::limitSeconds` says that the way it already said it for a budget
+nobody limited, because it is the same sentence: the household has no number for
+this. A capacity there would be one machine's two hours printed as everybody's,
+with a balance under it nobody could spend.
+
 **This is not exclusive.** Two computers told there are thirty minutes left can
 both spend them, bounded by the reporting interval and nothing else. The
 division into per-machine portions that came before did guarantee exclusivity

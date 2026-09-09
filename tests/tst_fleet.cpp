@@ -268,6 +268,116 @@ private slots:
         QCOMPARE(allowanceSeconds(profile, budget, fresh, tomorrow), 600);
     }
 
+    // A pot has no day, and a statement is made of days.
+    //
+    // The guard that returns the day's household allowance to zero when the
+    // statement is not for today is right, and it is right about a *daily*
+    // budget: the turn of the date is exactly when the household should have
+    // spoken again, and a machine out of contact must not re-issue an allowance
+    // that is the household's to give. A pot is not that. It does not recharge
+    // at midnight, so there is no new allowance to issue -- what is left of it
+    // was decided once and already belongs to the person. Applying the guard to
+    // one confused *the household has not spoken about today* with *the credit
+    // is finished*, and those are different things, one of which cannot happen
+    // to a pot.
+    //
+    // The network drops, midnight passes, and an hour and a half of a two hour
+    // pot is still an hour and a half. That is the whole of it.
+    void anEnrolledPotIsSpentToZeroWhileTheHouseholdIsSilent()
+    {
+        Profile profile;
+        profile.user = "kid";
+        profile.allocation = QJsonObject{{"authority", "manager"}, {"machine", "here"}};
+        Budget pot;
+        pot.id = "pot"; pot.match = {QStringLiteral("chromium")}; pot.dailyMinutes = 120;
+        pot.resets = Resets::Never; pot.onExhausted = OnExhausted::Close;
+        Budget session;
+        session.id = "session"; session.match = {QStringLiteral("*")};
+        session.dailyMinutes = 120; session.onExhausted = OnExhausted::Logout;
+        profile.budgets << pot << session;
+        const QDateTime now(QDate(2026, 9, 7), QTime(12, 0), QTimeZone::UTC);
+
+        Ledger today;
+        today.user = "kid"; today.date = now.date(); today.observedAt = now;
+        today.allocation = profile.allocation;
+        today.addKeptSeconds("pot", 1800);
+        today.addSeconds("session", 600);
+
+        QJsonObject plan;
+        QString error;
+        QVERIFY2(planAllocations(profile, {{"here", today}}, {}, now, &plan, &error),
+                 qPrintable(error));
+        QVERIFY2(applyAllocation(&profile, plan.value("documents").toObject()
+                                     .value("here").toObject(), now.date(), &error),
+                 qPrintable(error));
+
+        // Half an hour of the pot gone, an hour and a half left.
+        QCOMPARE(allowanceSeconds(profile, pot, today, now.date())
+                     - spentSeconds(pot, today), 5400);
+
+        // The line goes down. Midnight passes, the pot walks into the new day
+        // and the statement stays yesterday's.
+        const QDate tomorrow = now.date().addDays(1);
+        Ledger next = carryInto(tomorrow, today, profile);
+        QCOMPARE(next.keptSecondsFor("pot"), 1800);
+        QCOMPARE(allowanceSeconds(profile, pot, next, tomorrow) - spentSeconds(pot, next), 5400);
+
+        // A week of silence is the same answer. Nothing about a pot is measured
+        // in days, so nothing about it can go stale.
+        const QDate later = now.date().addDays(7);
+        Ledger week = next;
+        week.date = later;
+        QCOMPARE(allowanceSeconds(profile, pot, week, later) - spentSeconds(pot, week), 5400);
+
+        // And it can be spent to zero out there, with no floor under it but
+        // zero and no household to ask.
+        week.addKeptSeconds("pot", 5400);
+        QCOMPARE(allowanceSeconds(profile, pot, week, later) - spentSeconds(pot, week), 0);
+
+        // The guard has not moved for the budget it was written about. The
+        // session's allowance is the household's to give, and on a day the
+        // household has said nothing about there is none.
+        QCOMPARE(allowanceSeconds(profile, session, next, tomorrow), 0);
+
+        // Except what an operator handed over, which is the rule the day before
+        // this one established and is not disturbed here.
+        next.grants.append(Grant{QDateTime(tomorrow, QTime(9, 0), QTimeZone::UTC),
+                                 "operator", "session", 10});
+        QCOMPARE(allowanceSeconds(profile, session, next, tomorrow), 600);
+    }
+
+    // Handing over more is the only thing that refills a pot, and the enrolled
+    // path could not see it either -- the fold that carries a grant across a
+    // night is read on one side of this function and not the other. A pot
+    // refilled on Monday came into Tuesday on an enrolled machine with Monday's
+    // spending against Monday's smaller allowance.
+    void aRefillOnAnEnrolledPotSurvivesTheNightToo()
+    {
+        Profile profile;
+        profile.user = "kid";
+        profile.allocation = QJsonObject{{"authority", "manager"}, {"machine", "here"}};
+        Budget pot;
+        pot.id = "pot"; pot.match = {QStringLiteral("chromium")}; pot.dailyMinutes = 120;
+        pot.resets = Resets::Never; pot.onExhausted = OnExhausted::Close;
+        profile.budgets << pot;
+        const QDateTime now(QDate(2026, 9, 7), QTime(12, 0), QTimeZone::UTC);
+
+        Ledger monday;
+        monday.user = "kid"; monday.date = now.date(); monday.observedAt = now;
+        monday.allocation = profile.allocation;
+        monday.addKeptSeconds("pot", 7200);
+        monday.grants.append(Grant{now, "operator", "pot", 30});
+
+        // Spent to the last second, and half an hour handed over.
+        QCOMPARE(allowanceSeconds(profile, pot, monday, now.date())
+                     - spentSeconds(pot, monday), 1800);
+
+        const QDate tuesday = now.date().addDays(1);
+        const Ledger next = carryInto(tuesday, monday, profile);
+        QCOMPARE(next.keptGrantedFor("pot"), 1800);
+        QCOMPARE(allowanceSeconds(profile, pot, next, tuesday) - spentSeconds(pot, next), 1800);
+    }
+
     // `elsewhere` is what other computers have spent, and consumption adds up.
     // A statement saying they spent less than the last one is a report going
     // backwards, and honouring it would hand this machine the same minutes
@@ -493,6 +603,65 @@ private slots:
         const QVector<HouseBudget> house =
             consolidate(profile, {{QStringLiteral("laptop"), laptop}});
         QCOMPARE(house.at(0).limitSeconds, 60 * 60 + 600);
+    }
+
+    // A pot in the household's day. Every computer's spending of its own is
+    // real and is added up; the capacity over it is not, because each machine
+    // holds its own pot and the statement cannot carry one. Printing this
+    // machine's two hours as though they were everybody's would put a balance
+    // under it that nobody could spend.
+    //
+    // It is also the row that kept `omahouse house` and the machines panel from
+    // agreeing: both show what each computer spent, and read out of the daily
+    // counter a pot was nothing spent on every one of them, for ever.
+    void aPotIsAddedUpPerMachineAndHasNoHouseholdNumber()
+    {
+        Profile profile;
+        profile.user = "kid";
+        Budget pot;
+        pot.id = "pot"; pot.match = {QStringLiteral("chromium")}; pot.dailyMinutes = 120;
+        pot.resets = Resets::Never; pot.onExhausted = OnExhausted::Close;
+        Budget session;
+        session.id = "session"; session.match = {QStringLiteral("*")};
+        session.dailyMinutes = 120; session.onExhausted = OnExhausted::Logout;
+        profile.budgets << pot << session;
+
+        Ledger here, there;
+        here.user = there.user = "kid";
+        here.date = there.date = QDate(2026, 9, 7);
+        here.addKeptSeconds("pot", 1800);
+        here.addSeconds("session", 600);
+        there.addKeptSeconds("pot", 900);
+        there.addSeconds("session", 300);
+
+        const auto house = consolidate(profile, {{"here", here}, {"b", there}});
+        const HouseBudget *jar = nullptr;
+        const HouseBudget *daily = nullptr;
+        for (const auto &one : house) {
+            if (one.id == "pot") jar = &one;
+            if (one.id == "session") daily = &one;
+        }
+        QVERIFY(jar && daily);
+
+        // Half an hour here, a quarter there, and the sum of the two.
+        QCOMPARE(jar->spent.size(), 2);
+        QCOMPARE(jar->spent.first().seconds, 1800);
+        QCOMPARE(jar->spent.last().seconds, 900);
+        QCOMPARE(jar->totalSeconds, 2700);
+
+        // And no household number over it, said the way a budget nobody
+        // limited says it -- which is the same sentence: the household has no
+        // number for this.
+        QVERIFY2(!jar->hasLimit(),
+                 "the household printed one machine's pot as though it were everybody's");
+        QCOMPARE(jar->leftSeconds(), 0);
+
+        // The daily budget beside it is untouched: a household number, and what
+        // is left of it after both computers.
+        QVERIFY(daily->hasLimit());
+        QCOMPARE(daily->limitSeconds, 7200);
+        QCOMPARE(daily->totalSeconds, 900);
+        QCOMPARE(daily->leftSeconds(), 6300);
     }
 
     void aBudgetWithNoLimitIsAddedAndNeverRunsOut()

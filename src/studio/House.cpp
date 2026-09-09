@@ -160,7 +160,12 @@ QVariantList fleetRows(const Profile &profile, const Ledger &local, const QDateT
         const auto house = allocation.value("house").toObject();
         for (const auto &budget : profile.budgets) {
             if (!budget.hasLimit()) continue;
-            const int used = day.second.secondsFor(budget.id);
+            // Whichever of the two counters this budget spends, and on every
+            // row -- a collected day is a whole ledger, so what a pot has spent
+            // on the machine in the bedroom arrived here with it. Read from the
+            // daily counter alone, every pot on every computer showed nothing
+            // spent, for ever.
+            const int used = spentSeconds(budget, day.second);
             // The household's number, and what is left of it after every
             // computer. It is the same on every row of a budget, because that
             // is the point: there is one pot and no quota per machine. What

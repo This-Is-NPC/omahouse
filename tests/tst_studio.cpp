@@ -1796,6 +1796,50 @@ void TestStudio::fleetPanelShowsMissingMachinesAndUsesTheKeyboard()
     QVERIFY2(afterPanel != panel,
              "ten minutes were handed over on this machine and the panel did not move");
 
+    // And a budget that never resets is drawn out of the counter it really
+    // spends. Every pot on every computer showed nothing spent and its whole
+    // limit left, because the panel read the daily counter for all of them --
+    // and a collected day is a whole ledger, so the number was there to read
+    // the entire time.
+    //
+    // Its row is also the one that proves a pot does not go through the
+    // household at all: this statement has no entry for it, and the row is
+    // right anyway.
+    QVector<Profile> withPot;
+    QVERIFY2(readProfiles(paths::profilesFile(), &withPot, &error), qPrintable(error));
+    Budget jar;
+    jar.id = QStringLiteral("pot");
+    jar.match = {QStringLiteral("chromium")};
+    jar.dailyMinutes = 120;
+    jar.resets = Resets::Never;
+    jar.onExhausted = OnExhausted::Close;
+    withPot.first().budgets.append(jar);
+    QVERIFY2(writeProfiles(paths::profilesFile(), withPot, &error), qPrintable(error));
+
+    Ledger spent;
+    bool noDay = false;
+    QVERIFY2(readLedger(paths::ledgerFile(who, today), &spent, &error, &noDay),
+             qPrintable(error));
+    spent.user = who;
+    spent.date = today;
+    spent.addKeptSeconds(QStringLiteral("pot"), 1800);
+    QVERIFY2(writeLedger(paths::ledgerFile(who, today), spent, &error), qPrintable(error));
+    m_house->reload();
+    settle();
+
+    key('f');
+    QString potUsed, potLeft;
+    for (const auto &row : root()->property("rows").toList()) {
+        const auto item = row.toMap();
+        if (item.value("name").toString() == QLatin1String("here")
+                && item.value("id").toString() == QLatin1String("pot")) {
+            potUsed = item.value("used").toString();
+            potLeft = item.value("left").toString();
+        }
+    }
+    QCOMPARE(potUsed, QStringLiteral("30m"));
+    QCOMPARE(potLeft, QStringLiteral("1h30m"));
+
     key('f');
     // A subject cannot enter the operator's fleet view through its public go.
     m_admin->run("fixture", {"machine", "remove", "station-02"});

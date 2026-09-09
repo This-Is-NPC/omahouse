@@ -139,6 +139,15 @@ the household's allowance stays the household's to give.
 Do not schedule `leave`: it is a local adjustment, and repeating it after
 consumption refills a remainder. Enrolled profiles refuse it.
 
+**A budget that never resets is not part of any of this.** A pot has no day and
+a statement is made of days, so an enrolled machine works a pot out of its own
+profile and its own ledger and never asks the household about it. The line can
+drop for a week and what is left of the pot is still there to spend, down to
+zero — nothing about it goes stale, because nothing about it is measured in
+days. The other side of that is what the household cannot do yet: a pot does not
+cross between computers, so two machines under one profile each hold their own.
+Use a daily budget for what the household should share.
+
 In the operator's Studio, select an account and press **f** for machines. Each
 budget shows the machine's last reported consumption, the household's credit,
 what is left of it and the observation timestamp. **+** records household credit through

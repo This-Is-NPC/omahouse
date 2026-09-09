@@ -1,5 +1,6 @@
 #include "Fleet.h"
 
+#include "Allocation.h"
 #include "Json.h"
 
 #include <QJsonArray>
@@ -145,12 +146,25 @@ QVector<HouseBudget> consolidate(const Profile &profile,
         // made by leave must not feed back into the next consolidation.
         int granted = 0;
         for (const auto &day : days) {
-            const int seconds = day.second.secondsFor(budget.id);
+            // Whichever counter this budget spends. Safe here and nowhere that
+            // adds *days* together: this function is handed one day per
+            // machine, so a pot's running total is read once. `report` walks a
+            // range and must go on reading the daily map alone, because a pot
+            // is carried into the file of every day it touches and would be
+            // counted once per day there.
+            const int seconds = spentSeconds(budget, day.second);
             granted += day.second.creditedSeconds(budget.id);
             total.spent.append(Contribution {day.first, seconds});
             total.totalSeconds += seconds;
         }
-        if (budget.hasLimit())
+        // A budget that never resets gets no household number, and that is not
+        // an oversight to fill in later. Each machine holds its own pot -- the
+        // statement cannot carry one, docs/design.md §12 -- so a household
+        // capacity for it would be this machine's capacity printed as though it
+        // were everybody's, and the balance under it would be a number nobody
+        // could spend. What each computer has spent of its own is real and is
+        // still added up and shown.
+        if (budget.hasLimit() && !budget.carriesOver())
             total.limitSeconds = qMax(0, budget.dailyMinutes * 60 + granted);
         house.append(total);
     }

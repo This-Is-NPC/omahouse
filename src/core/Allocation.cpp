@@ -67,14 +67,43 @@ int spentSeconds(const Budget &budget, const Ledger &ledger)
 int allowanceSeconds(const Profile &profile, const Budget &budget,
                      const Ledger &ledger, const QDate &date)
 {
-    if (profile.allocation.isEmpty()) {
-        // A pot's refills are in two places and both of them count: the ones
-        // made today, still in today's grants, and the ones every night since
-        // has folded into the running total. A daily budget has only the first,
-        // because nothing of its is ever folded.
+    // A pot is worked out here and the household is not asked, because a pot has
+    // no day and a statement is made of nothing else -- a date, a revision, and
+    // seconds spent since midnight.
+    //
+    // The guard below returns a machine to nothing when the statement is not
+    // for today, and it is right about a *daily* budget: the turn of the date
+    // is exactly when the household should have spoken again, and a machine out
+    // of contact must not go on issuing an allowance that is the household's to
+    // give. A pot is not that. It does not recharge at midnight, so there is no
+    // new allowance to issue -- what is left of it was decided once and already
+    // belongs to whoever it was given to. Sending a pot past that guard
+    // confused *the household has not spoken about today* with *the credit is
+    // finished*, and the second cannot happen to a pot by the passage of time.
+    // The line drops, the night passes, and an hour and a half of a two hour
+    // pot is still an hour and a half; a week later it is still an hour and a
+    // half, and it can be spent to zero out there with no floor under it but
+    // zero.
+    //
+    // **This is not the household ignoring a pot by choice, and it should not
+    // be read as one.** The statement cannot carry a pot: `planAllocations`
+    // sums `secondsFor`, which is zero for every pot there has ever been, so
+    // `elsewhere` comes out zero on every machine and `credit` is rebuilt from
+    // the daily number each morning. What that produced was worse than no
+    // household at all -- refills crossed between computers and spending did
+    // not, so two machines were each told the whole pot and every top-up of it.
+    // Until a statement can carry one, a pot is this machine's, said plainly
+    // here rather than half-shared somewhere nobody would look.
+    //
+    // A pot's refills are in two places and both of them count: the ones made
+    // today, still in today's grants, and the ones every night since has folded
+    // into the running total.
+    if (budget.carriesOver()) {
         return budget.dailyMinutes * 60 + ledger.grantedSeconds(budget.id)
-            + (budget.carriesOver() ? ledger.keptGrantedFor(budget.id) : 0);
+            + ledger.keptGrantedFor(budget.id);
     }
+    if (profile.allocation.isEmpty())
+        return budget.dailyMinutes * 60 + ledger.grantedSeconds(budget.id);
     // What an operator has handed over here today, which the household has not
     // folded into its credit yet. Local adjustments are not in it -- `leave` is
     // refused on an enrolled profile, and this is that same rule at the place
