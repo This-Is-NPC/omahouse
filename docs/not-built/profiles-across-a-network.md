@@ -82,6 +82,17 @@ purchased-credit budget beside its daily one may have it, and a lan house that
 wants a daily cap beside its credit may have that. Nothing in the engine chooses
 between them.
 
+### Two rules a pot needed once the household could carry it
+
+**The fold carries operator credit and not every grant.** It used to carry all of
+them, which was cosmetic while the fold was local. Once the fold feeds the
+household's number, an adjustment made on one machine would have become credit
+for the whole house.
+
+**`leave` is refused on a pot.** It answers *how much is left today* and a pot
+has no today. Allowed, it had only two wrong answers available: expire at the
+turn and undo itself, or survive and refill the pot every morning.
+
 ### The idea this replaces, and why it was wrong
 
 An earlier version of this page asked for a budget **anchored at the login**: a
@@ -215,12 +226,13 @@ being offline, and that property is why it was chosen.
 **The pool is the person's, the record of it lives at the manager, and a machine
 asks.** An hour is an hour wherever they sit.
 
-> **This does not work yet for a credit, and §7 step 16 is why.** A budget that
-> never resets is spent where it is spent: the plan the manager issues is built
-> out of days, and a pot has no day, so nothing a pot spends reaches the other
-> machines. Until that step is written, a pot is the machine's and not the
-> household's — and it fails towards giving time away rather than withholding it,
-> which is the direction nobody notices. Forty minutes at one computer leave
+> **True for a credit as of 2026-09-08, and it was not true for most of that
+> day.** The plan a manager issues was built out of days and a pot has no day, so
+> nothing a pot spent reached the other machines while its refills did — two
+> machines each told the whole pot. §7 step 16 records what closed it. **What no
+> verb can do is ask for a pot**: `resets` is read and honoured and nothing
+> writes it, so a credit arrives only in a profile written by hand or pushed by a
+> manager. Forty minutes at one computer leave
 twenty at the next.
 
 A machine does not receive a portion in the morning and does not hold the
@@ -546,15 +558,19 @@ different sums to report and to read back.
     balance there is nothing to divide, and refusing would kill the case this page
     exists for. *omastore*
 
-16. **The plan has to carry a pot, and today it cannot.** This is the piece that
-    makes the lan house work, and it is not built. `planAllocations` sums the
-    daily counter, which is zero for any budget that never resets, so `elsewhere`
-    comes out zero on every machine and the credit is rebuilt each morning from
-    the daily number. The effect is worse than having no household: **refills
-    crossed between computers and spending did not**, so two machines were each
-    told the whole pot and each of its refills. The data is already there — a
-    collected day is a whole ledger and carries what a pot has spent — and what
-    is missing is the plan asking for it. *core, cli*
+16. **Done.** **The plan carries a pot.** It used to sum the daily counter, which
+    is zero for anything that carries over, so a pot's spending reached nobody
+    while its refills reached everybody — two machines each told the whole pot,
+    which is worse than having no household and fails towards giving time away.
+    Neither of a pot's numbers is a day: what it has spent is the running total,
+    and what it has been given is the fold beside it. **Nothing new had to
+    travel** — a collected day was already a whole ledger and carried both, and
+    the plan simply had to ask. *core, cli*
+
+17. **No verb writes `resets`, so nobody can ask for a pot.** The model does the
+    lan house and the interface does not let anyone request it. This is the last
+    thing between the code and what §3 promises, and it is a gap in the interface
+    rather than in the model. *cli, studio*
 
 **Omakure does not change.** It is the wire, and `collect` already travels on it.
 **The browser extension does not change.** A site budget uses the same machinery
