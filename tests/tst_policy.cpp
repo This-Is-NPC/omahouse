@@ -1186,6 +1186,32 @@ private slots:
         QCOMPARE(outcome.ledger.keptGrantedFor(QStringLiteral("pot")), 900);
     }
 
+    // The fold takes operator credit and not every grant, and the difference is
+    // a `leave` adjustment. Its own page forbids repeating it after
+    // consumption, so carrying it into tomorrow is exactly repeating it -- and
+    // it is also what the household is told a pot has been given, where an
+    // adjustment must never reach. `leave` is refused on a pot where it is
+    // typed; this is the same decision at the place it is read, because a
+    // profile that was edited by hand is not a place to find out.
+    void anAdjustmentIsNotSomethingTheNightCarries()
+    {
+        Profile profile = profileOf();
+        Budget pot = budget(QStringLiteral("pot"), QStringLiteral("chromium"), 60,
+                            OnExhausted::Warn);
+        pot.resets = Resets::Never;
+        profile.budgets.append(pot);
+
+        Ledger monday = startOfDay();
+        monday.grants.append(Grant {QDateTime(monday.date, QTime(20, 0)),
+                                    QStringLiteral("howl"), QStringLiteral("pot"), 10, false});
+        monday.grants.append(Grant {QDateTime(monday.date, QTime(21, 0)),
+                                    QStringLiteral("howl"), QStringLiteral("pot"), 45, true});
+
+        const Ledger tuesday = carryInto(monday.date.addDays(1), monday, profile);
+        QCOMPARE(tuesday.keptGrantedFor(QStringLiteral("pot")), 600);
+        QCOMPARE(allowanceSeconds(profile, pot, tuesday, tuesday.date), 3600 + 600);
+    }
+
     // A daily budget is not refilled by anything a pot was refilled with. The
     // fold is asked about every budget in the profile and answers for one kind
     // of them, and a fold that ran for all of them would put a grant into a

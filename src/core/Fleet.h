@@ -84,13 +84,7 @@ struct Contribution {
 /// One budget, added up across the house.
 struct HouseBudget {
     QString id;
-    /// Below zero when the household has no number for this budget.
-    ///
-    /// Two ways that happens and one meaning. A budget nobody put a limit on
-    /// counts and never runs out. A budget that never resets is held per
-    /// machine -- the statement cannot carry a pot, docs/design.md §12 -- so
-    /// there is no household capacity to print, and `spent` beside it is still
-    /// every computer's real spending of its own.
+    /// Below zero when the budget has no limit: it counts and never runs out.
     int limitSeconds = -1;
     /// Every machine's seconds, in the order the machines were given.
     QVector<Contribution> spent;

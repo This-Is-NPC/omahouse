@@ -139,14 +139,20 @@ the household's allowance stays the household's to give.
 Do not schedule `leave`: it is a local adjustment, and repeating it after
 consumption refills a remainder. Enrolled profiles refuse it.
 
-**A budget that never resets is not part of any of this.** A pot has no day and
-a statement is made of days, so an enrolled machine works a pot out of its own
-profile and its own ledger and never asks the household about it. The line can
-drop for a week and what is left of the pot is still there to spend, down to
-zero — nothing about it goes stale, because nothing about it is measured in
-days. The other side of that is what the household cannot do yet: a pot does not
-cross between computers, so two machines under one profile each hold their own.
-Use a daily budget for what the household should share.
+**A budget that never resets is shared like everything else, and it does not
+expire.** One pot for the household: what a computer spends of it comes off the
+others, and half an hour handed over on one is credit on all of them from the
+next synchronization. What differs is that a pot's statement never goes stale.
+Its two numbers are everything the pot has ever been given and everything the
+other computers have ever spent of it, neither of which is a day — so the line
+can drop for a week and what is left is still there to spend, down to zero, out
+of the last statement the machine received. A daily budget on a day the
+household has said nothing about is nothing plus what an operator handed over; a
+pot is not, and that is the difference between an allowance and a credit.
+
+`leave` is refused on a pot. It sets how much remains *today*, and a pot has no
+today; `omahouse grant <user> --budget <id>=<duration>` is what puts more in
+one.
 
 In the operator's Studio, select an account and press **f** for machines. Each
 budget shows the machine's last reported consumption, the household's credit,

@@ -605,16 +605,147 @@ private slots:
         QCOMPARE(house.at(0).limitSeconds, 60 * 60 + 600);
     }
 
-    // A pot in the household's day. Every computer's spending of its own is
-    // real and is added up; the capacity over it is not, because each machine
-    // holds its own pot and the statement cannot carry one. Printing this
-    // machine's two hours as though they were everybody's would put a balance
-    // under it that nobody could spend.
+    // A pot the whole household shares, which is the case the product is for
+    // and the one that did not work.
     //
-    // It is also the row that kept `omahouse house` and the machines panel from
-    // agreeing: both show what each computer spent, and read out of the daily
-    // counter a pot was nothing spent on every one of them, for ever.
-    void aPotIsAddedUpPerMachineAndHasNoHouseholdNumber()
+    // The plan was written for a thing that recharges. It summed `secondsFor`,
+    // which is zero for every pot there has ever been, so `elsewhere` came out
+    // zero on every machine and each was told the whole pot; and it rebuilt
+    // `credit` from the daily number every morning, so every refill older than
+    // one night was forgotten. Refills crossed between computers and spending
+    // did not, which is the direction that gives time away.
+    //
+    // Neither number is a day. What a pot has spent is its running total and
+    // what it has been given is the fold beside it, and a collected day is a
+    // whole ledger and brings both.
+    void aPotIsOnePotAcrossTheWholeHouse()
+    {
+        Profile profile;
+        profile.user = "kid";
+        profile.allocation = QJsonObject{{"authority", "manager"}, {"machine", "here"}};
+        Budget pot;
+        pot.id = "pot"; pot.match = {QStringLiteral("chromium")}; pot.dailyMinutes = 120;
+        pot.resets = Resets::Never; pot.onExhausted = OnExhausted::Close;
+        profile.budgets << pot;
+        const QDateTime now(QDate(2026, 9, 7), QTime(12, 0), QTimeZone::UTC);
+
+        Ledger a, b;
+        a.user = b.user = "kid"; a.date = b.date = now.date();
+        a.observedAt = b.observedAt = now;
+        a.allocation = profile.allocation;
+        b.allocation = QJsonObject{{"authority", "manager"}, {"machine", "b"}};
+        a.addKeptSeconds("pot", 1800);
+        b.addKeptSeconds("pot", 900);
+
+        QJsonObject plan;
+        QString error;
+        QVERIFY2(planAllocations(profile, {{"here", a}, {"b", b}}, {}, now, &plan, &error),
+                 qPrintable(error));
+        const auto documents = plan.value("documents").toObject();
+        const auto here = documents.value("here").toObject().value("house").toObject()
+                              .value("pot").toObject();
+        const auto there = documents.value("b").toObject().value("house").toObject()
+                               .value("pot").toObject();
+
+        // Two hours of pot, and each is told what the other has spent of it --
+        // all of it, and not what it spent today, because a pot has no today.
+        QCOMPARE(here.value("credit").toInt(), 7200);
+        QCOMPARE(there.value("credit").toInt(), 7200);
+        QCOMPARE(here.value("elsewhere").toInt(), 900);
+        QCOMPARE(there.value("elsewhere").toInt(), 1800);
+
+        // And both work out the same balance, which is the household's: three
+        // quarters of an hour gone between them.
+        QVERIFY2(applyAllocation(&profile, documents.value("here").toObject(), now.date(),
+                                 &error), qPrintable(error));
+        QCOMPARE(allowanceSeconds(profile, pot, a, now.date()) - spentSeconds(pot, a), 4500);
+
+        Profile other = profile;
+        other.allocation = QJsonObject{{"authority", "manager"}, {"machine", "b"}};
+        QVERIFY2(applyAllocation(&other, documents.value("b").toObject(), now.date(), &error),
+                 qPrintable(error));
+        QCOMPARE(allowanceSeconds(other, pot, b, now.date()) - spentSeconds(pot, b), 4500);
+
+        // Spending on one machine moves the other machine's balance. That is
+        // the whole point, and a pot could not do it.
+        b.addKeptSeconds("pot", 600);
+        QJsonObject next;
+        a.allocation = profile.allocation;
+        b.allocation = documents.value("b").toObject();
+        QVERIFY2(planAllocations(profile, {{"here", a}, {"b", b}}, plan, now, &next, &error),
+                 qPrintable(error));
+        const auto moved = next.value("documents").toObject().value("here").toObject();
+        QCOMPARE(moved.value("house").toObject().value("pot").toObject()
+                     .value("elsewhere").toInt(), 1500);
+        QVERIFY(applyAllocation(&profile, moved, now.date(), &error));
+        QCOMPARE(allowanceSeconds(profile, pot, a, now.date()) - spentSeconds(pot, a), 3900);
+    }
+
+    // A refill outlives the night on the way round the house too. Handing over
+    // half an hour is the only thing that puts anything back in a pot, and the
+    // fold that carries it past midnight lives on each machine -- so the plan
+    // has to ask for it, or every top-up older than one night is forgotten by
+    // everybody but the computer it was typed on.
+    void arefillOnOneMachineIsCreditForTheWholeHouse()
+    {
+        Profile profile;
+        profile.user = "kid";
+        profile.allocation = QJsonObject{{"authority", "manager"}, {"machine", "here"}};
+        Budget pot;
+        pot.id = "pot"; pot.match = {QStringLiteral("chromium")}; pot.dailyMinutes = 120;
+        pot.resets = Resets::Never; pot.onExhausted = OnExhausted::Close;
+        profile.budgets << pot;
+        const QDateTime now(QDate(2026, 9, 7), QTime(12, 0), QTimeZone::UTC);
+
+        Ledger a, b;
+        a.user = b.user = "kid"; a.date = b.date = now.date();
+        a.observedAt = b.observedAt = now;
+        a.allocation = profile.allocation;
+        b.allocation = QJsonObject{{"authority", "manager"}, {"machine", "b"}};
+        // Half an hour handed over here last week and folded by the nights
+        // since, and ten minutes handed over today.
+        a.addKeptGranted("pot", 1800);
+        a.grants.append(Grant{now, "operator", "pot", 10});
+
+        QJsonObject plan;
+        QString error;
+        QVERIFY2(planAllocations(profile, {{"here", a}, {"b", b}}, {}, now, &plan, &error),
+                 qPrintable(error));
+        const auto documents = plan.value("documents").toObject();
+        const auto there = documents.value("b").toObject().value("house").toObject()
+                               .value("pot").toObject();
+
+        // Three hours: the pot's two, plus the half hour and the ten minutes.
+        QCOMPARE(there.value("credit").toInt(), 7200 + 1800 + 600);
+        // None of it came from that machine, so it has counted none of it.
+        QCOMPARE(there.value("counted").toInt(), 0);
+        // And all of it came from this one.
+        QCOMPARE(documents.value("here").toObject().value("house").toObject()
+                     .value("pot").toObject().value("counted").toInt(), 2400);
+
+        QVERIFY2(applyAllocation(&profile, documents.value("here").toObject(), now.date(),
+                                 &error), qPrintable(error));
+        QCOMPARE(allowanceSeconds(profile, pot, a, now.date()), 9600);
+
+        // The night passes with no new statement. The ten minutes fold into the
+        // running total, the statement stops counting them separately, and the
+        // number does not move.
+        const QDate tomorrow = now.date().addDays(1);
+        Ledger next = carryInto(tomorrow, a, profile);
+        QCOMPARE(next.keptGrantedFor("pot"), 2400);
+        QCOMPARE(allowanceSeconds(profile, pot, next, tomorrow), 9600);
+    }
+
+    // A pot in the household's day, added up the way the statement adds it up.
+    //
+    // This is the row that kept `omahouse house` and the machines panel from
+    // agreeing with anything: both show what each computer spent, and read out
+    // of the daily counter a pot was nothing spent on every one of them, for
+    // ever. The capacity over it has to come from the same place the machines
+    // are told -- everything the pot has ever been handed, not what somebody
+    // handed it since midnight -- or the household says one number here and a
+    // different one to each machine.
+    void aPotIsAddedUpTheWayTheStatementAddsItUp()
     {
         Profile profile;
         profile.user = "kid";
@@ -633,6 +764,9 @@ private slots:
         here.addSeconds("session", 600);
         there.addKeptSeconds("pot", 900);
         there.addSeconds("session", 300);
+        // Half an hour handed over on the far machine a week ago, folded by the
+        // nights since. Read out of today's grants alone it would be gone.
+        there.addKeptGranted("pot", 1800);
 
         const auto house = consolidate(profile, {{"here", here}, {"b", there}});
         const HouseBudget *jar = nullptr;
@@ -649,12 +783,11 @@ private slots:
         QCOMPARE(jar->spent.last().seconds, 900);
         QCOMPARE(jar->totalSeconds, 2700);
 
-        // And no household number over it, said the way a budget nobody
-        // limited says it -- which is the same sentence: the household has no
-        // number for this.
-        QVERIFY2(!jar->hasLimit(),
-                 "the household printed one machine's pot as though it were everybody's");
-        QCOMPARE(jar->leftSeconds(), 0);
+        // Two hours of pot, three quarters of an hour gone between them, and
+        // the capacity counts a refill that outlived the night it was made in.
+        QVERIFY(jar->hasLimit());
+        QCOMPARE(jar->limitSeconds, 9000);
+        QCOMPARE(jar->leftSeconds(), 6300);
 
         // The daily budget beside it is untouched: a household number, and what
         // is left of it after both computers.

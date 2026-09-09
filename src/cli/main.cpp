@@ -4346,6 +4346,18 @@ int cmdLeave(const Globals &g, const QStringList &positionals, const Options &op
                  .arg(user, id, spellUser(user)));
         return kMissing;
     }
+    if (budget->carriesOver()) {
+        // `leave` answers *how much remains today*, and a budget that never
+        // resets has no today. Its own page forbids repeating it after
+        // consumption, which is what carrying an adjustment past midnight would
+        // be -- so on a pot it would either expire at the turn of the date and
+        // undo itself, or survive it and recharge the pot every morning. There
+        // is no third answer, and `grant` is the verb that puts time into a pot.
+        fail(QStringLiteral("leave: %1 never resets, so there is no balance for today to "
+                            "set; omahouse grant %2 --budget %1=<duration> puts more in it")
+                 .arg(id, spellUser(user)));
+        return kUsage;
+    }
     if (!budget->hasLimit()) {
         // A budget with no limit counts and never runs out, so there is nothing
         // for a number to be left of. Refused rather than written, because a row

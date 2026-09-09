@@ -1243,6 +1243,15 @@ def check_a_pot_survives_a_day_nobody_has_written_yet(box):
     assert written["keptGranted"] == {"pot": 1800}, written
     assert [g["minutes"] for g in written["grants"]] == [10]
 
+    # `leave` answers how much remains *today*, and a pot has no today. Refused
+    # where it is typed rather than left to do one of the two wrong things:
+    # expire at midnight and undo itself, or survive and recharge the pot every
+    # morning.
+    refused = box.run("leave", USER, "--budget", "pot=10m")
+    assert refused.returncode == 1, refused.stdout
+    assert "never resets" in refused.stderr, refused.stderr
+    assert "omahouse grant" in refused.stderr, refused.stderr
+
     # Which is what the answer says: two and a half hours, plus ten, less the
     # hour already spent.
     assert "1h40m left today" in given.stdout, given.stdout

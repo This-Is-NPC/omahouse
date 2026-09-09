@@ -153,18 +153,16 @@ QVector<HouseBudget> consolidate(const Profile &profile,
             // is carried into the file of every day it touches and would be
             // counted once per day there.
             const int seconds = spentSeconds(budget, day.second);
-            granted += day.second.creditedSeconds(budget.id);
+            granted += givenTo(budget, day.second);
             total.spent.append(Contribution {day.first, seconds});
             total.totalSeconds += seconds;
         }
-        // A budget that never resets gets no household number, and that is not
-        // an oversight to fill in later. Each machine holds its own pot -- the
-        // statement cannot carry one, docs/design.md §12 -- so a household
-        // capacity for it would be this machine's capacity printed as though it
-        // were everybody's, and the balance under it would be a number nobody
-        // could spend. What each computer has spent of its own is real and is
-        // still added up and shown.
-        if (budget.hasLimit() && !budget.carriesOver())
+        // `givenTo` and not today's grants, so that a pot's capacity here is
+        // everything it has ever been handed and not only what somebody handed
+        // it since midnight. It is the same number the statement carries, out
+        // of the same function, because a household total that disagreed with
+        // what the machines were told would be two answers to one question.
+        if (budget.hasLimit())
             total.limitSeconds = qMax(0, budget.dailyMinutes * 60 + granted);
         house.append(total);
     }

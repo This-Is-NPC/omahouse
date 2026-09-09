@@ -84,13 +84,22 @@ Ledger carryInto(const QDate &date, const Ledger &previous, const Profile &profi
     // `house` and `collect` all add days together out of `grants`, and a grant
     // copied into every day it outlived would be counted once per day there.
     //
+    // Operator credit and not every grant. A `leave` adjustment is an answer to
+    // *how much remains today*, and its own page says it must not be repeated
+    // after consumption -- carrying it into tomorrow is exactly repeating it.
+    // It is also what the household is told a pot has been given, and an
+    // adjustment must never feed back into the household's number, which is the
+    // rule `creditedSeconds` exists for. `leave` is refused on a budget that
+    // never resets, so nothing is being quietly dropped here; this is the same
+    // decision said twice, once where it is written and once where it is read.
+    //
     // The outgoing day's grants and no others. Every earlier day was folded by
     // the turn that left it, so this walks the whole chain by only ever looking
     // at one link of it.
     fresh.keptGranted = previous.keptGranted;
     for (const Budget &budget : profile.budgets) {
         if (budget.carriesOver())
-            fresh.addKeptGranted(budget.id, previous.grantedSeconds(budget.id));
+            fresh.addKeptGranted(budget.id, previous.creditedSeconds(budget.id));
     }
     // The events do not come with it, deliberately. A budget that ran out
     // yesterday and is still out says so again this morning before it acts,

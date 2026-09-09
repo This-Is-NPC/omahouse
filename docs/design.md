@@ -1585,38 +1585,62 @@ number: the household's allowance stays the household's to give, and a machine
 that has lost contact must not start issuing it. That cannot leak time, because
 the only thing that raises it is an operator deciding to.
 
-**And a budget that never resets never reaches any of this.** A pot has no day
-and a statement is made of nothing else — a date, a revision, and seconds spent
-since midnight — so `allowanceSeconds` answers a pot out of the profile and the
-ledger before the allocation is looked at. The guard above is right about a
-daily budget, where the turn of the date is exactly when the household should
-have spoken again; a pot does not recharge at midnight, so there is no new
-allowance to issue and what is left of it was decided once and already belongs
-to whoever it was given to. Sending a pot past that guard confused *the
-household has not spoken about today* with *the credit is finished*, and the
-second cannot happen to a pot by the passage of time. It did not merely take the
-balance away: with the spending still carried and the allowance gone, an hour
-and a half left over came out as an hour and a half **overdrawn**, so the line
-dropping at midnight locked somebody out of a pot they had not finished.
+### A pot the whole household shares
 
-**The household cannot carry a pot, and that is a gap and not a decision.**
-`planAllocations` sums `secondsFor`, which is zero for every pot there has ever
-been, so `elsewhere` comes out zero on every machine and `credit` is rebuilt
-from the daily number each morning. What that produced was worse than no
-household at all: refills crossed between computers and spending did not, so two
-machines were each told the whole pot and every top-up of it. A pot is therefore
-this machine's until a statement can carry one — said plainly in
-`allowanceSeconds` rather than half-shared somewhere nobody would look. The data
-is already here: a collected day is a whole ledger and carries `kept`, so what
-crosses is a question about the plan and not about what is known.
+One credit and several computers at once is the case this is for, and it is the
+one that did not work. The plan was written for a thing that recharges. It
+summed `secondsFor`, which is zero for every pot there has ever been, so
+`elsewhere` came out zero on every machine and each was told the whole pot; and
+it rebuilt `credit` out of today's grants alone, so every refill older than one
+night was forgotten by everybody but the computer it was typed on. **Refills
+crossed between computers and spending did not**, which is the direction that
+gives time away — and it is worse than no household at all, because two machines
+were each told the whole pot and every top-up of it.
 
-So `omahouse house` and the machines panel print what each computer has spent of
-its own pot — one day per machine, which is why they may read `kept` where
-`report` walks a range and must not — and no household capacity over it.
-`HouseBudget::limitSeconds` says that the way it already said it for a budget
-nobody limited, because it is the same sentence: the household has no number for
-this. A capacity there would be one machine's two hours printed as everybody's,
-with a balance under it nobody could spend.
+Neither of a pot's numbers is a day. What it has spent is its running total,
+`kept`; what it has been given is the fold beside it, `keptGranted`, which is
+where the turn of the date puts a grant so that nothing counts it once per day
+it outlived. A collected day is a whole ledger and brings both, so nothing new
+had to travel — the plan had to ask. `spentSeconds` and `givenTo` are the two
+questions, asked in one place each, because the plan builds `credit` out of one
+of them, tells each machine how much of that credit came from itself out of the
+same one, and the machine adds whatever it has handed over since.
+
+`givenTo` is operator credit and never a `leave` adjustment. An adjustment is a
+machine correcting its own balance and must not feed back into the household's,
+and on a pot it cannot exist at all: `leave` answers *how much remains today*
+and a pot has no today, so it is refused where it is typed. Left allowed it had
+only two wrong answers — expire at the turn of the date and undo itself, or
+survive it and recharge the pot every morning.
+
+**And a pot does not go past the guard above.** That guard is about days: the
+turn of the date is exactly when the household should have spoken again about a
+daily budget, and a machine out of contact must not go on issuing an allowance
+that is the household's to give. A pot's statement does not go stale that way.
+`credit` is everything the pot has ever been given and `elsewhere` is everything
+the other computers have ever spent of it, so a statement from last week is not
+expired, it is merely behind on the second number — it under-states `elsewhere`,
+and this machine allows a little too much rather than too little, which is the
+trade already taken for a late report.
+
+Sending a pot past that guard confused *the household has not spoken about
+today* with *the credit is finished*, and the second cannot happen to a pot by
+the passage of time. It did not merely take the balance away: with the spending
+still carried and the allowance gone, an hour and a half left over came out as
+an hour and a half **overdrawn**, so the line dropping at midnight did not stop
+somebody spending a pot — it locked them out of one they had not finished.
+
+`omahouse house` and the machines panel read `kept` too, and may: both are
+handed **one day per machine**, so a pot's running total is read once. `report`
+walks a range and must go on reading the daily map alone, because a pot is
+carried into the file of every day it touches and would be counted once per day
+there. Somebody who does not see that difference will think `report` is the one
+that is inconsistent.
+
+**No verb writes `resets`.** A pot cannot be asked for from the command line or
+from the window, so everything above is reachable today only by a profile
+written by hand or pushed from a manager. That is a gap in the interface and not
+in the model.
 
 **This is not exclusive.** Two computers told there are thirty minutes left can
 both spend them, bounded by the reporting interval and nothing else. The

@@ -6,6 +6,20 @@
 
 namespace omahouse {
 
+/// What has been handed over to `budget` that the household may count.
+///
+/// Today's operator credit, and for a budget that never resets the nights'
+/// worth folded in beside it. A `leave` adjustment is in neither: it is a
+/// machine correcting its own balance and must not feed back into the
+/// household's -- and it cannot exist on a pot at all, which is refused where
+/// `leave` is typed.
+///
+/// It is one function because three callers must agree about it or the
+/// household says two different things: the plan builds `credit` out of it, the
+/// same plan tells each machine how much of that credit came from itself, and
+/// the machine adds whatever it has handed over since.
+int givenTo(const Budget &budget, const Ledger &ledger);
+
 /// What has been spent against `budget`, out of whichever of the ledger's two
 /// counters belongs to it.
 ///

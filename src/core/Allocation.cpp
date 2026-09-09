@@ -58,6 +58,17 @@ bool validAllocation(const QJsonObject &a, QString *error)
     return true;
 }
 
+int givenTo(const Budget &budget, const Ledger &ledger)
+{
+    // Everything an operator has handed over to this budget that the household
+    // is allowed to count: today's, and for a pot the nights' worth folded in
+    // beside it. Local adjustments are in neither -- `leave` is a machine
+    // correcting its own balance, and `keptGranted` is fed from the credit half
+    // of the grants alone.
+    return ledger.creditedSeconds(budget.id)
+        + (budget.carriesOver() ? ledger.keptGrantedFor(budget.id) : 0);
+}
+
 int spentSeconds(const Budget &budget, const Ledger &ledger)
 {
     return budget.carriesOver() ? ledger.keptSecondsFor(budget.id)
@@ -67,48 +78,44 @@ int spentSeconds(const Budget &budget, const Ledger &ledger)
 int allowanceSeconds(const Profile &profile, const Budget &budget,
                      const Ledger &ledger, const QDate &date)
 {
-    // A pot is worked out here and the household is not asked, because a pot has
-    // no day and a statement is made of nothing else -- a date, a revision, and
-    // seconds spent since midnight.
+    // What an operator has handed over here that the household may count.
+    const int handedOver = givenTo(budget, ledger);
+    const auto one = profile.allocation.value(QStringLiteral("house")).toObject()
+                         .value(budget.id).toObject();
+
+    // A budget that never resets does not go past the guard below, and that is
+    // not the household being ignored -- it is the guard being about days.
     //
-    // The guard below returns a machine to nothing when the statement is not
-    // for today, and it is right about a *daily* budget: the turn of the date
-    // is exactly when the household should have spoken again, and a machine out
-    // of contact must not go on issuing an allowance that is the household's to
-    // give. A pot is not that. It does not recharge at midnight, so there is no
-    // new allowance to issue -- what is left of it was decided once and already
-    // belongs to whoever it was given to. Sending a pot past that guard
-    // confused *the household has not spoken about today* with *the credit is
-    // finished*, and the second cannot happen to a pot by the passage of time.
-    // The line drops, the night passes, and an hour and a half of a two hour
-    // pot is still an hour and a half; a week later it is still an hour and a
-    // half, and it can be spent to zero out there with no floor under it but
-    // zero.
+    // The guard returns a machine to what an operator handed over when the
+    // statement is not for today, and it is right about a *daily* budget: the
+    // turn of the date is exactly when the household should have spoken again,
+    // and a machine out of contact must not go on issuing an allowance that is
+    // the household's to give. A pot is not that. Neither of its numbers is a
+    // day -- `credit` is everything it has ever been given and `elsewhere` is
+    // everything the other computers have ever spent of it -- so a statement
+    // from last week is not stale, it is merely behind on the second one. It
+    // under-states `elsewhere`, so this machine allows a little too much rather
+    // than too little, which is the trade already taken for a late report.
     //
-    // **This is not the household ignoring a pot by choice, and it should not
-    // be read as one.** The statement cannot carry a pot: `planAllocations`
-    // sums `secondsFor`, which is zero for every pot there has ever been, so
-    // `elsewhere` comes out zero on every machine and `credit` is rebuilt from
-    // the daily number each morning. What that produced was worse than no
-    // household at all -- refills crossed between computers and spending did
-    // not, so two machines were each told the whole pot and every top-up of it.
-    // Until a statement can carry one, a pot is this machine's, said plainly
-    // here rather than half-shared somewhere nobody would look.
+    // Sending a pot past that guard confused *the household has not spoken
+    // about today* with *the credit is finished*, and the second cannot happen
+    // to a pot by the passage of time. It did not merely take the balance away:
+    // with the spending still carried and the allowance gone, an hour and a
+    // half left over came out as an hour and a half overdrawn, so the line
+    // dropping at midnight locked somebody out of a pot they had not finished.
     //
-    // A pot's refills are in two places and both of them count: the ones made
-    // today, still in today's grants, and the ones every night since has folded
-    // into the running total.
+    // With no statement at all it is the profile's own number plus everything
+    // handed over here -- today's, and the nights' worth folded in beside them.
     if (budget.carriesOver()) {
-        return budget.dailyMinutes * 60 + ledger.grantedSeconds(budget.id)
-            + ledger.keptGrantedFor(budget.id);
+        if (one.isEmpty())
+            return budget.dailyMinutes * 60 + handedOver;
+        const int fresh = qMax(0, handedOver - one.value(QStringLiteral("counted")).toInt(0));
+        return qMax(0, one.value(QStringLiteral("credit")).toInt(0)
+                           - one.value(QStringLiteral("elsewhere")).toInt(0) + fresh);
     }
+
     if (profile.allocation.isEmpty())
         return budget.dailyMinutes * 60 + ledger.grantedSeconds(budget.id);
-    // What an operator has handed over here today, which the household has not
-    // folded into its credit yet. Local adjustments are not in it -- `leave` is
-    // refused on an enrolled profile, and this is that same rule at the place
-    // the number is worked out.
-    const int handedOver = ledger.creditedSeconds(budget.id);
     if (profile.allocation.value(QStringLiteral("date")).toString() != date.toString(Qt::ISODate)) {
         // A day the household has said nothing about. That used to be nothing
         // at all, and nothing an operator could type changed it -- which is the
@@ -126,26 +133,20 @@ int allowanceSeconds(const Profile &profile, const Budget &budget,
     // the household's balance -- so an hour is an hour wherever the person
     // sits, and not a quota per machine.
     //
-    // Two numbers and not one pre-baked cap, because they are different kinds
+    // Three numbers and not one pre-baked cap, because they are different kinds
     // of fact and they go stale differently. `credit` is a decision and has a
     // correct current version; `elsewhere` is an observation and only grows. A
     // report that arrives late under-states `elsewhere`, so this machine allows
     // a little too much rather than too little -- bounded by how often the
     // household reports, which is the number an operator sets.
-    const auto one = profile.allocation.value(QStringLiteral("house")).toObject()
-                         .value(budget.id).toObject();
     //
-    // And a third: how much of *this machine's own* credit the household has
+    // And the third: how much of *this machine's own* credit the household has
     // already folded into `credit`. What an operator has handed over here since
     // is added on top, so a grant is ten minutes the instant it is typed rather
     // than at the next plan -- and it is ten minutes once, because the moment
     // the household counts it, `counted` rises by the same six hundred that
     // `credit` did and the sum does not move. By subtraction and never by
     // comparing a grant's clock against a statement's.
-    //
-    // It makes this machine briefly more generous than the household knows,
-    // exactly as a late report of `elsewhere` does, and bounded by the same
-    // thing: how often the household reports.
     const int fresh = qMax(0, handedOver - one.value(QStringLiteral("counted")).toInt(0));
     return qMax(0, one.value(QStringLiteral("credit")).toInt(0)
                        - one.value(QStringLiteral("elsewhere")).toInt(0) + fresh);
@@ -266,15 +267,31 @@ bool planAllocations(const Profile &profile, const QVector<QPair<QString, Ledger
     for (const auto &budget : profile.budgets) {
         if (!budget.hasLimit()) continue;
         any = true;
-        // What the household has to spend today: the profile's own number plus
-        // every grant an operator made anywhere. Local adjustments are left out
-        // -- `leave` is a machine correcting its own balance and must not feed
+        // What the household has to spend: the profile's own number plus every
+        // grant an operator made anywhere. Local adjustments are left out --
+        // `leave` is a machine correcting its own balance and must not feed
         // back into the household's.
+        //
+        // **For a pot, neither of these is a day, and that is the whole of what
+        // was wrong here.** This was written for a thing that recharges: it
+        // summed `secondsFor`, which is zero for every pot there has ever been,
+        // so `elsewhere` came out zero on every machine and each was told the
+        // whole pot; and it rebuilt the credit out of today's grants alone, so
+        // every refill older than one night was forgotten by everybody but the
+        // computer it was typed on. Refills crossed and spending did not, which
+        // is the direction that gives time away, and the case it broke is the
+        // one the product is for: one credit and several computers at once.
+        //
+        // What a pot has spent is its running total, and what it has been given
+        // is the fold beside it -- `keptGranted`, which is where a night puts a
+        // grant so that `report` and this function do not each count it once
+        // per day it outlived. A collected day is a whole ledger and brings
+        // both, so nothing new had to travel; the plan had to ask.
         qint64 credit = qint64(budget.dailyMinutes) * 60;
         qint64 spent = 0;
         for (const auto &day : days) {
-            credit += day.second.creditedSeconds(budget.id);
-            spent += day.second.secondsFor(budget.id);
+            credit += givenTo(budget, day.second);
+            spent += spentSeconds(budget, day.second);
         }
         if (credit < 0 || credit > 31536000)
             return refuse(error, QStringLiteral("household credit is outside the supported range"));
@@ -293,12 +310,12 @@ bool planAllocations(const Profile &profile, const QVector<QPair<QString, Ledger
         for (const auto &day : days) {
             auto doc = documents.value(day.first).toObject();
             auto house = doc.value("house").toObject();
-            const qint64 elsewhere = spent - day.second.secondsFor(budget.id);
-            // What this machine's own grants contributed to `credit`, so it
-            // can tell the ones already counted from the ones it has made
+            const qint64 elsewhere = spent - spentSeconds(budget, day.second);
+            // What this machine's own hand-overs contributed to `credit`, so
+            // it can tell the ones already counted from the ones it has made
             // since. Taken from the very day the credit was summed out of, so
             // the two cannot disagree.
-            const qint64 counted = day.second.creditedSeconds(budget.id);
+            const qint64 counted = givenTo(budget, day.second);
             house.insert(budget.id,
                          QJsonObject{{"credit", static_cast<int>(credit)},
                                      {"elsewhere", static_cast<int>(elsewhere)},
