@@ -828,13 +828,22 @@ Window {
                 height: 40
                 color: Theme.panel
 
+                // The two halves are anchored to their own edges, so the room
+                // between them is what the left one may have and no more: tiled
+                // at half a screen they were drawn over each other. The tabs
+                // keep their width -- a tab with a word missing is a key nothing
+                // answers -- and the sentence gives way from its tail, the way
+                // every other label in this window does when it runs out of
+                // room.
                 Row {
+                    id: face
                     anchors.left: parent.left
                     anchors.leftMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 10
 
                     Label {
+                        id: title
                         anchors.verticalCenter: parent.verticalCenter
                         text: "omahouse"
                         font.bold: true
@@ -843,6 +852,8 @@ Window {
                         objectName: "faceLabel"
                         anchors.verticalCenter: parent.verticalCenter
                         quiet: true
+                        width: Math.max(0, Math.min(implicitWidth,
+                                                    tabs.x - face.x - x - 16))
                         // Said out loud, because it is the answer to "why can I
                         // not change anything here" and to "why did it ask for a
                         // password". Neither is a thing to leave somebody to
@@ -853,6 +864,7 @@ Window {
                 }
 
                 Row {
+                    id: tabs
                     anchors.right: parent.right
                     anchors.rightMargin: 12
                     anchors.verticalCenter: parent.verticalCenter

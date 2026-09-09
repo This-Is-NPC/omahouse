@@ -160,6 +160,7 @@ private slots:
     void theFilterNarrowsOnlyTheListItWasTypedOn();
     void theSubjectFaceHasNothingToPress();
     void theWindowNeverWritesToTheMachine();
+    void theHeaderKeepsOffTheTabsWhenNarrow();
     void writesTheOperatorShots();
     void writesTheSubjectShots();
 
@@ -1231,6 +1232,39 @@ QByteArray TestStudio::treeUnder(const QString &directory)
         file.close();
     }
     return fingerprint;
+}
+
+void TestStudio::theHeaderKeepsOffTheTabsWhenNarrow()
+{
+    // Tiled at half a 1440 px screen the header's two halves -- who this is
+    // and what they may do on the left, the view tabs on the right -- were
+    // anchored to their own edges and drawn over each other. Measured in the
+    // showcase's frames, on both days it was filmed. The tabs keep their width
+    // and the sentence on the left gives way, because a tab strip with a word
+    // missing is a key nothing answers, and the sentence is still readable
+    // with its tail elided.
+    const int wasWide = window()->width();
+    for (int width : {700, window()->minimumWidth()}) {
+        window()->setWidth(width);
+        settle();
+        QQuickItem *face = awaitItem(QStringLiteral("faceLabel"));
+        QQuickItem *firstTab = awaitItem(QStringLiteral("viewChip1"));
+        if (QTest::currentTestFailed())
+            return;
+        const qreal faceRight = face->mapToScene(QPointF(face->width(), 0)).x();
+        const qreal tabsLeft = firstTab->mapToScene(QPointF(0, 0)).x();
+        QVERIFY2(faceRight <= tabsLeft,
+                 qPrintable(QStringLiteral("at %1 px the face line ends at %2 and the "
+                                           "tabs start at %3")
+                                .arg(width).arg(faceRight).arg(tabsLeft)));
+        QVERIFY2(face->width() > 0, "the face line vanished rather than eliding");
+    }
+    window()->setWidth(wasWide);
+    settle();
+    // Back at full width nothing is elided: the fix must cost the ordinary
+    // window nothing, or every full-width picture would change with it.
+    QQuickItem *face = awaitItem(QStringLiteral("faceLabel"));
+    QVERIFY2(!face->property("truncated").toBool(), "the face line is elided at full width");
 }
 
 void TestStudio::theWindowNeverWritesToTheMachine()
