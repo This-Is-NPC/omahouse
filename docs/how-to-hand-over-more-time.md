@@ -59,6 +59,11 @@ nothing has to remember to unblock it.
 the local turn of the date, and a grant that survived it would be tomorrow's
 time given away today.
 
+The one exception is the exception the word asks for: a grant into
+[a budget that never resets](how-to-limit-the-time.md#6-a-budget-that-never-resets)
+is folded into the pot at the turn of the date rather than dropped, because
+handing over more is the only thing that refills one.
+
 **It adds to the limit rather than replacing it,** and two grants add up:
 
 ```

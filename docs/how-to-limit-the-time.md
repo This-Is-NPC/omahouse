@@ -134,16 +134,69 @@ omahouse profile show kid
 
 ```
 BUDGETS
-BUDGET    APP                              A DAY  WHEN OUT
-chromium  chromium, org.chromium.Chromium     3m  closes
-session   *                               2h00m  logs out
+BUDGET    APP                              LIMIT  RESETS  WHEN OUT
+chromium  chromium, org.chromium.Chromium     3m  daily   closes
+session   *                               2h00m  daily   logs out
 ```
 
 One row and two names: the `APP` column is every id the budget is about, and the
-number is what they have between them.
+number is what they have between them. `RESETS` is whether that number comes
+back at the turn of the date, and `daily` is what every budget above says; §6 is
+the other answer.
 
 `omahouse status kid` is the same numbers live, with what has been spent and
 what is left — [reading the day](how-to-read-the-day.md).
+
+## 6. A budget that never resets
+
+Everything above comes back tomorrow. This one does not:
+
+```bash
+sudo omahouse limit kid --session 2h --resets never
+```
+
+```
+kid: session 2h in all, and it never resets: it logs out when the time is out, and only a grant refills it.
+```
+
+**Two hours are two hours until somebody hands over more.** Logging out and back
+in does not return them, the turn of the date does not, and walking to another
+computer does not — the allowance belongs to the person and not to the sitting.
+It is the shape a lan house sells and an office allocates, and it is what a
+household wants for a credit that sits beside the daily allowance rather than
+instead of it. `--resets never` goes on any of the three shapes: `--session`,
+`--budget minecraft=2h`, `--site youtube.com=1h`.
+
+Read it back and the word `daily` has changed on that row, and so has the
+sentence: `2h a day` is an allowance and `2h in all` is a pot.
+
+```
+BUDGET    APP   LIMIT  RESETS  WHEN OUT
+session   *     2h00m  never   logs out
+```
+
+Three things follow from the word and none of them is a surprise once it is
+read as a pot:
+
+- **A new number keeps it a pot.** `limit kid --session 3h` on the budget above
+  is three hours in all, still never resetting. Whether a budget resets is a
+  decision somebody made once, like what it does when it runs out, and a new
+  limit is not a reason to take it back. Say `--resets daily` to make it an
+  allowance again.
+- **`grant` is what refills it,** and a grant into a pot does not expire at
+  midnight the way one into an allowance does — it is folded into the pot.
+  `leave` is refused on it, because *how much is left today* is a question a
+  pot has no today for.
+- **The profile for anybody cannot have one.** That profile is shared, so a pot
+  on it would be emptied by the first person to sit down and never refilled:
+
+  ```
+  limit: a budget that never resets cannot be written for '*', because the profile for anybody is shared: the first person to sit down would empty it and nobody would ever refill it. A shared login takes a daily budget.
+  ```
+
+On a machine enrolled in a household, one pot is one pot for the whole house:
+what is spent on any computer comes off all of them —
+[household scheduling](how-to-schedule-household.md).
 
 ---
 
@@ -222,6 +275,10 @@ made for one day into the rule for every day is the mistake that avoids:
 And on the picker that follows `a`, the limit can be left empty:
 
 ![The "How long a day for firefox?" dialogue: "45m, 2h, 1h30m — or leave it empty, and it runs with no clock of its own, spending the day's total like everything else", an empty field, and "Enter ok" lit because this one accepts an empty answer.](img/09-operator-program-limit.png)
+
+`p` on the **today** view is §6 in the window: it makes the budget under the
+cursor a pot that never resets, and makes a pot an allowance again. The row
+says `never resets` while it is one, and `m` on it asks for minutes in all.
 
 `e` on the **people** view is the teeth, in and out. On a profile with no clock
 at all, the today view says which key would fix it:

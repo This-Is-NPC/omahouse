@@ -1,7 +1,8 @@
 # Profiles across a network — designed, and mostly not built
 
-> **Phases A and B shipped on 2026-09-08. Phase C did not, and §7 marks each
-> step.** A budget can be `daily` or `never`; a profile can name no account and
+> **Phases A and B shipped on 2026-09-08, and the last step of C on
+> 2026-09-09; §7 marks each step.** A budget can be `daily` or `never`, and
+> `omahouse limit --resets never` is what asks for one; a profile can name no account and
 > rule whoever sits at the machine; every profile records who wrote it and when;
 > a manager pushes one through a staging file and stands off a human edit it did
 > not make; a machine sends its own back in the same shape; and a merge answers
@@ -229,10 +230,10 @@ asks.** An hour is an hour wherever they sit.
 > **True for a credit as of 2026-09-08, and it was not true for most of that
 > day.** The plan a manager issues was built out of days and a pot has no day, so
 > nothing a pot spent reached the other machines while its refills did — two
-> machines each told the whole pot. §7 step 16 records what closed it. **What no
-> verb can do is ask for a pot**: `resets` is read and honoured and nothing
-> writes it, so a credit arrives only in a profile written by hand or pushed by a
-> manager. Forty minutes at one computer leave
+> machines each told the whole pot. §7 step 16 records what closed it, and
+> step 17 what let anybody ask for one: `omahouse limit <user> --session 2h
+> --resets never`, on the manager, pushed to the machines the way every profile
+> is. Forty minutes at one computer leave
 twenty at the next.
 
 A machine does not receive a portion in the morning and does not hold the
@@ -570,10 +571,17 @@ different sums to report and to read back.
     travel** — a collected day was already a whole ledger and carried both, and
     the plan simply had to ask. *core, cli*
 
-17. **No verb writes `resets`, so nobody can ask for a pot.** The model does the
-    lan house and the interface does not let anyone request it. This is the last
-    thing between the code and what §3 promises, and it is a gap in the interface
-    rather than in the model. *cli, studio*
+17. **Done.** **A verb writes `resets`.** It is `--resets daily|never` on
+    `limit`, for all three of its shapes, because `limit` is where a budget's
+    shape is written and `allow --limit` is sugar for the common case. Absent
+    means daily and is never written into the file; a budget that is already
+    there keeps what it was, the way it keeps `onExhausted`, so renumbering a
+    pot does not quietly turn it back into an allowance. The profile for anybody
+    is refused a pot where it is typed and not only where the file is read,
+    with the cause named. `profile show` and `status` say `daily` or `never`
+    on every row. The window shows a pot as one, edits its number without
+    changing its shape, and `p` on the today view turns a budget into a pot and
+    back. *cli, studio*
 
 **Omakure does not change.** It is the wire, and `collect` already travels on it.
 **The browser extension does not change.** A site budget uses the same machinery

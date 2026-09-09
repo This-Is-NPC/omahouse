@@ -306,10 +306,12 @@ and that is not tidiness. It was asked in four, three of them right: `status`
 and the window read the daily map for every budget alike, so a pot showed
 nothing spent and its whole limit left, however much of it had gone.
 
-**No verb writes `resets` yet**, so a profile cannot ask for a pot from the
-command line or from the window. The model and the arithmetic are here; the rest
-is written down in
-[`not-built/profiles-across-a-network.md`](not-built/profiles-across-a-network.md).
+`omahouse limit --resets never` is what writes it, on any of the verb's three
+shapes, and `--resets daily` is what a budget means when it says nothing — so it
+is never written into the file, a new budget that says nothing is daily, and a
+budget that is already there keeps what it was, the way it keeps what it does
+when it runs out. The rest of what a pot is across a household is written down
+in [`not-built/profiles-across-a-network.md`](not-built/profiles-across-a-network.md).
 
 A profile whose `user` is `*` applies to anybody who logs in without one of
 their own — `Profile::anybody`. It is how a machine carries rules for whoever
@@ -692,6 +694,13 @@ Writing needs root, and the studio gets there through `pkexec`. `status`,
 once, because that is how somebody thinks while configuring. `grant` is the one
 verb beyond the agreed scope of four things; it is here because an operator who
 cannot hand over ten minutes with the game open is not an operator.
+
+`limit` is where a budget's shape is written, and so it is the one verb that
+takes `--resets`. Not `allow --limit`: that is sugar for the common case, and a
+pot is not it. The line the verb prints back tells the two apart — `2h a day`
+and `2h in all` — and `profile show` and `status` carry a `RESETS` column on
+every row rather than a mark on the odd one, because a column blank on most rows
+reads as a column with no answer.
 
 Every root the program reads moves by environment variable, which is how the end
 to end suite runs as an ordinary user with nothing installed. Two of them also
@@ -1643,10 +1652,12 @@ carried into the file of every day it touches and would be counted once per day
 there. Somebody who does not see that difference will think `report` is the one
 that is inconsistent.
 
-**No verb writes `resets`.** A pot cannot be asked for from the command line or
-from the window, so everything above is reachable today only by a profile
-written by hand or pushed from a manager. That is a gap in the interface and not
-in the model.
+**`omahouse limit <user> --session|--budget|--site … --resets never` is what
+asks for a pot**, since 2026-09-09. Everything above is reachable from the
+command line on the manager, and a pot pushed to a machine arrives the way every
+profile does. The window shows a pot as one and edits its number without turning
+it back into an allowance; asking for one from the window is `p` on the today
+view.
 
 **This is not exclusive.** Two computers told there are thirty minutes left can
 both spend them, bounded by the reporting interval and nothing else. The

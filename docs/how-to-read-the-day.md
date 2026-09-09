@@ -32,16 +32,20 @@ omahouse status kid
 omahouse status — nobody (Kid)
 observing, default allow, 2026-09-05 · ledger on disk
 
-BUDGET       LIMIT   USED   LEFT  WHEN OUT
-chromium       45m    45m     0m  closes
-code           45m     0m    45m  closes
-session      2h10m  1h10m  1h00m  logs out
-youtube.com    30m    25m     5m  stops opening
+BUDGET       LIMIT   USED   LEFT  RESETS  WHEN OUT
+chromium       45m    45m     0m  daily   closes
+code           45m     0m    45m  daily   closes
+session      2h10m  1h10m  1h00m  daily   logs out
+youtube.com    30m    25m     5m  daily   stops opening
 ```
 
-`LIMIT` already has today's grants in it. `WHEN OUT` is the whole vocabulary of
-what running out can do: an app **closes**, the session **logs out**, a site
-**stops opening**, and a budget with nothing behind it only warns.
+`LIMIT` already has today's grants in it. `RESETS` is whether the row comes
+back at the turn of the date: `daily` does, and `never` is a pot whose `USED`
+is everything ever spent of it and whose `LIMIT` is everything it was ever given
+— [a budget that never resets](how-to-limit-the-time.md#6-a-budget-that-never-resets).
+`WHEN OUT` is the whole vocabulary of what running out can do: an app
+**closes**, the session **logs out**, a site **stops opening**, and a budget
+with nothing behind it only warns.
 
 With no argument it is about whoever ran it, by real uid rather than by `$USER`.
 On an account with no profile it runs as a plain scan of the live app scopes,

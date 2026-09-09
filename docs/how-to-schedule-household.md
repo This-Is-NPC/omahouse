@@ -140,9 +140,10 @@ Do not schedule `leave`: it is a local adjustment, and repeating it after
 consumption refills a remainder. Enrolled profiles refuse it.
 
 **A budget that never resets is shared like everything else, and it does not
-expire.** One pot for the household: what a computer spends of it comes off the
-others, and half an hour handed over on one is credit on all of them from the
-next synchronization. What differs is that a pot's statement never goes stale.
+expire.** `omahouse limit kid --session 2h --resets never` on the manager writes
+one, and a push carries it to the machines like any profile. One pot for the
+household: what a computer spends of it comes off the others, and half an hour
+handed over on one is credit on all of them from the next synchronization. What differs is that a pot's statement never goes stale.
 Its two numbers are everything the pot has ever been given and everything the
 other computers have ever spent of it, neither of which is a day — so the line
 can drop for a week and what is left is still there to spend, down to zero, out

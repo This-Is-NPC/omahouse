@@ -79,7 +79,8 @@ about it are decisions and none of them is visible from the field:
 A budget that never resets is refused on this profile. A pot is emptied by being
 spent and refilled by somebody handing over more, so on a shared login the first
 person empties it and the second sits down to a spent clock with no midnight
-coming. Use a daily one.
+coming. Use a daily one. `omahouse limit '*' … --resets never` refuses it where
+it is typed, and the file reader refuses it again if one arrives by push.
 
 `omahouse status kid` on somebody covered by it says so in as many words, because
 they will not find their own name in `profiles.json` and would go looking.

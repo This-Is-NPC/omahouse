@@ -102,9 +102,11 @@ measured the meter end to end deliberately did not exercise either.
 
 [**Profiles across a network**](profiles-across-a-network.md) is what it would
 take for one omahouse to govern many machines and many people: a lan house, an
-office, a lab. It was decided on 2026-09-08 and **none of it works on any
-machine**. One piece was built wrong on the way — a budget anchored at the login,
-which its §1 records and replaces — and no verb or screen reaches it.
+office, a lab. It was decided on 2026-09-08, and the page's own header says
+which of it has since been built: the three shapes of budget, the profile for
+anybody, the push, the stamp, the merge and the verb that asks for a pot are in;
+what is open is on that page and not here. One piece was built wrong on the way
+— a budget anchored at the login, which its §1 records and replaces.
 
 The engine is already general — [`design.md` §4](../design.md) says the same
 schema with `default: "allow"` is a focus profile for an adult — so the page is
