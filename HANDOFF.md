@@ -203,3 +203,56 @@ doing, in both directions — once promising a case that did not work, once
 denying one that had started working twenty minutes earlier. If you change what
 a pot does, that page and [`docs/design.md`](docs/design.md) §12 both have to
 move with it.
+
+---
+
+# 2026-09-09
+
+Written at the end of the day, on `spike/omakure-core`, still unpushed. The
+rules above held. `mise run verify` is green and both two-machine VM cases pass.
+
+## What changed
+
+- **The merge classifies by the rules, not the stamp** (`fix(cli)`). `kindOf`
+  compared whole documents, so a pushed copy -- restamped on arrival by the node
+  -- read as `changed` forever. It now compares `withoutTheStamp()`, as
+  `stampWhatChanged` always did. Decided by the coordinator on the owner's
+  behalf; the table still shows who wrote each copy and when.
+- **A verb writes `resets`** (`feat(cli)`): `omahouse limit <user>
+  --session|--budget|--site … --resets daily|never`. Absent is daily and never
+  written into the file; an existing budget keeps its shape, the way it keeps
+  `onExhausted`; the profile for anybody is refused a pot where it is typed.
+  `profile show` and `status` grew a `RESETS` column on every row, and
+  `profile show`'s `A DAY` header became `LIMIT`. Not on `allow --limit`: that
+  is sugar for the common case.
+- **The window asks for a pot** (`feat(studio)`): `p` on the today view, through
+  `limit --resets`, restating the profile's own number. A pot's row says
+  `never resets`; `m` on it asks for minutes in all. Three today-view pictures
+  regenerated.
+- **`day` carries a pot into a morning nobody wrote** (`fix(cli)`). Found by
+  reading the source before writing the VM case: `day` used `readLedger` while
+  every other verb about now used `readDay`, so an idle machine reported a pot
+  as untouched after midnight and the household's next statement was refused
+  for consumption moving backwards, every cycle. Today now goes through
+  `readDay`; `--date` still reads a past day as written.
+- **`vm/cases/a_shared_pot.py`** (`test(vm)`): poc + dad, PASS in 109s (178s
+  with provisioning). 300s spent on poc reached dad's balance in 2s (7s on the
+  second run). Seen red with the `day` fix reverted, at the morning-after step.
+  `a_battery_schedule_shares_one_balance` still passes (198s; 9s trip).
+
+## Not seen red
+
+- In `check_a_pot_survives_a_day_nobody_has_written_yet`, the new assertion
+  that `day --date <past>` still exits 2 was already true before the fix; it
+  guards the carry from spreading to past days and was not made to fail.
+
+## What is open
+
+1. **`docs/not-built/README.md`** was stale before today ("none of it works on
+   any machine"); only the paragraph made wronger by this session was touched.
+   The rest of that page still describes the design as unstarted.
+2. **Nothing is pushed.** Same as before.
+3. The push in `a_shared_pot` travels over the console API exactly as
+   `omahouse-sync.py` does, but the manager-side driver for a push is still a
+   person typing `profile merge --keep` and cueing `omahouse-profile-push.py`;
+   there is no Battery script that does the two together.
