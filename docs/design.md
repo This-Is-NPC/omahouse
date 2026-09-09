@@ -1704,4 +1704,9 @@ The Battery's `.scripts/test-sync.py` uses real CLI processes with disposable
 file roots for retries, partial delivery, readback, offline peers and overlap.
 The VM case `a_battery_schedule_shares_one_balance` exercises actual
 Omakure scheduled history, paired HTTP transport, repeated runs, restart, an
-offline machine and a subsequent grant in two disposable guests.
+offline machine and a subsequent grant in two disposable guests. `a_shared_pot`
+does the same for a pot: asked for on the manager with `limit --resets never`,
+pushed through the stage over the console API, the merge calling the two copies
+the same under two stamps, 300s spent on one machine coming off the other's
+balance in 2s and 7s on two runs with the credit unchanged, and a turn of the
+date on the spending machine that refills nothing and loses nothing.

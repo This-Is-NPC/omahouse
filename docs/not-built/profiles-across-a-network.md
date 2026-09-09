@@ -583,6 +583,26 @@ different sums to report and to read back.
     changing its shape, and `p` on the today view turns a budget into a pot and
     back. *cli, studio*
 
+18. **Done, and measured.** **Two real machines share one pot.** The VM case
+    `a_shared_pot` (`vm/run.sh --case a_shared_pot`, `poc` and `dad`) asks for
+    the pot on the manager with the verb, pushes it over the console API
+    through the stage against the copy the manager collected, and the merge
+    afterwards calls the two copies `same` under two stamps. Enrolled, both
+    machines are told the same 7200s credit and read the same balance. **300s
+    spent on one machine came off the other's balance in 2s on the first run
+    and 7s on the second** -- the case does not choose where in the ten-second
+    cycle it starts -- with the credit unchanged, 7200s left becoming 6900s.
+    Then the date is turned on the spending machine (its ledger renamed to
+    yesterday and today left with no file, the clock untouched so the
+    scheduler is not measuring its own lie): the machine still reads 300s
+    used and 6900s left, the document it reports still carries the pot, and a
+    scheduled cycle later the house reads exactly what it read before. PASS in
+    109s, 178s with provisioning, on 2026-09-09. **The case was seen red first
+    for a defect it found before it ran**: `omahouse day` read today's file
+    plainly, so on that morning it reported the pot untouched and the
+    manager's next statement was refused for consumption moving backwards;
+    with that fix reverted the case fails at exactly that step. *tests, cli*
+
 **Omakure does not change.** It is the wire, and `collect` already travels on it.
 **The browser extension does not change.** A site budget uses the same machinery
 as an app budget, so a credit reaches it for free.
