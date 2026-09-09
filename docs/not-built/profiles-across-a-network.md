@@ -213,7 +213,14 @@ being offline, and that property is why it was chosen.
 ### The rule this page takes instead
 
 **The pool is the person's, the record of it lives at the manager, and a machine
-asks.** An hour is an hour wherever they sit. Forty minutes at one computer leave
+asks.** An hour is an hour wherever they sit.
+
+> **This does not work yet for a credit, and §7 step 16 is why.** A budget that
+> never resets is spent where it is spent: the plan the manager issues is built
+> out of days, and a pot has no day, so nothing a pot spends reaches the other
+> machines. Until that step is written, a pot is the machine's and not the
+> household's — and it fails towards giving time away rather than withholding it,
+> which is the direction nobody notices. Forty minutes at one computer leave
 twenty at the next.
 
 A machine does not receive a portion in the morning and does not hold the
@@ -523,18 +530,31 @@ different sums to report and to read back.
     the reason. *docs*
 11. **Replace division with asking.** No morning portion. The manager holds the
     balance and a machine reads it. *core, cli*
-12. **Report while spending.** The watch loop that already debits per tick sends
-    what it spent in the same pass, so the manager is a few seconds behind and
-    never a day. *sys*
+12. **Superseded.** ~~Report while spending, from the watch loop.~~ The report
+    rides the cued script instead, which is the section below and needs nothing
+    of the watch loop. Kept struck out rather than deleted, because sending from
+    the loop is the obvious idea and somebody will have it again. *nothing*
 13. **The Battery changes job.** From dividing once a day to carrying the report
     and the balance at the counter's cadence, through a wrapper that holds the
     schedule. The scripts themselves need no change. *omahouse-battery*
 14. **Spend the cache down.** A machine out of contact keeps spending the balance
     it last read, to zero, and reports when it can. No timeout and no ceiling.
     *core, sys*
-15. **The downstream readers follow.** omastore learns the fallback profile; the
-    Battery refuses a credit that never resets instead of dividing it wrongly.
-    *omastore, omahouse-battery*
+15. **Half done, and the other half was the wrong instruction.** omastore learned
+    the fallback profile. The Battery was told to **refuse** a credit rather than
+    divide it, and that was written when the manager handed out portions — with a
+    balance there is nothing to divide, and refusing would kill the case this page
+    exists for. *omastore*
+
+16. **The plan has to carry a pot, and today it cannot.** This is the piece that
+    makes the lan house work, and it is not built. `planAllocations` sums the
+    daily counter, which is zero for any budget that never resets, so `elsewhere`
+    comes out zero on every machine and the credit is rebuilt each morning from
+    the daily number. The effect is worse than having no household: **refills
+    crossed between computers and spending did not**, so two machines were each
+    told the whole pot and each of its refills. The data is already there — a
+    collected day is a whole ledger and carries what a pot has spent — and what
+    is missing is the plan asking for it. *core, cli*
 
 **Omakure does not change.** It is the wire, and `collect` already travels on it.
 **The browser extension does not change.** A site budget uses the same machinery
