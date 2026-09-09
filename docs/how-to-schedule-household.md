@@ -105,6 +105,16 @@ remains in force until the local date changes — which means a household that
 stops reporting goes on spending a balance nobody is updating. Disabling a
 schedule neither removes profiles nor restores standalone limits.
 
+Gathering profiles can be scheduled the same way, with `--gather`: a second
+locally owned wrapper, on its own cadence, that asks every machine what rules
+it has and files each answer for `omahouse profile merge`. Schedule it because
+a merge table that is only as fresh as the last time somebody remembered to run
+the gathering lies by omission — a profile an administrator fixed by hand on a
+machine last week sits there unlisted, and *nothing to decide* is the ordinary
+answer, so the table never looks wrong. Pushing a decision back is never
+scheduled and must not be: it changes a household's rules, so it stays a verb a
+person types.
+
 ## Operate and inspect
 
 ```bash
