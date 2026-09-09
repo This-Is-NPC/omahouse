@@ -287,6 +287,16 @@ Window {
             rows.push({ id: "grant", key: "+", hint: "more today",
                         label: "more time today for this budget",
                         usable: row !== null && row.kind === "budget" })
+            // A pot or an allowance. Only where there is a number to keep,
+            // because a budget with no limit has nothing for the turn of the
+            // date to empty, and `limit` wants the number said again.
+            rows.push({ id: "pot", key: "p",
+                        hint: row && row.pot ? "resets daily" : "never resets",
+                        label: row && row.pot
+                               ? "let this budget reset daily again"
+                               : "make this budget a pot that never resets",
+                        usable: row !== null && row.kind === "budget"
+                                && row.limited === true })
         }
         return rows
     }
@@ -489,9 +499,17 @@ Window {
             win.target = row.id
             win.targetKind = row.kind
             const aSite = row.kind === "site" || row.site === true
+            // A pot is not a day. The title and the words change with the
+            // shape, and the number written keeps the shape: `limit` leaves
+            // `resets` alone unless it is said.
             prompt.ask("minutes",
-                       (aSite ? "Minutes a day on " : "Minutes a day for ") + win.target,
-                       aSite
+                       (row.pot === true ? "Minutes in all for "
+                        : aSite ? "Minutes a day on " : "Minutes a day for ") + win.target,
+                       row.pot === true
+                       ? "45m, 2h. This budget never resets, so this is everything it "
+                         + "has until somebody hands over more; a new number keeps it "
+                         + "a pot."
+                       : aSite
                        // The crossing of docs/design.md §5.2, said where the
                        // number is being decided: a site is billed only where
                        // the browser and the screen agree, so the limit somebody
@@ -511,6 +529,21 @@ Window {
                        "10m, 1h. It goes into today's ledger and expires with it, and it "
                        + "adds to the limit rather than replacing it.",
                        "+", "", false)
+        } else if (id === "pot") {
+            if (row === null || row.limited !== true)
+                return
+            // The number said again as it is written in the profile, because
+            // `limit` is where a budget's shape is written and it takes the
+            // number with the shape; `daily` is that number and not what
+            // today's grants have made of it, for the reason `m` opens with
+            // it. Which of the three shapes, carried on the row and never
+            // inferred from the id, as `m` does.
+            const shape = row.session ? ["--session", row.daily]
+                        : row.site === true ? ["--site", row.id + "=" + row.daily]
+                                            : ["--budget", row.id + "=" + row.daily]
+            Admin.run(row.pot ? "reset daily again" : "never reset",
+                      ["limit", person.user].concat(shape)
+                          .concat(["--resets", row.pot ? "daily" : "never"]))
         } else if (id === "drop") {
             if (row === null)
                 return
@@ -549,8 +582,12 @@ Window {
                        person.incognitoDenied ? "--allow" : "--deny"])
         } else if (id === "day") {
             prompt.ask("day", "How long is " + person.user + "'s day?",
-                       "2h, 90m. This is the budget whose selector is everything, and it "
-                       + "ends the session when it runs out.",
+                       person.hasSessionBudget && person.session.pot === true
+                       ? "2h, 90m. This session never resets, so this is everything it "
+                         + "has until somebody hands over more; a new number keeps it a "
+                         + "pot."
+                       : "2h, 90m. This is the budget whose selector is everything, and it "
+                         + "ends the session when it runs out.",
                        "", person.hasSessionBudget ? (person.session.daily || "") : "", false)
         }
     }
@@ -1333,6 +1370,8 @@ Window {
                                     quiet: true
                                     text: programRow.app.limited
                                           ? programRow.app.ending + " when the time is up"
+                                            + (programRow.app.pot === true
+                                               ? " · never resets" : "")
                                           : "no limit of its own — it spends the day's total"
                                 }
                             }
@@ -1477,6 +1516,8 @@ Window {
                                     text: todayRow.line.limited
                                           ? todayRow.line.spent + " spent · "
                                             + todayRow.line.ending + " when it runs out"
+                                            + (todayRow.line.pot === true
+                                               ? " · never resets" : "")
                                           : todayRow.line.spent + " spent · no limit"
                                 }
                                 // The house, on the machine that manages it.

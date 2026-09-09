@@ -659,6 +659,25 @@ void TestStudio::theWholeJobOnTheKeyboard()
     const QVariantMap session = julia.value(QStringLiteral("session")).toMap();
     QCOMPARE(session.value(QStringLiteral("left")).toString(), QStringLiteral("2h10m"));
     QCOMPARE(session.value(QStringLiteral("granted")).toString(), QStringLiteral("10m"));
+    QCOMPARE(session.value(QStringLiteral("resets")).toString(), QStringLiteral("daily"));
+
+    // And a pot, from the same row. `p` turns the allowance into a budget that
+    // never resets and back, through `limit --resets`, and the number written
+    // in the profile goes with it unchanged -- `2h`, not the `2h10m` today's
+    // grant has made of it, because a grant made for one day must not become
+    // the rule for every day.
+    key('p');
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    QVariantMap pot = personNamed(QStringLiteral("tstjulia")).value(QStringLiteral("session")).toMap();
+    QCOMPARE(pot.value(QStringLiteral("resets")).toString(), QStringLiteral("never"));
+    QVERIFY(pot.value(QStringLiteral("pot")).toBool());
+    QCOMPARE(pot.value(QStringLiteral("daily")).toString(), QStringLiteral("2h"));
+    key('p');
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    pot = personNamed(QStringLiteral("tstjulia")).value(QStringLiteral("session")).toMap();
+    QCOMPARE(pot.value(QStringLiteral("resets")).toString(), QStringLiteral("daily"));
+    QVERIFY(!pot.value(QStringLiteral("pot")).toBool());
+    QCOMPARE(pot.value(QStringLiteral("daily")).toString(), QStringLiteral("2h"));
 
     // Not one pointer event was sent in this test.
 }

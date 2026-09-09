@@ -221,6 +221,18 @@ The `+` on the left is drawn by the field and is not in it. On a live session th
 keystroke that opened the sheet lands in the field as well, which is
 [defect 5](what-does-not-work.md#5-the-key-that-opens-more-time-today-lands-in-the-field).
 
+`p` is whether the budget under the cursor comes back tomorrow. It turns an
+allowance into a pot that **never resets** — two hours are two hours until
+somebody hands over more, whatever the clock says and however often somebody
+logs in — and turns a pot back into an allowance, through `omahouse limit
+--resets`, with the number written in the profile said again unchanged. A pot's
+row says `never resets` after what happens when it runs out, `m` on it asks
+for *minutes in all* rather than minutes a day, and a new number keeps it a
+pot: whether a budget resets is a decision somebody made once, like what it
+does when it runs out. It is on the today view only, because that is the one
+list every budget is on, and only on a row with a number, since a budget with
+no limit has nothing for the turn of the date to empty.
+
 # 5. Saying which sites open
 
 `4`, or the **sites** chip. **A view of its own rather than rows folded into the

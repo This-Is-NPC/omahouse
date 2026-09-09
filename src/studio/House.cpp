@@ -278,6 +278,11 @@ QVariantMap clockOf(const Profile &profile, const Budget &budget, const Ledger &
     clock.insert(QStringLiteral("running"), running);
     clock.insert(QStringLiteral("onExhausted"), onExhaustedName(budget.onExhausted));
     clock.insert(QStringLiteral("ending"), spellExhausted(budget.onExhausted));
+    // Whether the turn of the date empties it. Carried as the word the file
+    // uses and as the question every row asks of it, so the QML never spells
+    // `never` on its own.
+    clock.insert(QStringLiteral("resets"), resetsName(budget.resets));
+    clock.insert(QStringLiteral("pot"), budget.carriesOver());
     return clock;
 }
 
@@ -297,6 +302,8 @@ QVariantMap noClock(int spentSeconds)
     clock.insert(QStringLiteral("left"), QString());
     clock.insert(QStringLiteral("exhausted"), false);
     clock.insert(QStringLiteral("running"), false);
+    clock.insert(QStringLiteral("resets"), resetsName(Resets::Daily));
+    clock.insert(QStringLiteral("pot"), false);
     clock.insert(QStringLiteral("onExhausted"), QString());
     clock.insert(QStringLiteral("ending"), QString());
     return clock;
