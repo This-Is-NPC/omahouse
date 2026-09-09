@@ -541,6 +541,10 @@ A budget that is already there gets the new number and keeps everything else: wh
 
 A budget can be written for an app no rule names. That is a program somebody wants a number for at the end of the day, and it is a legitimate thing to ask for.
 
+**`--resets never` makes it a pot rather than an allowance**, for any of the three shapes: two hours are two hours until somebody hands over more, and the turn of the date, a logout and a walk to another computer give none of them back -- `docs/design.md` §2. `--resets daily` is what a budget means when it says nothing, so it is never written into the file; absent, a new budget is daily and a budget that is already there keeps whatever it was, for the reason it keeps what it does when it runs out. The line printed back says which it is: `2h a day` is an allowance, `2h in all` is a pot. `profile show` and `status` say it in a `RESETS` column on every row.
+
+**It is refused on the profile for anybody.** That profile is shared, so a pot on it is emptied once by the first person to sit down and never refilled -- `never` is what took the midnight away. The file reader makes the same refusal, and it is made here as well so the person typing it is told why rather than shown a profiles.json that will not read.
+
 ### Arguments
 - **`<user>`**
 
@@ -548,6 +552,7 @@ A budget can be written for an app no rule names. That is a program somebody wan
 - **`--session <duration>`** — The whole session: 2h
 - **`--budget <id>=<duration>`** — One budget by id: minecraft=45m
 - **`--site <domain>=<duration>`** — One site by domain: youtube.com=30m
+- **`--resets <daily|never>`** — Whether the clock goes back to zero at the turn of the date: daily, or never
 
 ## `omahouse grant`
 

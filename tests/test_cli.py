@@ -706,13 +706,13 @@ def check_status_with_a_profile(box):
     # The balance, with the ten minutes an operator granted inside the limit:
     # 120m + 10m against 4210s spent leaves 3590s.
     assert row_for(shown.stdout, "session", after="BUDGET") == \
-        ["session", "2h10m", "1h10m", "59m", "logs out"]
+        ["session", "2h10m", "1h10m", "59m", "daily", "logs out"]
     # 45m of 45m: out, and what happens when it is.
     assert row_for(shown.stdout, "chromium", after="BUDGET") == \
-        ["chromium", "45m", "45m", "0m", "closes"]
+        ["chromium", "45m", "45m", "0m", "daily", "closes"]
     # A budget with no dailyMinutes counts and never runs out.
     assert row_for(shown.stdout, "code", after="BUDGET") == \
-        ["code", "—", "0m", "—", "never runs out"]
+        ["code", "—", "0m", "—", "daily", "never runs out"]
 
 
 def check_status_json(box):
@@ -996,8 +996,8 @@ def check_profile_show(box):
     assert row_for(shown.stdout, "grace") == ["grace", "20s"]
     assert "10m, 5m, 1m left" in shown.stdout
     assert row_for(shown.stdout, "allow") == ["allow", "chromium"]
-    assert row_for(shown.stdout, "session") == ["session", "*", "2h00m", "logs out"]
-    assert row_for(shown.stdout, "code") == ["code", "code", "—", "never runs out"]
+    assert row_for(shown.stdout, "session") == ["session", "*", "2h00m", "daily", "logs out"]
+    assert row_for(shown.stdout, "code") == ["code", "code", "—", "daily", "never runs out"]
 
     # Wrapped the way profiles.json wraps, and not the bare profile: these are
     # the bytes another machine takes in, and the envelope is what carries the
@@ -1120,8 +1120,8 @@ def check_a_profile_from_nothing_to_read_back(box):
     # And it reads back through the verbs that were written before it existed.
     shown = box.run("profile", "show", "julia")
     assert shown.returncode == 0, shown.stderr
-    assert row_for(shown.stdout, "session") == ["session", "*", "2h00m", "logs out"]
-    assert row_for(shown.stdout, "chromium") == ["chromium", "chromium", "45m", "closes"]
+    assert row_for(shown.stdout, "session") == ["session", "*", "2h00m", "daily", "logs out"]
+    assert row_for(shown.stdout, "chromium") == ["chromium", "chromium", "45m", "daily", "closes"]
     assert json.loads(box.run("--json", "profile", "show", "julia").stdout)["profiles"] \
         == [profile]
     assert row_for(box.run("profile", "list").stdout, "julia")[:5] == \
@@ -1255,6 +1255,108 @@ def check_a_pot_survives_a_day_nobody_has_written_yet(box):
     # Which is what the answer says: two and a half hours, plus ten, less the
     # hour already spent.
     assert "1h40m left today" in given.stdout, given.stdout
+
+
+def check_a_budget_can_be_asked_never_to_reset(box):
+    """The verb that writes a pot, and the three things it must not do.
+
+    `resets: never` was read and honoured by the engine for a day before
+    anything could write it, so a pot arrived only in a file somebody edited by
+    hand or a manager pushed. It is an option on `limit`, because `limit` is
+    where a budget's shape is written and every one of its three shapes can be
+    a pot. Absent means daily and is not written into the file; a budget that
+    is already there keeps what it had, the way it keeps what it does when it
+    runs out; and the profile for anybody is refused a pot where it is typed
+    and not only where the file is read.
+    """
+    # Seeded and not written through `profile add`: whoever runs this suite
+    # is an administrator, and the verb refuses to fiscalise one by accident.
+    # A profile with no budgets, so that every budget below is one this case
+    # wrote.
+    document = profile_document()
+    document["profiles"][0]["budgets"] = []
+    box.write_profiles(document)
+
+    def profile():
+        return json.loads((box.config / "profiles.json").read_text())["profiles"][0]
+
+    pot = box.run("limit", USER, "--session", "2h", "--resets", "never")
+    assert pot.returncode == 0, pot.stderr
+    assert "never resets" in pot.stdout, pot.stdout
+    assert "a day" not in pot.stdout, pot.stdout
+    assert profile()["budgets"] == [
+        {"id": "session", "match": ["*"], "dailyMinutes": 120, "resets": "never",
+         "onExhausted": "logout"},
+    ], profile()
+    # Stamped as every other write is: who, and when.
+    assert profile()["writtenBy"] == USER, profile()
+    assert profile()["writtenAt"].startswith(TODAY.isoformat()), profile()
+
+    # Absent is daily, and daily is not written into the file.
+    daily = box.run("limit", USER, "--budget", "code=1h")
+    assert daily.returncode == 0, daily.stderr
+    assert "a day" in daily.stdout, daily.stdout
+    assert profile()["budgets"][1] == \
+        {"id": "code", "match": ["code"], "dailyMinutes": 60, "onExhausted": "close"}, profile()
+
+    # A new number keeps the pot a pot. Whether a budget resets is the same
+    # kind of decision as what it does when it runs out, and a new limit is not
+    # a reason to take either back.
+    again = box.run("limit", USER, "--session", "3h")
+    assert again.returncode == 0, again.stderr
+    assert "never resets" in again.stdout, again.stdout
+    assert profile()["budgets"][0]["resets"] == "never", profile()
+    assert profile()["budgets"][0]["dailyMinutes"] == 180, profile()
+
+    # A site can be a pot too: the same noun with the other selector.
+    site = box.run("limit", USER, "--site", "youtube.com=30m", "--resets", "never")
+    assert site.returncode == 0, site.stderr
+    assert profile()["budgets"][2]["resets"] == "never", profile()
+
+    # `profile show` and `status` both say which, on every row.
+    shown = box.run("profile", "show", USER)
+    assert row_for(shown.stdout, "session") == \
+        ["session", "*", "3h00m", "never", "logs out"], shown.stdout
+    assert row_for(shown.stdout, "code") == \
+        ["code", "code", "1h00m", "daily", "closes"], shown.stdout
+    live = box.run("status", USER)
+    assert live.returncode == 0, live.stderr
+    session = row_for(live.stdout, "session", after="BUDGET")
+    assert session[4:] == ["never", "logs out"], live.stdout
+    assert row_for(live.stdout, "code", after="BUDGET")[4:] == ["daily", "closes"], live.stdout
+    document = json.loads(box.run("--json", "status", USER).stdout)
+    assert {b["id"]: b["resets"] for b in document["budgets"]} == \
+        {"session": "never", "code": "daily", "youtube.com": "never"}, document
+
+    # Back to daily, said in so many words, and the word leaves the file.
+    back = box.run("limit", USER, "--session", "2h", "--resets", "daily")
+    assert back.returncode == 0, back.stderr
+    assert "a day" in back.stdout, back.stdout
+    assert "resets" not in profile()["budgets"][0], profile()
+
+    # Anything else is refused and told what the two words are.
+    weekly = box.run("limit", USER, "--session", "2h", "--resets", "weekly")
+    assert weekly.returncode == 1, weekly.stdout
+    assert "daily or never" in weekly.stderr, weekly.stderr
+
+    # And it belongs to `limit` alone. `allow --limit` is sugar for the common
+    # case, and a pot is not it.
+    sugar = box.run("allow", USER, "chromium", "--limit", "45m", "--resets", "never")
+    assert sugar.returncode == 1, sugar.stdout
+    assert "takes no --resets" in sugar.stderr, sugar.stderr
+
+    # The profile for anybody is shared, and a pot on a shared login is emptied
+    # once by the first person and never refilled. Refused where it is typed,
+    # naming the cause, with the file left exactly as it was.
+    assert box.run("profile", "add", anybody(), "--name", "Whoever sits here").returncode == 0
+    before = (box.config / "profiles.json").read_text()
+    refused = box.run("limit", anybody(), "--session", "2h", "--resets", "never")
+    assert refused.returncode == 1, refused.stdout
+    assert "never resets" in refused.stderr, refused.stderr
+    assert "shared" in refused.stderr, refused.stderr
+    assert (box.config / "profiles.json").read_text() == before
+    # A daily one is what a shared login takes, and it is not refused.
+    assert box.run("limit", anybody(), "--session", "2h").returncode == 0
 
 
 def check_allow_warns_about_what_is_really_inside(box):
@@ -4049,6 +4151,7 @@ def main():
         check_the_removal_leaves_the_other_program_its_own_unit,
         check_the_reading_verbs_write_nothing,
         check_a_pot_survives_a_day_nobody_has_written_yet,
+        check_a_budget_can_be_asked_never_to_reset,
     ]
     for case in cases:
         # A machine of its own per case: a profiles.json one case wrote is a

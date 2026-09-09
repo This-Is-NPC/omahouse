@@ -114,6 +114,13 @@ struct Options {
     /// Minecraft are the same thing an operator is doing -- docs/design.md §2's
     /// Budget with the other kind of selector.
     QString site;
+    /// Whether the budget `limit` is writing goes back to zero at the turn of
+    /// the date, or never does. Only `limit` takes it, because it is a fact
+    /// about the budget's shape and `limit` is where a budget's shape is
+    /// written; `allow --limit` is sugar for the common case, and a pot is not
+    /// it. Absent, a new budget is daily and an existing one keeps what it had,
+    /// which is the discipline `limit` already applies to `onExhausted`.
+    QString resets;
     QString interval;
     /// The Omakure node identity of a machine, and where its wire answers.
     /// Both are optional: a household can write a computer down before it is
@@ -232,6 +239,7 @@ bool parseOptions(const QStringList &args, Options *options, QStringList *positi
         {"--session", &Options::session, "a length of time, like 2h"},
         {"--budget", &Options::budget, "an id and a length of time, like minecraft=45m"},
         {"--site", &Options::site, "a domain and a length of time, like youtube.com=30m"},
+        {"--resets", &Options::resets, "daily or never"},
         {"--interval", &Options::interval, "a number of seconds, like 2"},
         {"--node", &Options::node, "an Omakure node id, like omk1_1c6eeda142"},
         {"--at", &Options::at, "where its wire answers, like 192.168.1.20:7879"},
@@ -616,6 +624,7 @@ struct Balance {
     int grantedSeconds = 0;
     int usedSeconds = 0;
     int leftSeconds = 0;
+    Resets resets = Resets::Daily;
     OnExhausted onExhausted = OnExhausted::Warn;
 
     bool hasLimit() const { return limitSeconds >= 0; }
@@ -631,6 +640,7 @@ QVector<Balance> balancesOf(const Profile &profile, const Ledger &ledger)
         Balance balance;
         balance.id = budget.id;
         balance.match = budget.match;
+        balance.resets = budget.resets;
         balance.onExhausted = budget.onExhausted;
         balance.grantedSeconds = ledger.grantedSeconds(budget.id);
         balance.usedSeconds = spentSeconds(budget, ledger);
@@ -653,12 +663,13 @@ void printBalances(const QVector<Balance> &balances)
             balance.hasLimit() ? humanDuration(balance.limitSeconds) : kNothing,
             humanDuration(balance.usedSeconds),
             balance.hasLimit() ? humanDuration(balance.leftSeconds) : kNothing,
+            resetsName(balance.resets),
             balance.hasLimit() ? whenOut(balance.onExhausted) : QStringLiteral("never runs out"),
         });
     }
     printTable({QStringLiteral("BUDGET"), QStringLiteral("LIMIT"), QStringLiteral("USED"),
-                QStringLiteral("LEFT"), QStringLiteral("WHEN OUT")},
-               rows, {false, true, true, true, false});
+                QStringLiteral("LEFT"), QStringLiteral("RESETS"), QStringLiteral("WHEN OUT")},
+               rows, {false, true, true, true, false, false});
 }
 
 QJsonArray balancesToJson(const QVector<Balance> &balances)
@@ -670,6 +681,7 @@ QJsonArray balancesToJson(const QVector<Balance> &balances)
             {QStringLiteral("match"), namesToJson(balance.match)},
             {QStringLiteral("usedSeconds"), balance.usedSeconds},
             {QStringLiteral("grantedSeconds"), balance.grantedSeconds},
+            {QStringLiteral("resets"), resetsName(balance.resets)},
             {QStringLiteral("onExhausted"), onExhaustedName(balance.onExhausted)},
         };
         // Null and not zero for a budget with no limit: zero left is a budget
@@ -2840,12 +2852,18 @@ int cmdProfileShow(const Globals &g, const QStringList &positionals)
         for (const Budget &budget : profile->budgets) {
             rows.append({budget.id, namesSpelled(budget.match),
                          budget.hasLimit() ? humanDuration(budget.dailyMinutes * 60) : kNothing,
+                         // Said for every row and not only for a pot, because a
+                         // column that is blank on most rows reads as a column
+                         // with no answer -- and `daily` is the answer.
+                         resetsName(budget.resets),
                          budget.hasLimit() ? whenOut(budget.onExhausted)
                                            : QStringLiteral("never runs out")});
         }
-        printTable({QStringLiteral("BUDGET"), QStringLiteral("APP"), QStringLiteral("A DAY"),
-                    QStringLiteral("WHEN OUT")},
-                   rows, {false, false, true, false});
+        // `LIMIT` and not `A DAY`: a pot's limit is not a day's, and the column
+        // beside it says which.
+        printTable({QStringLiteral("BUDGET"), QStringLiteral("APP"), QStringLiteral("LIMIT"),
+                    QStringLiteral("RESETS"), QStringLiteral("WHEN OUT")},
+                   rows, {false, false, true, false, false});
     }
 
     printWebRules(*profile, profiles.all);
@@ -4113,6 +4131,30 @@ int cmdLimit(const Globals &g, const QStringList &positionals, const Options &op
         return kUsage;
     }
 
+    // Whether the clock goes back to zero at the turn of the date. Said only
+    // when it is said: a new budget that says nothing is daily, and one that
+    // is already there keeps what it had, for the reason it keeps what it does
+    // when it runs out -- a new number is not a reason to take a decision back.
+    const bool resetsSaid = !options.resets.isEmpty();
+    Resets resets = Resets::Daily;
+    if (resetsSaid && !resetsFromName(options.resets, &resets)) {
+        fail(QStringLiteral("limit: --resets is daily or never, not '%1'").arg(options.resets));
+        return kUsage;
+    }
+    // The same refusal the file reader makes, made here so that the person
+    // typing it is told why rather than shown a profiles.json that will not
+    // read. A pot is emptied by being spent and refilled by somebody handing
+    // over more; on a login several people share, the first of them empties it
+    // and the second sits down to a spent clock with no midnight coming --
+    // because `never` is what took the midnight away.
+    if (resetsSaid && resets == Resets::Never && user == anybody()) {
+        fail(QStringLiteral("limit: a budget that never resets cannot be written for '%1', "
+                            "because the profile for anybody is shared: the first person "
+                            "to sit down would empty it and nobody would ever refill it. "
+                            "A shared login takes a daily budget.").arg(anybody()));
+        return kUsage;
+    }
+
     if (!mayWrite(QStringLiteral("limit"), paths::profilesFile(),
                   paths::configDirIsTheSystems(), g))
         return kUsage;
@@ -4128,7 +4170,7 @@ int cmdLimit(const Globals &g, const QStringList &positionals, const Options &op
     Budget *budget = budgetFor(profile, id);
     if (!budget) {
         profile->budgets.append(
-            Budget {id, {match}, selects, minutes, Resets::Daily, whenGone});
+            Budget {id, {match}, selects, minutes, resets, whenGone});
         budget = &profile->budgets.last();
     } else if (budget->selects != selects) {
         // One id, one thing. `org.freedesktop.Platform` is a scope id with dots
@@ -4142,17 +4184,27 @@ int cmdLimit(const Globals &g, const QStringList &positionals, const Options &op
                       site ? QStringLiteral("a site") : QStringLiteral("an app")));
         return kUsage;
     } else {
-        // Only the number. What a budget does when it runs out is a decision
-        // somebody made once, and a new limit is not a reason to take it back.
+        // Only the number, and the reset when it was said. What a budget does
+        // when it runs out is a decision somebody made once, and a new limit is
+        // not a reason to take it back; whether it resets is the same kind of
+        // decision, so it moves only when somebody moves it.
         budget->dailyMinutes = minutes;
+        if (resetsSaid)
+            budget->resets = resets;
     }
     if (!saveProfiles(QStringLiteral("limit"), profiles.all))
         return kUsage;
 
+    // Two sentences and not one with a word swapped, because the two shapes are
+    // different offers: an allowance comes back tomorrow and a pot does not.
     const int status2 = wrote(
         g, *profile,
-        QStringLiteral("%1: %2 %3 a day, and it %4 when the time is out.")
-            .arg(user, id, durationFromMinutes(minutes), whenOut(budget->onExhausted)));
+        budget->carriesOver()
+            ? QStringLiteral("%1: %2 %3 in all, and it never resets: it %4 when the time is "
+                             "out, and only a grant refills it.")
+                  .arg(user, id, durationFromMinutes(minutes), whenOut(budget->onExhausted))
+            : QStringLiteral("%1: %2 %3 a day, and it %4 when the time is out.")
+                  .arg(user, id, durationFromMinutes(minutes), whenOut(budget->onExhausted)));
     // Said once, here, where somebody is deciding it: the browser's policy is
     // one file for the whole machine -- docs/design.md §11 -- so a site that
     // runs out stops opening for every account on it, the operator's included.
@@ -6200,7 +6252,7 @@ int dispatch(const Globals &g, const QStringList &args)
     if (verb == QLatin1String("limit")) {
         if (!onlyTheseOptions(options,
                               {QStringLiteral("--session"), QStringLiteral("--budget"),
-                               QStringLiteral("--site")},
+                               QStringLiteral("--site"), QStringLiteral("--resets")},
                               verb))
             return kUsage;
         return cmdLimit(g, positionals, options);
