@@ -193,6 +193,15 @@ minutes left can both start spending them, and the overspend is bounded by how
 often the household reports — which is why that interval is the setting that
 matters on that page.
 
+`grant` is not the same thing and it does work here. Ten minutes handed over on
+an enrolled computer are ten minutes on it straight away: the statement says how
+much of that computer's own credit the household has already folded into the
+total, so what has been handed over since is added on top, and when the
+household does fold it in the two numbers rise together and the balance does not
+move. It is ten minutes once, whether the manager is reachable or not. What is
+still not immediate is the *other* computer, which learns about it at the next
+synchronization.
+
 `leave` remains a standalone local adjustment. It must not be repeated as a
 synchronization loop: consumption between calls would be refilled. New local
 adjustments are excluded from household credit, and enrolled profiles refuse

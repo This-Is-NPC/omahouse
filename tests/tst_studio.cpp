@@ -1737,6 +1737,66 @@ void TestStudio::fleetPanelShowsMissingMachinesAndUsesTheKeyboard()
     key(Qt::Key_Escape);
     key('h');
     QCOMPARE(root()->property("view").toInt(), 1);
+    // The two views say the same thing about this computer, and they did not.
+    // The panel worked its own row out of the household's two numbers, and a
+    // grant typed here is in neither of them until the manager next plans -- so
+    // the today view said one figure for what was left and the panel beside it
+    // said another, about the same machine, on the same screen.
+    QString error;
+    QVector<Profile> profiles;
+    QVERIFY2(readProfiles(paths::profilesFile(), &profiles, &error), qPrintable(error));
+    QCOMPARE(profiles.size(), 1);
+    QString session;
+    for (const Budget &budget : profiles.first().budgets)
+        if (budget.isSession()) session = budget.id;
+    QVERIFY(!session.isEmpty());
+
+    const QString who = profiles.first().user;
+    const QDate today = QDate::currentDate();
+    QJsonObject statement{{"credit", 7200}, {"elsewhere", 1200}, {"counted", 0}};
+    QJsonObject house;
+    for (const Budget &budget : profiles.first().budgets)
+        if (budget.hasLimit()) house.insert(budget.id, statement);
+    profiles.first().allocation = QJsonObject{{"authority", "manager"}, {"machine", "here"},
+        {"user", who}, {"date", today.toString(Qt::ISODate)}, {"revision", 1},
+        {"house", house}};
+    QVERIFY2(writeProfiles(paths::profilesFile(), profiles, &error), qPrintable(error));
+    m_house->reload();
+    settle();
+
+    const auto leftOnThisMachine = [&](const QString &budgetId) {
+        key('f');
+        for (const auto &row : root()->property("rows").toList()) {
+            const auto item = row.toMap();
+            if (item.value("name").toString() == QLatin1String("here")
+                    && item.value("id").toString() == budgetId)
+                return item.value("left").toString();
+        }
+        return QString();
+    };
+    const QString panel = leftOnThisMachine(session);
+    QVERIFY2(!panel.isEmpty(), "this computer has no row of its own in the fleet panel");
+
+    // Ten minutes handed over here, with the manager none the wiser. Both
+    // numbers move, and they move together.
+    m_admin->run("fixture", {"grant", who, "--budget", session + "=10m"});
+    QVERIFY(waitForWrite());
+    m_house->reload();
+    settle();
+    const QString afterPanel = leftOnThisMachine(session);
+    key('t');
+    QString afterToday;
+    for (const auto &entry : todayOf(who)) {
+        const auto item = entry.toMap();
+        if (item.value("id").toString() == session)
+            afterToday = item.value("left").toString();
+    }
+    QVERIFY2(!afterToday.isEmpty(), "the today view has no row for the session");
+    QCOMPARE(afterPanel, afterToday);
+    QVERIFY2(afterPanel != panel,
+             "ten minutes were handed over on this machine and the panel did not move");
+
+    key('f');
     // A subject cannot enter the operator's fleet view through its public go.
     m_admin->run("fixture", {"machine", "remove", "station-02"});
     QVERIFY(waitForWrite());
@@ -1914,16 +1974,24 @@ void TestStudio::writesTheOperatorShots()
     QVERIFY(readProfiles(paths::profilesFile(), &originalProfiles, &fleetError));
     auto enrolledProfiles = originalProfiles;
     const QString date = QDate::currentDate().toString(Qt::ISODate);
-    // The household's credit and what the other computer has spent of it, which
-    // is what a statement carries now. `station-02` has spent 40 minutes of the
-    // session, so this machine is told `elsewhere: 2400` and works out the same
-    // balance station-02 does.
-    const auto statement = [](int credit, int elsewhere) {
-        return QJsonObject{{"credit", credit}, {"elsewhere", elsewhere}};
+    // The household's credit, what the other computer has spent of it, and how
+    // much of this machine's own credit is already inside the first number.
+    // `station-02` has spent 40 minutes of the session, so this machine is told
+    // `elsewhere: 2400` and works out the same balance station-02 does.
+    //
+    // The session's credit is 7800 and not 7200 because the fixture's own day
+    // has ten minutes handed over in it, and the household has folded them in.
+    // So `counted` is 600 there and zero everywhere else -- a statement saying
+    // it had counted none of them while carrying them inside `credit` is the
+    // one shape that pays a grant twice, and a fixture that held it would put
+    // that number in a picture the documentation ships.
+    const auto statement = [](int credit, int elsewhere, int counted = 0) {
+        return QJsonObject{{"credit", credit}, {"elsewhere", elsewhere},
+                           {"counted", counted}};
     };
     QJsonObject document{{"authority", "example"}, {"machine", "here"},
         {"user", "nobody"}, {"date", date}, {"revision", 1},
-        {"house", QJsonObject{{"session", statement(7800, 2400)},
+        {"house", QJsonObject{{"session", statement(7800, 2400, 600)},
                               {"code", statement(2700, 0)},
                               {"firefox", statement(3600, 0)},
                               {"youtube.com", statement(1800, 0)}}}};
@@ -1936,6 +2004,8 @@ void TestStudio::writesTheOperatorShots()
     remote.user = QStringLiteral("nobody"); remote.date = QDate::currentDate();
     remote.addSeconds(QStringLiteral("session"), 2400);
     document.insert("machine", "station-02");
+    // station-02's own statement: the same credit, its own `elsewhere`, and
+    // nothing counted from it -- the ten minutes were handed over here.
     document.insert("house", QJsonObject{{"session", statement(7800, 4200)},
                                          {"code", statement(2700, 1500)},
                                          {"firefox", statement(3600, 3600)},

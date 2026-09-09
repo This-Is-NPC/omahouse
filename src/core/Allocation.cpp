@@ -39,12 +39,20 @@ bool validAllocation(const QJsonObject &a, QString *error)
     for (auto it = house.begin(); it != house.end(); ++it) {
         int credit = 0;
         int elsewhere = 0;
+        int counted = 0;
         const auto one = it.value().toObject();
+        // `counted` is required and not defaulted, and that is the difference
+        // between a field and a hole. Absent it would be read as a zero, which
+        // is the shape that says *the household has counted none of this
+        // machine's grants* -- so a document written by something that does not
+        // know about the field hands over every grant this machine has ever
+        // made, a second time, silently.
         if (it.key().isEmpty() || !it.value().isObject()
                 || !whole(one.value(QStringLiteral("credit")), &credit)
-                || !whole(one.value(QStringLiteral("elsewhere")), &elsewhere)) {
-            return refuse(error, QStringLiteral("a household budget is a credit and an "
-                                               "elsewhere, both nonnegative whole seconds"));
+                || !whole(one.value(QStringLiteral("elsewhere")), &elsewhere)
+                || !whole(one.value(QStringLiteral("counted")), &counted)) {
+            return refuse(error, QStringLiteral("a household budget is a credit, an elsewhere "
+                                               "and a counted, all nonnegative whole seconds"));
         }
     }
     return true;
@@ -67,8 +75,23 @@ int allowanceSeconds(const Profile &profile, const Budget &budget,
         return budget.dailyMinutes * 60 + ledger.grantedSeconds(budget.id)
             + (budget.carriesOver() ? ledger.keptGrantedFor(budget.id) : 0);
     }
-    if (profile.allocation.value(QStringLiteral("date")).toString() != date.toString(Qt::ISODate))
-        return 0;
+    // What an operator has handed over here today, which the household has not
+    // folded into its credit yet. Local adjustments are not in it -- `leave` is
+    // refused on an enrolled profile, and this is that same rule at the place
+    // the number is worked out.
+    const int handedOver = ledger.creditedSeconds(budget.id);
+    if (profile.allocation.value(QStringLiteral("date")).toString() != date.toString(Qt::ISODate)) {
+        // A day the household has said nothing about. That used to be nothing
+        // at all, and nothing an operator could type changed it -- which is the
+        // worst moment for the one verb that exists so somebody can hand over
+        // ten minutes with the manager unreachable.
+        //
+        // So it is exactly what somebody decided to hand over, and no daily
+        // number: the household's allowance is the household's to give, and a
+        // machine that has lost contact must not start issuing it. Nothing here
+        // can leak time, because the only thing that raises it is an operator.
+        return handedOver;
+    }
     // The household's credit, less what the other computers have already spent
     // of it. What is left over here is then `allowance - spent here`, which is
     // the household's balance -- so an hour is an hour wherever the person
@@ -82,8 +105,21 @@ int allowanceSeconds(const Profile &profile, const Budget &budget,
     // household reports, which is the number an operator sets.
     const auto one = profile.allocation.value(QStringLiteral("house")).toObject()
                          .value(budget.id).toObject();
+    //
+    // And a third: how much of *this machine's own* credit the household has
+    // already folded into `credit`. What an operator has handed over here since
+    // is added on top, so a grant is ten minutes the instant it is typed rather
+    // than at the next plan -- and it is ten minutes once, because the moment
+    // the household counts it, `counted` rises by the same six hundred that
+    // `credit` did and the sum does not move. By subtraction and never by
+    // comparing a grant's clock against a statement's.
+    //
+    // It makes this machine briefly more generous than the household knows,
+    // exactly as a late report of `elsewhere` does, and bounded by the same
+    // thing: how often the household reports.
+    const int fresh = qMax(0, handedOver - one.value(QStringLiteral("counted")).toInt(0));
     return qMax(0, one.value(QStringLiteral("credit")).toInt(0)
-                       - one.value(QStringLiteral("elsewhere")).toInt(0));
+                       - one.value(QStringLiteral("elsewhere")).toInt(0) + fresh);
 }
 
 bool applyAllocation(Profile *profile, const QJsonObject &d, const QDate &today, QString *error)
@@ -123,6 +159,12 @@ bool applyAllocation(Profile *profile, const QJsonObject &d, const QDate &today,
             if (house.value(key).toObject().value(QStringLiteral("elsewhere")).toInt()
                     < old.value(key).toObject().value(QStringLiteral("elsewhere")).toInt())
                 return refuse(error, QStringLiteral("household consumption moved backwards"));
+            // And `counted` the same way, for the same reason pointing the
+            // other way: a statement that unlearns what it has counted from
+            // here hands this machine every grant it has made a second time.
+            if (house.value(key).toObject().value(QStringLiteral("counted")).toInt()
+                    < old.value(key).toObject().value(QStringLiteral("counted")).toInt())
+                return refuse(error, QStringLiteral("the household unlearned what it counted"));
         }
     }
     profile->allocation = d;
@@ -223,9 +265,15 @@ bool planAllocations(const Profile &profile, const QVector<QPair<QString, Ledger
             auto doc = documents.value(day.first).toObject();
             auto house = doc.value("house").toObject();
             const qint64 elsewhere = spent - day.second.secondsFor(budget.id);
+            // What this machine's own grants contributed to `credit`, so it
+            // can tell the ones already counted from the ones it has made
+            // since. Taken from the very day the credit was summed out of, so
+            // the two cannot disagree.
+            const qint64 counted = day.second.creditedSeconds(budget.id);
             house.insert(budget.id,
                          QJsonObject{{"credit", static_cast<int>(credit)},
-                                     {"elsewhere", static_cast<int>(elsewhere)}});
+                                     {"elsewhere", static_cast<int>(elsewhere)},
+                                     {"counted", static_cast<int>(counted)}});
             doc.insert("house", house);
             documents.insert(day.first, doc);
         }

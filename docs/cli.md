@@ -38,7 +38,7 @@ The identity of a running app is its systemd scope and not the path of its execu
   - `profile show` -- the profile as `/etc/omahouse/profiles.json` holds it, including its `web` half when it has one.
   - `status` also carries `webPolicy`: the `path` of the managed policy file, `wholeMachine` (always true, and there so a reader cannot miss it), and `contents` -- the composed policy of every profile at once, or null when there should be no file on the machine at all.
   - every verb that writes a profile -- `profile add`, `profile remove`, `profile enforce`, `profile default`, `allow`, `deny`, `limit`, `web block`, `web allow`, `web incognito` -- prints the profile it wrote, or for `remove` the one it took out. So a script can write and read in one call, and the answer is the same shape `profile show` gives.
-  - `grant` -- `user`, `budget`, `minutes`, `by`, `at`, and the day's `usedSeconds`, `grantedSeconds`, `limitSeconds` and `leftSeconds` for that budget, plus `pendingAllocation` (true when household credit awaits the next successful Battery sync).
+  - `grant` -- `user`, `budget`, `minutes`, `by`, `at`, and the day's `usedSeconds`, `grantedSeconds`, `limitSeconds` and `leftSeconds` for that budget. There is no field saying the minutes are not live yet, because they are: an enrolled machine adds what an operator has handed over on top of the household's credit, and the household folds it in later without the number moving.
 
   A budget with no limit has `limitSeconds` and `leftSeconds` null rather than zero: zero left is a budget that has run out, and the two must never read the same.
 
@@ -559,6 +559,10 @@ The verb that is the difference between an operator and a form. `docs/design.md`
 
 The minutes go into the day's own ledger, `/var/lib/omahouse/<user>/<YYYY-MM-DD>.json`, and so they expire when the file does: the balance resets at the local turn of the date, and a grant that survived it would be tomorrow's time given away today. It adds to the limit rather than replacing it, and two grants add up.
 
+**A budget whose `resets` is `never` is the exception, and it is the exception the word `never` asks for.** A pot is emptied by being spent and refilled by somebody handing over more, so the turn of the date folds what was handed over into the pot's running total instead of dropping it. Dropping it left the spending the grant had paid for and took the decision away, which is worse than losing both.
+
+**On a machine enrolled in a household it lands here immediately**, and it lands once. The statement that machine holds says how much of its own credit the household has already folded into the total, so what has been handed over since is added on top -- and when the household does fold it in, that number rises by the same amount the credit does and the balance does not move. There is nothing to wait for and nothing to repeat. On a day the household has said nothing about, what an operator has handed over is the whole of the allowance: the daily number is the household's to give and a machine out of contact does not give it.
+
 Signed with the name of whoever asked. Under `pkexec` that is the person polkit authenticated and not root, because `root gave kid ten minutes` is not the line an operator wants to read back in a month.
 
 A budget the profile does not have is refused: time added to a counter the daemon never looks at would read on the report as though it had been given.
@@ -574,7 +578,7 @@ A budget the profile does not have is refused: time added to a counter the daemo
 
 - **Usage:** `omahouse leave [--session <time>] [--budget <id=time>]`
 
-Set how much remains on this machine today. Zero (0m) is supported. Writes a local adjustment, excluded from household credit. This is a manual override for standalone profiles, not a distributed synchronization protocol: repeating an old remaining balance after consumption would recharge it. Enrolled profiles use allocation apply with an absolute daily portion instead. Untagged historical grants remain operator credit because their original intent cannot be recovered.
+Set how much remains on this machine today. Zero (0m) is supported. Writes a local adjustment, excluded from household credit. This is a manual override for standalone profiles, not a distributed synchronization protocol: repeating an old remaining balance after consumption would recharge it. Enrolled profiles take their balance from the household's statement, which `allocation apply` reads, and use `grant` when somebody wants to hand over more. Untagged historical grants remain operator credit because their original intent cannot be recovered.
 
 ### Flags
 - **`--session <time>`** — What should be left of the session today

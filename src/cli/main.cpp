@@ -4267,7 +4267,6 @@ int cmdGrant(const Globals &g, const QStringList &positionals, const Options &op
         document.insert(QStringLiteral("limitSeconds"),
                         limited ? QJsonValue(limit) : QJsonValue());
         document.insert(QStringLiteral("leftSeconds"), limited ? QJsonValue(left) : QJsonValue());
-        document.insert(QStringLiteral("pendingAllocation"), !profile->allocation.isEmpty());
         printJson(document);
         return kOk;
     }

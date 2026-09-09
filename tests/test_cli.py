@@ -2727,7 +2727,8 @@ def check_the_household_balance_is_absolute_and_fails_closed(box):
     # the balance is the whole credit. The two numbers are carried separately
     # even here, because which of them a late report moves is the difference
     # between allowing a little too much and allowing a day too much.
-    assert document["house"]["session"] == {"credit": 7200, "elsewhere": 0}, document
+    assert document["house"]["session"] == {
+        "credit": 7200, "elsewhere": 0, "counted": 0}, document
     for _ in range(2):
         applied = box.run("allocation", "apply", USER, stdin=json.dumps(document))
         assert applied.returncode == 0, applied.stderr
@@ -2743,11 +2744,25 @@ def check_the_household_balance_is_absolute_and_fails_closed(box):
         assert bad.returncode == 1, bad.stdout
     granted = box.run("grant", USER, "--session", "10m", "--json")
     assert granted.returncode == 0, granted.stderr
-    assert json.loads(granted.stdout)["pendingAllocation"] is True
-    assert json.loads(granted.stdout)["leftSeconds"] == 5340
+    # The ten minutes are ten minutes here and now. They used to be nothing at
+    # all until the manager next planned, and on a machine that had lost contact
+    # they were nothing ever -- which is the worst moment for the one verb that
+    # exists so somebody can hand over time with the manager unreachable.
+    assert "pendingAllocation" not in json.loads(granted.stdout)
+    assert json.loads(granted.stdout)["leftSeconds"] == 5940
     next_plan = json.loads(box.run("allocation", "plan", USER).stdout)
     assert next_plan["documents"]["here"]["house"]["session"]["credit"] == 7800, next_plan
     assert next_plan["revision"] == 2
+    # And when the household folds those ten minutes in, they are still ten
+    # minutes. `counted` rises by the same six hundred `credit` did, so the
+    # machine stops adding its own copy on top and the balance does not move.
+    # Adding without subtracting would read 6540 here, which is the same grant
+    # paid twice.
+    issued = next_plan["documents"]["here"]
+    assert issued["house"]["session"]["counted"] == 600, issued
+    assert box.run("allocation", "apply", USER, stdin=json.dumps(issued)).returncode == 0
+    after = json.loads(box.run("status", USER, "--json").stdout)["budgets"][0]
+    assert after["leftSeconds"] == 5940, after
     # Reservations cannot be reconstructed from consumption after state loss.
     (box.state / "allocations" / USER / f"{TODAY}.json").unlink()
     refused = box.run("allocation", "plan", USER)

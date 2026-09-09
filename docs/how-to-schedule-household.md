@@ -122,11 +122,22 @@ of observations, and the balance under it is what every computer is told it may
 spend — the same remainder in each of them, which is the point and also the
 reason two of them can spend it at once.
 
-New grants are household credit. The next successful synchronization puts them
-in the credit every machine is told. The CLI and window do not promise that a
-remote computer received time merely because the grant was recorded. Do not
-schedule `leave`: it is a local adjustment, and repeating it after consumption
-refills a remainder. Enrolled profiles refuse it.
+New grants are household credit, and they are also time on the machine they
+were typed on, straight away. The statement each computer holds says how much of
+that computer's own credit the household has already folded into the total, so
+the machine adds what it has handed over since — and when the next
+synchronization folds it in, the credit and that number rise together and the
+balance does not move. A grant is ten minutes once, whether the manager is
+reachable or not.
+
+What is still not promised is that a *remote* computer has the time: a grant
+made here reaches the machine in the bedroom at the next synchronization and not
+before. On a day the household has said nothing about at all, an enrolled
+machine allows exactly what an operator has handed over and no daily number —
+the household's allowance stays the household's to give.
+
+Do not schedule `leave`: it is a local adjustment, and repeating it after
+consumption refills a remainder. Enrolled profiles refuse it.
 
 In the operator's Studio, select an account and press **f** for machines. Each
 budget shows the machine's last reported consumption, the household's credit,

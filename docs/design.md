@@ -1546,18 +1546,44 @@ a structural change when the time comes.
 
 The contract and operator setup are in
 [the household scheduling guide](how-to-schedule-household.md). `Allocation` in
-core plans and validates a **statement** per machine: two numbers per budget,
-the household's `credit` and the seconds spent `elsewhere`. Each machine's
-allowance is the difference, so what is left over there is the household's
-balance and an hour is an hour wherever the person sits.
+core plans and validates a **statement** per machine: three numbers per budget,
+the household's `credit`, the seconds spent `elsewhere`, and how much of *this*
+machine's own credit is already inside the first of them, `counted`. Each
+machine's allowance is `credit - elsewhere`, plus whatever it has handed over
+since `counted` — so what is left over there is the household's balance and an
+hour is an hour wherever the person sits.
 
-They are two numbers and not one cap because they are different kinds of fact
-and go stale differently — the same split §11's page draws between policy and
-observation. `credit` is a decision with a correct current version and may be
-lowered mid-day; `elsewhere` is consumption, only ever grows, and a statement
+They are separate numbers and not one cap because they are different kinds of
+fact and go stale differently — the same split §11's page draws between policy
+and observation. `credit` is a decision with a correct current version and may
+be lowered mid-day; `elsewhere` is consumption, only ever grows, and a statement
 reporting less than the last one is refused for the reason `collect` refuses
 it. A late report under-states `elsewhere`, so a machine allows a little too
 much rather than too little.
+
+`counted` is what makes `grant` work on an enrolled machine, and it had to
+exist. The allowance was `credit - elsewhere` and a grant is in neither number,
+so handing over ten minutes wrote the ledger, printed the same balance back and
+changed nothing until the manager next planned — and on a machine that had lost
+contact, never. Adding the grant on top was not available either: the manager
+folds every grant it collects into `credit`, so the machine would count its own
+twice the moment the next statement landed. So the statement says how much of
+this machine's credit it has already folded in, taken from the very day the
+credit was summed out of, and the machine adds the rest. Exactly once, by
+subtraction and never by comparing a grant's clock against a statement's. It
+moves in one direction like `elsewhere` and is refused for going backwards for
+the mirror-image reason: a statement that unlearns what it counted hands this
+machine every grant it has made a second time.
+
+It is required in a document rather than defaulted, which is the difference
+between a field and a hole: absent, it reads as *the household has counted none
+of this machine's grants*, and every grant ever made here is handed over again.
+
+**A day the household has said nothing about is not a day with no operator.**
+The allowance there is exactly what somebody has handed over and no daily
+number: the household's allowance stays the household's to give, and a machine
+that has lost contact must not start issuing it. That cannot leak time, because
+the only thing that raises it is an operator deciding to.
 
 **This is not exclusive.** Two computers told there are thirty minutes left can
 both spend them, bounded by the reporting interval and nothing else. The

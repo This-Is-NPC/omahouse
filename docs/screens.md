@@ -492,7 +492,16 @@ a race the offscreen run does not lose.
 
 Select an account as the operator and press **f**. Each row is one limited
 budget on one computer: that computer's consumption, the household's credit and
-what is left of it, followed by the observation state and timestamp. **/**
+what is left of it, followed by the observation state and timestamp.
+
+**This computer's own row is worked out the way the today view works it out**,
+and not from the two household numbers beside it. Time handed over here with
+`grant` is in neither of them until the manager next plans, so a panel that read
+only those would say one figure for what is left and the today view another,
+about the same computer, on the same screen. Every other row is the household's
+view, because that is all this machine knows about them — a grant made in the
+bedroom is in nothing here until that computer reports, and the timestamp at the
+end of the row is what says how old that is. **/**
 filters these rows, **j/k** moves, **+** records household credit, and **h**
 returns to people. The same commands are clickable; the subject face cannot
 enter this view.

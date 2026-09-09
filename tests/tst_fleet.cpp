@@ -119,6 +119,155 @@ private slots:
         QVERIFY(!planAllocations(profile, {{"here", a}, {"b", b}}, corrupt, now, &refused, &error));
     }
 
+    // Handing over ten minutes is the one verb that has to work while nobody is
+    // listening, and on an enrolled profile it did nothing at all. The balance
+    // came from the statement -- credit less what the others spent -- and a
+    // grant was in neither number, so `grant` wrote the ledger, printed the
+    // same balance back and changed nothing. The minutes arrived at the next
+    // plan, if there was one.
+    //
+    // The reason it could not simply be added is that the manager folds every
+    // grant it collects into `credit`, so a machine adding its own on top would
+    // count them twice the moment the next statement landed. So the statement
+    // says how much of *this machine's* credit it has already counted, and what
+    // is added here is the rest. Exactly once, by subtraction and not by
+    // comparing clocks.
+    void aGrantTakesEffectHereBeforeTheHouseholdHearsAboutIt()
+    {
+        Profile profile;
+        profile.user = "kid";
+        profile.allocation = QJsonObject{{"authority", "manager"}, {"machine", "here"}};
+        Budget budget;
+        budget.id = "session"; budget.match = {QStringLiteral("*")}; budget.dailyMinutes = 120;
+        budget.onExhausted = OnExhausted::Logout;
+        profile.budgets << budget;
+        const QDateTime now(QDate(2026, 9, 7), QTime(12, 0), QTimeZone::UTC);
+
+        Ledger a, b;
+        a.user = b.user = "kid"; a.date = b.date = now.date();
+        a.observedAt = b.observedAt = now;
+        a.allocation = profile.allocation;
+        b.allocation = QJsonObject{{"authority", "manager"}, {"machine", "b"}};
+        a.addSeconds("session", 1800); b.addSeconds("session", 1800);
+
+        QJsonObject plan;
+        QString error;
+        QVERIFY2(planAllocations(profile, {{"here", a}, {"b", b}}, {}, now, &plan, &error),
+                 qPrintable(error));
+        const auto documents = plan.value("documents").toObject();
+        QVERIFY2(applyAllocation(&profile, documents.value("here").toObject(), now.date(), &error),
+                 qPrintable(error));
+        // Two hours, half an hour spent on each machine: an hour left here.
+        QCOMPARE(allowanceSeconds(profile, budget, a, now.date()) - a.secondsFor("session"), 3600);
+
+        // Nothing has been counted from here yet, and the statement says so.
+        QCOMPARE(documents.value("here").toObject().value("house").toObject()
+                     .value("session").toObject().value("counted").toInt(-1), 0);
+
+        // Ten minutes handed over on this machine, with the manager none the
+        // wiser. It is ten minutes *here*, now.
+        a.grants.append(Grant{now, "operator", "session", 10});
+        QCOMPARE(allowanceSeconds(profile, budget, a, now.date()) - a.secondsFor("session"), 4200);
+
+        // And when the household does hear about it, it is still ten minutes
+        // and not twenty: the credit rose by six hundred and so did what the
+        // statement says it has counted from here.
+        QJsonObject next;
+        b.allocation = documents.value("b").toObject();
+        a.allocation = profile.allocation;
+        QVERIFY2(planAllocations(profile, {{"here", a}, {"b", b}}, plan, now, &next, &error),
+                 qPrintable(error));
+        const auto after = next.value("documents").toObject().value("here").toObject();
+        const auto one = after.value("house").toObject().value("session").toObject();
+        QCOMPARE(one.value("credit").toInt(), 7800);
+        QCOMPARE(one.value("counted").toInt(), 600);
+        QVERIFY2(applyAllocation(&profile, after, now.date(), &error), qPrintable(error));
+        QCOMPARE(allowanceSeconds(profile, budget, a, now.date()) - a.secondsFor("session"), 4200);
+
+        // The other machine is told about the credit and counted none of it,
+        // because `counted` is about that machine's own grants and not the
+        // household's.
+        const auto elsewhere = next.value("documents").toObject().value("b").toObject()
+                                   .value("house").toObject().value("session").toObject();
+        QCOMPARE(elsewhere.value("credit").toInt(), 7800);
+        QCOMPARE(elsewhere.value("counted").toInt(), 0);
+
+        // A statement that says it has counted less than the last one is a
+        // report going backwards, and honouring it would hand this machine the
+        // same ten minutes a second time. The same rule `elsewhere` keeps.
+        auto backwards = after;
+        auto house = backwards.value("house").toObject();
+        auto session = house.value("session").toObject();
+        session.insert("counted", 0);
+        house.insert("session", session);
+        backwards.insert("house", house);
+        backwards.insert("revision", after.value("revision").toInt() + 1);
+        QVERIFY2(!applyAllocation(&profile, backwards, now.date(), &error),
+                 "a statement unlearned what it had counted and the grant came back");
+
+        // A budget with no `counted` at all is refused where the document is
+        // read. It would be taken for a zero, which is the shape that hands
+        // over every grant this machine has made a second time.
+        auto silent = after;
+        auto quiet = silent.value("house").toObject();
+        auto without = quiet.value("session").toObject();
+        without.remove("counted");
+        quiet.insert("session", without);
+        silent.insert("house", quiet);
+        QVERIFY(!validAllocation(silent, &error));
+    }
+
+    // A statement is for a day, and the day after it there is none. Until this
+    // was written that left an enrolled machine at nothing at all, and nothing
+    // an operator could type changed it -- which is the worst moment for the
+    // one verb that exists so somebody can hand over ten minutes with the
+    // manager unreachable.
+    //
+    // So on a day the household has said nothing about, the allowance is
+    // exactly what an operator has handed over and no daily number at all. It
+    // cannot leak time: there is no floor under it but zero, and the only thing
+    // that raises it is somebody deciding to.
+    void withNoStatementForTodayAnOperatorCanStillHandOverTen()
+    {
+        Profile profile;
+        profile.user = "kid";
+        profile.allocation = QJsonObject{{"authority", "manager"}, {"machine", "here"}};
+        Budget budget;
+        budget.id = "session"; budget.match = {QStringLiteral("*")}; budget.dailyMinutes = 120;
+        budget.onExhausted = OnExhausted::Logout;
+        profile.budgets << budget;
+        const QDateTime now(QDate(2026, 9, 7), QTime(12, 0), QTimeZone::UTC);
+
+        Ledger a;
+        a.user = "kid"; a.date = now.date(); a.observedAt = now;
+        a.allocation = profile.allocation;
+        QJsonObject plan;
+        QString error;
+        QVERIFY2(planAllocations(profile, {{"here", a}}, {}, now, &plan, &error),
+                 qPrintable(error));
+        QVERIFY(applyAllocation(&profile, plan.value("documents").toObject()
+                                    .value("here").toObject(), now.date(), &error));
+
+        // Tomorrow, with no statement for it. Nothing, as before.
+        const QDate tomorrow = now.date().addDays(1);
+        Ledger fresh;
+        fresh.user = "kid"; fresh.date = tomorrow;
+        QCOMPARE(allowanceSeconds(profile, budget, fresh, tomorrow), 0);
+
+        // Ten minutes is ten minutes, and the two hours the household has not
+        // granted are still not granted.
+        fresh.grants.append(Grant{QDateTime(tomorrow, QTime(9, 0), QTimeZone::UTC),
+                                  "operator", "session", 10});
+        QCOMPARE(allowanceSeconds(profile, budget, fresh, tomorrow), 600);
+
+        // A local adjustment is not credit and never was. `leave` is refused on
+        // an enrolled profile for that reason, and this is the same rule where
+        // the number is worked out.
+        fresh.grants.append(Grant{QDateTime(tomorrow, QTime(9, 5), QTimeZone::UTC),
+                                  "operator", "session", 45, true});
+        QCOMPARE(allowanceSeconds(profile, budget, fresh, tomorrow), 600);
+    }
+
     // `elsewhere` is what other computers have spent, and consumption adds up.
     // A statement saying they spent less than the last one is a report going
     // backwards, and honouring it would hand this machine the same minutes
@@ -139,7 +288,8 @@ private slots:
                                {"user", "kid"}, {"date", today.toString(Qt::ISODate)},
                                {"revision", revision},
                                {"house", QJsonObject{{"session",
-                                    QJsonObject{{"credit", credit}, {"elsewhere", elsewhere}}}}}};
+                                    QJsonObject{{"credit", credit}, {"elsewhere", elsewhere},
+                                                {"counted", 0}}}}}};
         };
 
         QVERIFY2(applyAllocation(&profile, statement(1, 7200, 1200), today, &error),
@@ -189,7 +339,8 @@ private slots:
         QJsonObject zero{{"user", "kid"}, {"authority", "manager"}, {"machine", "here"},
                          {"date", now.date().toString(Qt::ISODate)}, {"revision", 1},
                          {"house", QJsonObject{{"session",
-                              QJsonObject{{"credit", 7200}, {"elsewhere", 7200}}}}}};
+                              QJsonObject{{"credit", 7200}, {"elsewhere", 7200},
+                                          {"counted", 0}}}}}};
         QVERIFY(applyAllocation(&profile, zero, now.date(), &error));
         QCOMPARE(allowanceSeconds(profile, budget, day, now.date()), 0);
         zero.insert("date", now.date().addDays(1).toString(Qt::ISODate));

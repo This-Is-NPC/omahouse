@@ -112,7 +112,28 @@ def exercise(vm, dad):
     if json_cli(dad, 'allocation', 'show', child)['reservation'] != initial:
         raise vm.Failed('a machine that stopped reporting changed the household balance')
     vm.root('systemctl start omakure-node.service')
-    json_cli(dad, 'grant', child, '--session', '10m')
+
+    # Ten minutes are ten minutes on the machine they were typed on, before any
+    # manager hears about it. This used to be the one thing an enrolled profile
+    # would not do: the balance came from the statement, a grant was in none of
+    # its numbers, and `grant` printed the same figure back and changed nothing
+    # until the next plan -- which on a machine that had lost contact was never.
+    #
+    # A window and not an equality, because the session budget is being spent
+    # while this runs and the only direction that drift goes is down.
+    def left_here(box):
+        for budget in json_cli(box, 'status', child)['budgets']:
+            if budget['id'] == 'session':
+                return budget['leftSeconds']
+        raise vm.Failed('no session budget to read on ' + box.machine)
+
+    before_here = left_here(dad)
+    handed = json_cli(dad, 'grant', child, '--session', '10m')
+    if not before_here + 600 - 30 <= handed['leftSeconds'] <= before_here + 600:
+        raise vm.Failed(f'a 10m grant left {handed["leftSeconds"]}s on the machine it was '
+                        f'typed on, from {before_here}s: the minutes did not land here')
+    print(f'      the grant was live on the spot: {before_here}s became '
+          f'{handed["leftSeconds"]}s')
     deadline = time.monotonic() + 150
     while time.monotonic() < deadline:
         updated = json_cli(dad, 'allocation', 'show', child)['reservation']

@@ -178,7 +178,24 @@ QVariantList fleetRows(const Profile &profile, const Ledger &local, const QDateT
                 {"state", state}, {"limited", true}, {"hasBudget", true},
                 {"used", faults.contains(day.first) ? "?" : spellSeconds(used)},
                 {"credit", allocated ? spellSeconds(credit) : "0m"},
-                {"left", allocated ? spellSeconds(qMax(0, credit - elsewhere - used)) : "0m"},
+                // This computer's own balance is worked out by the function the
+                // today view uses, and not out of the two numbers beside it.
+                // Those are the household's view of this machine, and what an
+                // operator has handed over here since the last statement is in
+                // neither of them -- so the panel said one thing about what was
+                // left and the today view another, about the same computer, on
+                // the same screen, twenty minutes apart.
+                //
+                // Every other row stays the household's view, because that is
+                // all this machine knows about them: a grant made on the
+                // machine in the bedroom is in nothing here until that machine
+                // reports, and `lastReport` at the end of the row is what says
+                // how old that is.
+                {"left", !allocated ? QStringLiteral("0m")
+                    : here ? spellSeconds(qMax(0, allowanceSeconds(profile, budget,
+                                                                   day.second, now.date())
+                                                   - spentSeconds(budget, day.second)))
+                           : spellSeconds(qMax(0, credit - elsewhere - used))},
                 {"lastReport", here ? QStringLiteral("local") : day.second.observedAt.isValid()
                     ? day.second.observedAt.toLocalTime().toString(Qt::ISODate) : QStringLiteral("never")}});
         }
