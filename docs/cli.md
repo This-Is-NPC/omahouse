@@ -269,6 +269,8 @@ It needs no privilege: a ledger is 0644 and always has been.
 
 A day nobody spent is exit 2 and no document at all. That is the whole point of the exit code here -- a quiet afternoon and a machine that is not reporting must never look the same to the thing adding them up, and a ledger of zeroes printed under a real date would make them identical.
 
+**Today carries a pot.** A budget that never resets keeps its running total in the last file that touched it, so a morning nobody has written yet is read the way `status` reads it -- through `readDay`, with the pot carried in -- and is a day with something in it to report. Read plainly it reported every pot as untouched, the manager told the other machines so, and their next statement was refused for consumption moving backwards, every cycle, until something was spent here. A machine off at midnight and idle all morning is the ordinary case. `--date` reads a past day exactly as it was written, because a carry there would put a pot's running total into a day the pot was not touched.
+
 `--date` because a machine that was off at midnight still owes the house yesterday. `--date` and not `--on`: `profile enforce --on` already means something else, and one flag name with two meanings is a flag somebody gets wrong once.
 
 ### Arguments

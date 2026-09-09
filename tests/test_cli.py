@@ -1235,6 +1235,22 @@ def check_a_pot_survives_a_day_nobody_has_written_yet(box):
     assert pot is not None, shown.stdout
     assert "1h30m" in " ".join(pot), pot
 
+    # What this computer reports to the house is the same morning. `day` is
+    # what a household collects and plans from, and a pot it reported as empty
+    # would have every other machine told the pot was untouched -- and then
+    # refused the next statement for consumption moving backwards, every cycle,
+    # until somebody spent something here. A machine that is off at midnight
+    # and idle all morning is the ordinary case, not a corner.
+    reported = box.run("--json", "day", USER)
+    assert reported.returncode == 0, reported.stderr
+    told = json.loads(reported.stdout)
+    assert told["kept"] == {"pot": 3600}, told
+    assert told["keptGranted"] == {"pot": 1800}, told
+    assert told["date"] == TODAY.isoformat(), told
+    # And not a day in the past: `report` reads each day as it was written.
+    absent = box.run("day", USER, "--date", (TODAY - timedelta(days=2)).isoformat())
+    assert absent.returncode == 2, absent.stdout
+
     # And handing over ten more does not erase what came before it.
     given = box.run("grant", USER, "--budget", "pot=10m")
     assert given.returncode == 0, given.stderr

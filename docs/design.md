@@ -1652,6 +1652,16 @@ carried into the file of every day it touches and would be counted once per day
 there. Somebody who does not see that difference will think `report` is the one
 that is inconsistent.
 
+`omahouse day` is on the `status` side of that line and was not, until
+2026-09-09. It is the document the household collects and plans from, and it
+read today's file plainly: on a morning nobody had written yet it reported every
+pot as untouched, the manager summed that into `elsewhere` for the other
+machines, and their `apply` refused the statement for consumption moving
+backwards — every cycle, until something was spent on the idle machine. Today
+now goes through `readDay` like every other verb about now, and a carried pot is
+a day with something in it to report; `--date` still reads a past day as it was
+written.
+
 **`omahouse limit <user> --session|--budget|--site … --resets never` is what
 asks for a pot**, since 2026-09-09. Everything above is reachable from the
 command line on the manager, and a pot pushed to a machine arrives the way every

@@ -4535,24 +4535,43 @@ int cmdDay(const Globals &g, const QStringList &positionals, const Options &opti
         }
     }
 
-    Ledger ledger;
-    QString error;
-    bool missing = false;
-    if (!readLedger(paths::ledgerFile(user, when), &ledger, &error, &missing)) {
-        fail(QStringLiteral("day: %1").arg(error));
-        return kUsage;
-    }
     Profiles profiles;
     int profileStatus = kOk;
     if (!loadProfiles(&profiles, &profileStatus)) return profileStatus;
+    const Profile *own = nullptr;
     for (const auto &profile : profiles.all) {
-        if (profile.user == user && !profile.allocation.isEmpty()) {
-            ledger.user = user;
-            ledger.date = when;
-            ledger.allocation = profile.allocation;
-            ledger.observedAt = QDateTime::currentDateTimeUtc();
-            missing = false; // An enrolled, idle machine explicitly reports zero.
-        }
+        if (profile.user == user)
+            own = &profile;
+    }
+
+    // Today goes through `readDay`, with what a pot holds carried in, and a day
+    // in the past does not. This is the document a household collects and
+    // plans from: read plainly, a morning nobody has written yet reported every
+    // pot as untouched, the manager told the other machines so, and their next
+    // statement was refused for consumption moving backwards -- every cycle,
+    // until something was spent here. A machine off at midnight and idle all
+    // morning is the ordinary case. `--date` is `report`'s question and reads
+    // each day as it was written, because a carry there would put a pot's
+    // running total into a day the pot was not touched.
+    Ledger ledger;
+    QString error;
+    bool missing = false;
+    const bool today = options.date.isEmpty();
+    if (!(today && own ? readDay(*own, when, &ledger, &missing, &error)
+                       : readLedger(paths::ledgerFile(user, when), &ledger, &error, &missing))) {
+        fail(QStringLiteral("day: %1").arg(error));
+        return kUsage;
+    }
+    // A carried pot is a day with something in it to report, whether or not
+    // anything was spent since midnight.
+    if (missing && (!ledger.keptSeconds.isEmpty() || !ledger.keptGranted.isEmpty()))
+        missing = false;
+    if (own && !own->allocation.isEmpty()) {
+        ledger.user = user;
+        ledger.date = when;
+        ledger.allocation = own->allocation;
+        ledger.observedAt = QDateTime::currentDateTimeUtc();
+        missing = false; // An enrolled, idle machine explicitly reports zero.
     }
     // `missing` and not the return value: a file that is not there is not a
     // failure to read, which is right everywhere else in omahouse and wrong
