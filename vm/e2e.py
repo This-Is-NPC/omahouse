@@ -620,15 +620,21 @@ class VM:
             raise Blocked(f"{self.domain} is not disposable, and reset() empties "
                           "/etc/omahouse and /var/lib/omahouse")
         self.stop_daemon()
-        # `machine.json` and `machine-tokens.json` belong on this line and were
-        # missing from it, which the peer guard found the first time it ran: a
-        # machine reset by a run that finished still said what it was in the
-        # household and still held the bearers for reading the others. The
-        # sentence above says "no fleet identity" and those two are exactly
-        # that -- what this machine is (`Kind`), and how to reach the rest.
-        self.root("rm -f /etc/omahouse/blocked /etc/omahouse/profiles.json "
-                  "/etc/omahouse/machines.json /etc/omahouse/omakure-token "
-                  "/etc/omahouse/machine.json /etc/omahouse/machine-tokens.json")
+        # Everything under /etc/omahouse, and not a list of names.
+        #
+        # It was a list, and the list drifted twice. `machine.json` and
+        # `machine-tokens.json` went missing from it and the peer guard found
+        # them the first time it ran; then `staged/` did the same, and that one
+        # is worse -- it is a directory, so no `rm -f` of file names was ever
+        # going to reach it, and a run that *finished cleanly* left the peer
+        # dirty for the next one. The suite then blocked on its own leftovers
+        # and pointed at the machine rather than at this line.
+        #
+        # The guard next door refuses a peer whose /etc/omahouse is not empty,
+        # so that is the condition, and this is now exactly it rather than an
+        # approximation of it that somebody has to keep current. A new file
+        # omahouse learns to write is covered the day it is written.
+        self.root("rm -rf /etc/omahouse/* /etc/omahouse/.[!.]*", check=False)
         self.root("rm -rf /var/lib/omahouse/*")
         # And no fleet identity either. Pairing is an omahouse verb now, and it
         # leaves a service running, a unit, a trust registry and a 0700 secrets

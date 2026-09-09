@@ -32,6 +32,24 @@ def run(vm):
         dad.root('rm -f /usr/bin/omahouse', check=False)
 
 
+def allocation_on(box, child, json_cli):
+    """That machine's statement, out of `profile show`.
+
+    `profile show --json` answers in the envelope `profiles.json` uses -- a
+    `schemaVersion` and a list -- because the bytes it emits are the bytes
+    `profile apply-staged` takes in on another computer. So the profile is one
+    level down, and reaching for the field directly is how this case came to
+    fail on a shape that had changed under it: the envelope arrived with the
+    verbs that push a profile between computers, and nothing here ran again
+    until now. The failure named `allocation` and pointed at the household,
+    which had nothing to do with it.
+    """
+    profiles = json_cli(box, 'profile', 'show', child)['profiles']
+    if len(profiles) != 1:
+        raise box.Failed(f'{box.machine} shows {len(profiles)} profiles for {child}')
+    return profiles[0].get('allocation')
+
+
 def exercise(vm, dad):
     child = vm.subject
     workspace = '/var/lib/omakure-workspace'
@@ -40,6 +58,7 @@ def exercise(vm, dad):
                         + ' omakure ' + ' '.join(shlex.quote(a) for a in args))
     def json_cli(box, *args):
         return json.loads(box.root('omahouse --json ' + ' '.join(shlex.quote(a) for a in args)))
+
     for box in (vm, dad):
         for script in ('omahouse.allocation', 'omahouse.sync'):
             omk(box, 'battery', 'install', 'omahouse', script)
@@ -59,7 +78,7 @@ def exercise(vm, dad):
     credits = {d['house']['session']['credit'] for d in initial['documents'].values()}
     if credits != {7200}:
         raise vm.Failed(f'machines were told different credits: {credits}')
-    original_remote = json_cli(vm, 'profile', 'show', child)['allocation']
+    original_remote = allocation_on(vm, child, json_cli)
     dad.put(str(dad.battery_checkout / '.scripts/configure-sync.py'), '/tmp/configure-sync.py')
     dad.root('-u omakure python3 /tmp/configure-sync.py --workspace ' + workspace
              + ' --users ' + shlex.quote(child) + ' --cron ' + shlex.quote('*/10 * * * * *'))
@@ -86,7 +105,7 @@ def exercise(vm, dad):
           'on both')
     dad.root('systemctl restart omakure-node.service')
     wait_rows(3, True)
-    if json_cli(vm, 'profile', 'show', child)['allocation'] != original_remote:
+    if allocation_on(vm, child, json_cli) != original_remote:
         raise vm.Failed('manager restart recharged the remote machine')
     vm.root('systemctl stop omakure-node.service')
     wait_rows(1, False)
@@ -101,7 +120,7 @@ def exercise(vm, dad):
             after = {d['house']['session']['credit'] for d in updated['documents'].values()}
             if after != {7800}:
                 raise vm.Failed(f'a 10m grant made the credits {after}, expected 7800 on both')
-            peer = json_cli(vm, 'profile', 'show', child)['allocation']
+            peer = allocation_on(vm, child, json_cli)
             if peer['revision'] == updated['revision']:
                 break
         time.sleep(2)
@@ -153,7 +172,7 @@ def spending_moves_the_other_balance(vm, dad, child, json_cli):
     the manager's own statement, carried by a scheduled cycle and nobody's hand.
     """
     def statement(box):
-        return json_cli(box, 'profile', 'show', child)['allocation']['house']['session']
+        return allocation_on(box, child, json_cli)['house']['session']
 
     def spent_here(box):
         for budget in json_cli(box, 'status', child)['budgets']:
