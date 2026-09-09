@@ -525,7 +525,10 @@ different sums to report and to read back.
 8. **Done on the machine's side; the manager's script is open.** **Merge of
    locally created profiles.** The manager lists what a machine has and offers to
    take it in, and it answers **four** things rather than two: `new` (the machine
-   has one the manager never issued), `changed` (both have one and they differ),
+   has one the manager never issued), `changed` (both have one and the rules
+   differ -- the rules and never the stamp, because a pushed copy is restamped
+   on arrival and a merge that read the stamp called every machine changed
+   forever; found and fixed on 2026-09-09),
    `gone` (the machine says it has none and the manager has one), and
    `not collected`, which is not an answer and is named rather than folded into
    *no differences*. **A collected document with an empty list is the form of "I

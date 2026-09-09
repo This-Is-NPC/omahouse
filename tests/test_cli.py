@@ -1821,7 +1821,7 @@ def check_the_merge_tells_the_four_answers_apart(box):
     """
     box.write_profiles({"schemaVersion": 2, "profiles": []})
     box.run("profile", "add", "kid", "--name", "Here")
-    for machine in ("the study", "the kitchen", "the attic", "silent"):
+    for machine in ("the study", "the kitchen", "the attic", "the porch", "silent"):
         assert box.run("machine", "add", machine).returncode == 0
 
     def collected(machine, document):
@@ -1835,11 +1835,23 @@ def check_the_merge_tells_the_four_answers_apart(box):
     collected("the study", {"schemaVersion": 2, "profiles": [theirs]})
     collected("the kitchen", {"schemaVersion": 2, "profiles": []})
     collected("the attic", mine)
+    # The same rules under another hand and another second. A pushed profile
+    # is restamped by the machine that took it in, so two copies that agree on
+    # every rule differ in the stamp as a matter of course -- and a merge that
+    # read the stamp would list every machine in the house as `changed` forever,
+    # with nothing to decide about any of them. The stamp is shown in the
+    # table; it is not what the answer is about.
+    restamped = json.loads(json.dumps(mine))
+    restamped["profiles"][0]["writtenBy"] = "omakure"
+    restamped["profiles"][0]["writtenAt"] = "2026-09-08T14:00:01-03:00"
+    assert restamped != mine, restamped
+    collected("the porch", restamped)
 
     seen = json.loads(box.run("--json", "profile", "merge", "kid").stdout)
     says = {row["machine"]: row["is"] for row in seen["machines"]}
     assert says == {"the study": "changed", "the kitchen": "gone",
-                    "the attic": "same", "silent": "not collected"}, says
+                    "the attic": "same", "the porch": "same",
+                    "silent": "not collected"}, says
     # Both versions are shown whole, because whoever is choosing needs what
     # changed and who wrote each -- and all of that is already in the documents.
     assert seen["mine"]["displayName"] == "Here", seen
@@ -1883,6 +1895,7 @@ def check_the_merge_tells_the_four_answers_apart(box):
     kinds = {row["machine"]: row["is"] for row in after["machines"]}
     assert kinds["the study"] == "new", kinds
     assert kinds["the attic"] == "new", kinds
+    assert kinds["the porch"] == "new", kinds
     assert kinds["the kitchen"] == "same", kinds
 
     # The refusals. Nothing collected is not a version to decide about.

@@ -793,6 +793,12 @@ there is nothing to conflict with:
   An administrator created it with the manager unreachable, which is exactly
   what the exit is for. The decision is whether to take it in.
 - **changed** — both have one and they are not the same. The only real conflict.
+  Decided by the rules and never by the stamp: a pushed profile is restamped
+  by the machine that takes it in, so two copies that agree on every rule
+  differ in `writtenBy` and `writtenAt` as a matter of course, and a merge
+  that compared whole documents listed every machine in the house as changed
+  forever, with nothing to decide about any of them. The stamp is in the
+  table beside the answer, which is where *who wrote each and when* belongs.
 - **gone** — that machine says it has none and this one has one. Somebody
   removed it there.
 
