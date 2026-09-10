@@ -1,9 +1,9 @@
-"""The walkthrough of `docs/how-to-link-another-computer.md`, typed for real.
+"""The pairing portion of `docs/how-to-link-another-computer.md`, typed for real.
 
-Not a case that happens to cover the same ground. This follows that page step
-for step, in its order, with its commands -- so that a household reading it gets
-what is printed there, and so that changing the page without changing the
-product fails here.
+The install, pairing and removal commands follow the walkthrough. Usage
+collection and manual balance adjustment keep their two-profile fixture; the
+central draft and publication step is exercised by
+`a_profile_is_published_from_the_console`.
 
 It starts from the state the page says it starts from: a second computer running
 Omarchy with **no omahouse on it**, reachable by ssh and nothing else. The
@@ -19,7 +19,7 @@ computer -- "this one", the manager -- and `poc` is the one being linked.
 import json
 
 MACHINE = "poc"
-WHY = "a household follows docs/how-to-link-another-computer.md and gets what it says"
+WHY = "the pairing walkthrough installs, identifies and removes a second computer"
 
 WIRE = 7879
 
@@ -171,7 +171,7 @@ def walked(vm, dad):
     print("      each computer says what it is, and the managed one says it is "
           "still its own")
 
-    # -- 3. Put the same person under rules on both --------------------------
+    # -- Seed two profiles for the usage-collection regression ---------------
     for box in (dad, vm):
         box.root(f"omahouse profile add {child} --name Kid")
         box.root(f"omahouse limit {child} --session 2h")
@@ -203,19 +203,20 @@ def walked(vm, dad):
     print(f"      the house has spent {session['totalSeconds']}s of 7200s; "
           f"{left}s stand")
 
-    # -- 5. Push the truth back ----------------------------------------------
+    # -- Adjust the standalone machine's balance manually --------------------
+    # Scheduled household sharing is covered separately by a_shared_pot.
     minutes = max(1, left // 60)
     code, said = dad.root(
         f"ssh arch@{there} sudo omahouse leave {child} --session {minutes}m",
         check=False)
     if code != 0:
-        raise Failed(f"step 5 came back {code}:\n{said[:400]}")
+        raise Failed(f"the manual adjustment came back {code}:\n{said[:400]}")
     if "left today" not in said:
-        raise Failed(f"`leave` does not say what is left, which the page shows:\n"
+        raise Failed(f"`leave` does not say what is left:\n"
                      f"{said[:300]}")
 
     # And it really moved the far machine's own number, which is the only thing
-    # that makes step 5 worth typing.
+    # that makes the manual adjustment worth typing.
     theirs = json.loads(vm.root(f"omahouse --json status {child}"))
     budget = [b for b in theirs["budgets"] if b["id"] == "session"][0]
     if budget["leftSeconds"] != minutes * 60:
