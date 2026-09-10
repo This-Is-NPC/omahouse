@@ -145,7 +145,11 @@ Window {
         : (House.snapshot.sites[win.subject] || [])
     readonly property var allToday: win.subject === "" ? []
         : (House.snapshot.today[win.subject] || [])
-    readonly property var fleetRows: win.subject === "" ? []
+    readonly property var machineRows: (win.household.machines || []).map(function (machine) {
+        return {name: machine.name, id: "", state: machine.reachable ? "paired" : "not paired",
+                machineOnly: true, limited: false}
+    })
+    readonly property var fleetRows: win.subject === "" ? win.narrow(win.machineRows, win.filterFleet)
         : win.narrow((House.snapshot.fleet || {})[win.subject] || [], win.filterFleet)
     readonly property int fleetCursor: win.clamp(win.cursorFleet, win.fleetRows.length)
     readonly property var catalogue: win.subject === "" ? []
@@ -209,7 +213,7 @@ Window {
             return rows
 
         rows.push({ id: "fleet", key: "f", hint: "machines",
-                    label: "manage the household machines", usable: person !== null && win.view !== 5 })
+                    label: "manage the household machines", usable: win.view !== 5 && (person !== null || win.machineRows.length > 0) })
         if (win.view === 5) {
             rows.push({ id: "grant", key: "+", hint: "household credit",
                         label: "add household credit for the next synchronization",
@@ -1074,7 +1078,8 @@ Window {
                             width: parent.width
                             wrapMode: Text.WordWrap
                             quiet: true
-                            text: "One pot, spent on any of them: every row of a budget "
+                            text: win.subject === "" ? "The computers linked to this household."
+                                  : "One pot, spent on any of them: every row of a budget "
                                   + "shows the same credit and the same balance, and USED "
                                   + "is that computer's share of having spent it. A recent "
                                   + "report is not a live connection, and a machine that "
@@ -1083,14 +1088,15 @@ Window {
                         Label {
                             width: parent.width
                             visible: win.fleetRows.length === 0
-                            text: "No limited budgets to manage. Configure a profile and enroll the Battery."
+                            text: win.subject === "" ? "No computers match this filter."
+                                  : "No limited budgets to manage. Configure a profile and enroll the Battery."
                             wrapMode: Text.WordWrap
                         }
                         Row {
                             objectName: "fleetColumns"
                             width: parent.width
-                            Label { width: parent.width * 0.45; text: "MACHINE / BUDGET"; quiet: true }
-                            Label { text: "USED / CREDIT / LEFT"; quiet: true }
+                            Label { width: parent.width * 0.45; text: win.subject === "" ? "MACHINE" : "MACHINE / BUDGET"; quiet: true }
+                            Label { visible: win.subject !== ""; text: "USED / CREDIT / LEFT"; quiet: true }
                         }
                         ListView {
                             id: fleetList
@@ -1116,12 +1122,13 @@ Window {
                                         Label {
                                             width: parent.width * 0.45
                                             elide: Text.ElideRight
-                                            text: fleetRow.modelData.name + " / " + fleetRow.modelData.id
+                                            text: fleetRow.modelData.name + (fleetRow.modelData.machineOnly ? "" : " / " + fleetRow.modelData.id)
                                         }
                                         Label {
                                             width: parent.width * 0.55
                                             elide: Text.ElideRight
-                                            text: fleetRow.modelData.used + " / "
+                                            visible: !fleetRow.modelData.machineOnly
+                                            text: fleetRow.modelData.machineOnly ? "" : fleetRow.modelData.used + " / "
                                                   + fleetRow.modelData.credit + " / " + fleetRow.modelData.left
                                         }
                                     }
@@ -1133,7 +1140,8 @@ Window {
                                     }
                                     Label {
                                         width: parent.width
-                                        text: "Last report: " + fleetRow.modelData.lastReport
+                                        visible: !fleetRow.modelData.machineOnly
+                                        text: fleetRow.modelData.machineOnly ? "" : "Last report: " + fleetRow.modelData.lastReport
                                         quiet: true
                                         elide: Text.ElideRight
                                     }

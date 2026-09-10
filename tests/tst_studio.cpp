@@ -160,6 +160,7 @@ private slots:
     void theFilterNarrowsOnlyTheListItWasTypedOn();
     void theSubjectFaceHasNothingToPress();
     void theWindowNeverWritesToTheMachine();
+    void theMachinesViewOpensWithNobodySelected();
     void theHeaderSaysWhatThisComputerIs();
     void theHeaderKeepsOffTheTabsWhenNarrow();
     void writesTheOperatorShots();
@@ -1233,6 +1234,26 @@ QByteArray TestStudio::treeUnder(const QString &directory)
         file.close();
     }
     return fingerprint;
+}
+
+void TestStudio::theMachinesViewOpensWithNobodySelected()
+{
+    QString error;
+    Machine machine;
+    machine.name = QStringLiteral("station-02");
+    machine.nodeId = QStringLiteral("omk1_abc");
+    machine.endpoint = QStringLiteral("localhost:8787");
+    QVERIFY(writeMachines(paths::machinesFile(), {machine}, &error));
+    m_house->reload(); settle();
+    QVERIFY(people().isEmpty());
+    key('f');
+    QCOMPARE(root()->property("view").toInt(), 5);
+    const auto rows = root()->property("fleetRows").toList();
+    QCOMPARE(rows.size(), 1);
+    QCOMPARE(rows.first().toMap().value("name").toString(), QStringLiteral("station-02"));
+    QCOMPARE(rows.first().toMap().value("state").toString(), QStringLiteral("paired"));
+    QFile::remove(paths::machinesFile());
+    m_house->reload();
 }
 
 void TestStudio::theHeaderSaysWhatThisComputerIs()
