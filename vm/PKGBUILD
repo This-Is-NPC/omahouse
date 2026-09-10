@@ -54,7 +54,7 @@ license=('MIT')
 # omahouse needs, in one command, with nothing for a household to go and find.
 # The same will be true of omastore when there is one to depend on.
 depends=('qt6-base' 'qt6-declarative' 'polkit' 'libnotify' 'openssl' 'zip'
-         'omakure')
+         'omakure' 'git' 'python' 'curl' 'jq')
 makedepends=('qt6-base' 'qt6-declarative' 'qt6-tools' 'gcc' 'make')
 # `vm/omahouse.install` is a symlink to `packaging/omahouse.install`, so the
 # scriptlet pacman runs here is the very file the repo ships and not a copy that

@@ -25,11 +25,6 @@ def document(box, user):
     return json.loads(cli(box, 'profile', 'show', user, '--json'))
 
 
-def as_node(box, *args):
-    return box.root('-u omakure env HOME=' + WORKSPACE + ' OMAKURE_SCRIPTS_DIR='
-                    + WORKSPACE + ' omakure ' + shlex.join(args))
-
-
 def run(vm):
     dad = vm.peer('dad')
     dad.put(str(vm.build_binary), '/tmp/omahouse')
@@ -46,15 +41,7 @@ def run(vm):
                                '--pair', prepared['pair']))
         if not added.get('trusted'):
             raise vm.Failed('pairing did not finish')
-        for box, scripts in ((vm, ('omahouse.profile-send', 'omahouse.profile-push')),
-                             (dad, ('omahouse.sync', 'omahouse.profile-publish'))):
-            repo = box.put_the_battery()
-            as_node(box, 'battery', 'add', repo, '--ref', 'master', '--name', 'omahouse')
-            as_node(box, 'battery', 'sync', 'omahouse')
-            for script in scripts:
-                as_node(box, 'battery', 'install', 'omahouse', script)
-        # Scripts are resolved per API request; installing them after pairing
-        # must work without a service restart on either computer.
+        # Pairing installed every runtime adapter from the public Battery.
         exercise(vm, dad)
     finally:
         dad.root('rm -f /usr/bin/omahouse', check=False)
@@ -149,9 +136,6 @@ def exercise(vm, dad):
     # Enrollment attaches different runtime allocations to otherwise identical
     # policies: the central is 'here', the client is its fleet name. Publishing
     # rules must neither mistake those bindings for edits nor transplant them.
-    for script in ('omahouse.day', 'omahouse.allocation'):
-        as_node(vm, 'battery', 'install', 'omahouse', script)
-
     def synchronize(action):
         result = json.loads(dad.root('-u omakure env HOME=' + WORKSPACE
             + ' OMAKURE_SCRIPTS_DIR=' + WORKSPACE + ' python3 ' + WORKSPACE

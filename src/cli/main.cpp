@@ -2155,6 +2155,11 @@ int becomeTheManager(const Globals &g, const QString &verb, const Options &optio
     // machine's day -- runs as the node's account and files what it fetched.
     if (!letTheNodeReachOmahouse(verb, &error))
         return kUsage;
+    if (!Omakure::installBattery(QStringLiteral("omahouse"), &error)) {
+        fail(QStringLiteral("%1: Battery setup failed: %2 — retry this command after fixing the cause")
+                     .arg(verb, error));
+        return kUsage;
+    }
 
     if (!Omakure::describe(options.at, mine, &error)) {
         fail(QStringLiteral("%1: %2").arg(verb, error));
@@ -2284,6 +2289,11 @@ int cmdMachinePrepare(const Globals &g, const Options &options)
 
     if (!letTheNodeReachOmahouse(verb, &error))
         return kUsage;
+    if (!Omakure::installBattery(config.cueBatteries.value(0), &error)) {
+        fail(QStringLiteral("%1: Battery setup failed: %2 — retry this command after fixing the cause")
+                     .arg(verb, error));
+        return kUsage;
+    }
 
     // Last, and allowed to fail. Everything above is the part that is hard to
     // get right and impossible to guess at; a machine with no systemd still has
@@ -4825,9 +4835,8 @@ int cmdProfilePublish(const Globals &g, const QStringList &positionals, const Op
     }
     if (!QFileInfo::exists(QDir(Omakure::workspace()).filePath("omahouse-profile-publish.py"))) {
         fail(QStringLiteral(
-            "the household's Battery is not installed here — as the node account with "
-            "OMAKURE_SCRIPTS_DIR set to the node workspace: omakure battery install omahouse "
-            "omahouse.sync; omakure battery install omahouse omahouse.profile-publish"));
+            "the household's Battery is not installed here — repeat the original omahouse machine link "
+            "command on the central computer to install or repair it automatically"));
         return kUsage;
     }
     QDir().mkpath(paths::stateDir());

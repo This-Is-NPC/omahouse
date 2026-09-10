@@ -42,29 +42,16 @@ profiles and state together. Historical `leave` entries without a `kind` cannot
 be distinguished from genuine credit; start this mode on a new day after the
 upgrade, rather than interpreting old entries as new household credit.
 
-## Install the Battery scripts
+## The Battery is installed during linking
 
-Use the trusted workspace of the account that runs `omakure node serve`, on the
-manager and each participant. Substitute your actual workspace and Battery URL.
-The commands below run **as that service account**, not as the person whose time
-is limited.
+`omahouse machine link` installs the public `omahouse-battery` master on both
+computers, including the day, allocation and sync adapters. The explicit
+invite/prepare flow does the same. The pairing workflow also provisions the
+service account, its workspace and noninteractive access to the writing verbs.
+No separate Battery installation or service restart is needed.
 
-```bash
-omakure --scripts-dir /var/lib/omakure-workspace battery add \
-    /path/to/omahouse-battery --ref master --name omahouse
-omakure --scripts-dir /var/lib/omakure-workspace battery sync omahouse
-omakure --scripts-dir /var/lib/omakure-workspace battery install \
-    omahouse omahouse.day
-omakure --scripts-dir /var/lib/omakure-workspace battery install \
-    omahouse omahouse.allocation
-omakure --scripts-dir /var/lib/omakure-workspace battery install \
-    omahouse omahouse.sync
-```
-
-The service account needs noninteractive permission for the writing omahouse
-verbs. The pairing workflow provisions that access. Check that the node service
-uses the intended workspace and restart it after installing the scripts. Do not
-start a second scheduler for the same workspace.
+Schedules remain locally owned and are not activated by installing or refreshing
+the adapters. Do not start a second scheduler for the same workspace.
 
 ## Enroll, then enable the schedule
 

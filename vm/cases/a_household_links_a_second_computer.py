@@ -1,9 +1,8 @@
 """The pairing portion of `docs/how-to-link-another-computer.md`, typed for real.
 
-The install, pairing and removal commands follow the walkthrough. Usage
-collection and manual balance adjustment keep their two-profile fixture; the
-central draft and publication step is exercised by
-`a_profile_is_published_from_the_console`.
+The install, pairing, publication and removal commands follow the walkthrough.
+The first central draft reaches the empty client without any separate Battery
+setup. Usage collection and manual balance adjustment follow that publication.
 
 It starts from the state the page says it starts from: a second computer running
 Omarchy with **no omahouse on it**, reachable by ssh and nothing else. The
@@ -171,10 +170,14 @@ def walked(vm, dad):
     print("      each computer says what it is, and the managed one says it is "
           "still its own")
 
-    # -- Seed two profiles for the usage-collection regression ---------------
-    for box in (dad, vm):
-        box.root(f"omahouse profile add {child} --name Kid")
-        box.root(f"omahouse limit {child} --session 2h")
+    # No Battery setup here: the single link command must leave publication ready.
+    dad.root(f"omahouse profile add {child} --name Kid")
+    dad.root(f"omahouse limit {child} --session 2h")
+    dad.root(f"omahouse profile publish {child} --to 'the kitchen laptop'")
+    remote = json.loads(vm.root(f"omahouse --json profile show {child}"))
+    if next(b for b in remote["profiles"][0]["budgets"] if b["id"] == "session")["dailyMinutes"] != 120:
+        raise Failed(f"the linked client did not receive its first draft: {remote}")
+    print("      the one link command also made remote publication ready")
 
     # -- 4. Read the day across both -----------------------------------------
     #

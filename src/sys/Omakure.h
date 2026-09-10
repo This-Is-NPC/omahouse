@@ -76,6 +76,11 @@ public:
     /// points the product's own scratch files at the one place that bricks it.
     static bool provision(QString *error);
 
+    /// Register and sync the public Battery's master, then install its runtime
+    /// adapters in the service workspace. Repeating pairing refreshes them;
+    /// schedules remain an explicit operator choice.
+    static bool installBattery(const QString &name, QString *error);
+
     /// Run `omakure <arguments>` as the node's account, and hand back what it
     /// said. `stdout` and `stderr` both, because Omakure's refusals are on the
     /// second one and a caller that only reads the first reports an empty

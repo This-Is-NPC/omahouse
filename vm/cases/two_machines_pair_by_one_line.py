@@ -33,7 +33,6 @@ import time
 MACHINE = "poc"
 WHY = "three commands and one carried line replace seven manual pairing steps"
 
-REPO = "https://github.com/This-Is-NPC/omahouse-battery.git"
 # omahouse's own defaults, from `renderNodeConfig`.
 API, WIRE = 8787, 7879
 
@@ -170,19 +169,12 @@ def paired(vm, dad):
                         "OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace "
                         f"omakure {command}", check=check)
 
-    # Into the node's own workspace, as the node's account: the service that
-    # answers a Cue is `omakure`, so a Battery installed anywhere else is one
-    # the gate cannot see -- `accepted: false, code 1206`, which says "not
-    # declared" and means "not there".
-    as_node(vm, f"--json battery add {REPO} --ref master --name omahouse")
-    as_node(vm, "--json battery sync omahouse")
-    as_node(vm, "--json battery install omahouse omahouse.grant")
+    # Pairing installed the grant adapter in the service workspace.
     # A Cue carries no arguments, so the account comes from the node's own
     # environment.
     as_node(vm, f"env create house OMAHOUSE_BATTERY_USER={child}")
     as_node(vm, "env activate house")
-    # The service was started by `machine prepare` before the Battery existed,
-    # and it reads its declarations at startup.
+    # Reload the environment selected above for the no-argument Cue.
     vm.root("systemctl restart omakure-node.service")
 
     # The bearer is on disk and was never printed: `machine invite` put the

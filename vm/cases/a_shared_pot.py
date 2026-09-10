@@ -187,7 +187,7 @@ def exercise(vm, dad):
     if kinds.get(THEIRS) != 'changed':
         raise Failed(f'the manager wrote a pot and the merge says {kinds}')
     document = dad.root(f'omahouse profile merge {child} --keep {shlex.quote(THEIRS)}')
-    omk(vm, 'battery', 'install', 'omahouse', 'omahouse.profile-push')
+    omk(vm, 'battery', 'install', 'omahouse', 'omahouse.profile-push', '--force')
     vm.root('systemctl restart omakure-node.service')
     cue(dad, THEIRS, 'omahouse-profile-push.py', ['--document', document.strip()])
 
@@ -213,7 +213,7 @@ def exercise(vm, dad):
     # -- 2. enrolled, and told the same credit -------------------------------
     for box in (vm, dad):
         for script in ('omahouse.allocation', 'omahouse.sync'):
-            omk(box, 'battery', 'install', 'omahouse', script)
+            omk(box, 'battery', 'install', 'omahouse', script, '--force')
     vm.root('systemctl restart omakure-node.service')
     enrolled = json.loads(node(dad, 'omahouse-sync.py', '--action', 'enroll', '--users', child))
     if not enrolled['ok']:

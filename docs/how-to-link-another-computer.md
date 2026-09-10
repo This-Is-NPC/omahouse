@@ -17,6 +17,8 @@ truth back.
 - **The other computer runs Omarchy and you have ssh to it.** That is the whole
   of what is needed there — no omahouse yet, no omakure, nothing installed by
   hand. `ssh arch@192.168.1.20 true` answering is the check.
+- **Both computers can reach GitHub over HTTPS during linking.** The command
+  downloads the Battery automatically; later enforcement runs locally.
 - **You can become root on both.** On the far side that is your own sudo,
   through the same ssh.
 - **You know this computer's address on the household network.** `ip -4 addr`
@@ -117,34 +119,19 @@ this machine
 
 ## 3. Write a draft here and publish it
 
-The Battery source must be available on both computers. Replace
-`/path/to/omahouse-battery` below with its local checkout on that computer.
-Register and sync it on each computer as the node account first:
-
-```sh
-sudo -u omakure env HOME=/var/lib/omakure-workspace OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace omakure battery add /path/to/omahouse-battery --ref master --name omahouse
-sudo -u omakure env HOME=/var/lib/omakure-workspace OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace omakure battery sync omahouse
-```
+`machine link` installs the Battery automatically on both computers from
+[`omahouse-battery`](https://github.com/This-Is-NPC/omahouse-battery), branch
+`master`, over HTTPS. Both computers need Internet access during linking. The
+adapters live in `/var/lib/omakure-workspace` and run as the node account;
+there is no separate Battery installation step. Repeating the link refreshes
+them and repairs an interrupted setup. A download or installation failure
+fails the command with the cause; fix it and repeat the same link command.
 
 On the central computer:
 
 ```sh
 sudo omahouse profile add kid --name Kid
 sudo omahouse limit kid --session 2h
-sudo -u omakure env HOME=/var/lib/omakure-workspace OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace omakure battery install omahouse omahouse.sync
-sudo -u omakure env HOME=/var/lib/omakure-workspace OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace omakure battery install omahouse omahouse.profile-publish
-```
-
-On the managed computer, install its Battery endpoints as the node account:
-
-```sh
-sudo -u omakure env HOME=/var/lib/omakure-workspace OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace omakure battery install omahouse omahouse.profile-send
-sudo -u omakure env HOME=/var/lib/omakure-workspace OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace omakure battery install omahouse omahouse.profile-push
-```
-
-Then, on the central:
-
-```sh
 sudo omahouse profile publish kid --to "the kitchen laptop"
 ```
 

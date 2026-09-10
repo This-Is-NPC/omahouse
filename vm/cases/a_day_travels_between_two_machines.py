@@ -89,24 +89,7 @@ def collected(vm, dad):
     if dad.root("stat -c %a /etc/omahouse/machine-tokens.json").strip() != "600":
         raise Failed("the keys to the other machines are readable by somebody else")
 
-    # -- the Battery, from this disk -----------------------------------------
-    #
-    # The published one would be whatever was pushed last; these are the scripts
-    # under test. The performer needs the half that publishes a day and the
-    # operator's needs the half that fetches one.
-    def as_node(box, command, check=True):
-        return box.root("-u omakure env HOME=/var/lib/omakure-workspace "
-                        "OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace "
-                        f"omakure {command}", check=check)
-
-    for box, script in ((vm, "omahouse.day"), (dad, "omahouse.collect")):
-        repo = box.put_the_battery()
-        as_node(box, f"--json battery add {repo} --ref master --name omahouse")
-        as_node(box, "--json battery sync omahouse")
-        as_node(box, f"--json battery install omahouse {script}")
-    # The service reads its declarations at startup, and it was started before
-    # the Battery existed.
-    vm.root("systemctl restart omakure-node.service")
+    # Pairing installed the day and collection adapters in the service workspace.
 
     # -- a day on the machine under rules, and a profile on both -------------
     #

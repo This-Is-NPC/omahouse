@@ -4156,7 +4156,7 @@ def check_publish_refuses_what_it_cannot_do(box):
     assert run("profile", "publish", "kid", "--to", "unpaired").returncode != 0
     (workspace / "omahouse-profile-publish.py").unlink()
     result = run("profile", "publish", "kid", "--to", "a")
-    assert "omakure battery install" in result.stderr, result.stderr
+    assert "repeat the original omahouse machine link" in result.stderr, result.stderr
 
 
 def check_publish_lands_a_draft(box):

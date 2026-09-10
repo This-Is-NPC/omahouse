@@ -61,7 +61,7 @@ def exercise(vm, dad):
 
     for box in (vm, dad):
         for script in ('omahouse.allocation', 'omahouse.sync'):
-            omk(box, 'battery', 'install', 'omahouse', script)
+            omk(box, 'battery', 'install', 'omahouse', script, '--force')
     vm.root('systemctl restart omakure-node.service')
     # A bounded explicit enrollment, then every subsequent sync must be a
     # Scheduled row, not a manual command masquerading as automation.

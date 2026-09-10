@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
@@ -71,9 +72,8 @@ bool Omakure::runBatteryScript(const QString &script, const QStringList &argumen
     const QString path = QDir(workspace()).filePath(script);
     if (!QFileInfo::exists(path)) {
         *error = QStringLiteral(
-            "the household's Battery is not installed here — as the node account with "
-            "OMAKURE_SCRIPTS_DIR set to the node workspace: omakure battery install omahouse "
-            "omahouse.sync; omakure battery install omahouse omahouse.profile-publish");
+            "the household's Battery is not installed here — repeat the original omahouse machine link "
+            "command on the central computer to install or repair it automatically");
         return false;
     }
     QString launcher = QStringLiteral("python3");
@@ -241,6 +241,66 @@ bool Omakure::provision(QString *error)
             *error = QStringLiteral("cannot give %1 to %2").arg(owned, user);
             return false;
         }
+    }
+    return true;
+}
+
+bool Omakure::installBattery(const QString &name, QString *error)
+{
+    const QString source = QStringLiteral("https://github.com/This-Is-NPC/omahouse-battery.git");
+    const QStringList prefix {QStringLiteral("--scripts-dir"), workspace(),
+                              QStringLiteral("--json"), QStringLiteral("battery")};
+    QString output;
+    if (!run(prefix + QStringList {QStringLiteral("list")}, &output, error))
+        return false;
+    const auto data = QJsonDocument::fromJson(output.toUtf8()).object().value(QStringLiteral("data"));
+    if (!data.isArray()) {
+        *error = QStringLiteral("Omakure returned an invalid Battery list");
+        return false;
+    }
+    bool registered = false;
+    for (const auto &item : data.toArray()) {
+        const auto entry = item.toObject();
+        if (entry.value(QStringLiteral("name")).toString() != name)
+            continue;
+        registered = true;
+        if (entry.value(QStringLiteral("git_url")).toString() != source
+            || entry.value(QStringLiteral("requested_ref")).toString() != QStringLiteral("master")) {
+            *error = QStringLiteral("Battery %1 is registered to another source or ref; "
+                                    "expected %2 at master").arg(name, source);
+            return false;
+        }
+    }
+    if (!registered && !run(prefix + QStringList {QStringLiteral("add"), source,
+            QStringLiteral("--ref"), QStringLiteral("master"), QStringLiteral("--name"), name},
+            &output, error))
+        return false;
+    if (!run(prefix + QStringList {QStringLiteral("sync"), name}, &output, error, 180000))
+        return false;
+
+    if (!run(prefix + QStringList {QStringLiteral("inspect"), name}, &output, error))
+        return false;
+    const auto inspected = QJsonDocument::fromJson(output.toUtf8()).object()
+                                   .value(QStringLiteral("data")).toObject();
+    const auto scripts = inspected.value(QStringLiteral("manifest")).toObject()
+                                 .value(QStringLiteral("scripts")).toArray();
+    QStringList ids;
+    for (const auto &script : scripts)
+        ids.append(script.toObject().value(QStringLiteral("id")).toString());
+    for (const auto &required : {"omahouse.sync", "omahouse.profile-publish",
+            "omahouse.profile-gather", "omahouse.profile-send", "omahouse.profile-push",
+            "omahouse.day", "omahouse.allocation"}) {
+        if (!ids.contains(QString::fromLatin1(required))) {
+            *error = QStringLiteral("Battery %1 does not provide %2").arg(name, QString::fromLatin1(required));
+            return false;
+        }
+    }
+    // These are the Battery's adapters, not operator-owned schedule wrappers.
+    // --force makes a repeated link repair partial installs and refresh old code.
+    for (const auto &id : ids) {
+        if (!run(prefix + QStringList {QStringLiteral("install"), name, id,
+                QStringLiteral("--force")}, &output, error))
+            return false;
     }
     return true;
 }

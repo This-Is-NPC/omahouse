@@ -1,5 +1,9 @@
 #include "NodeConfig.h"
 #include "Pairing.h"
+#include "Omakure.h"
+#include <QScopeGuard>
+#include <pwd.h>
+#include <unistd.h>
 
 #include <QtTest>
 
@@ -30,6 +34,86 @@ private:
     }
 
 private slots:
+    void batterySetupRepairsRetriesAndReportsFailures()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString root = directory.path();
+        const QList<QByteArray> keys {"OMAHOUSE_OMAKURE_BIN", "OMAHOUSE_OMAKURE_USER",
+                                      "OMAHOUSE_OMAKURE_WORKSPACE"};
+        QList<QByteArray> saved;
+        for (const auto &key : keys)
+            saved.append(qgetenv(key));
+        const auto restore = qScopeGuard([&] {
+            for (int i = 0; i < keys.size(); ++i) {
+                if (saved[i].isNull()) qunsetenv(keys[i].constData());
+                else qputenv(keys[i].constData(), saved[i]);
+            }
+        });
+        const auto write = [&](const QString &name, const QByteArray &contents) {
+            QFile file(root + QLatin1Char('/') + name);
+            if (!file.open(QIODevice::WriteOnly)) return false;
+            return file.write(contents) == contents.size();
+        };
+        QVERIFY(write(QStringLiteral("omakure"), R"PY(#!/usr/bin/python3
+import json, pathlib, sys
+args = sys.argv[1:]
+root = pathlib.Path(args[args.index('--scripts-dir') + 1])
+args = args[args.index('battery') + 1:]
+source = 'https://github.com/This-Is-NPC/omahouse-battery.git'
+registry = root / 'registry'
+ids = ['omahouse.' + s for s in ('sync', 'profile-publish', 'profile-gather',
+                                'profile-send', 'profile-push', 'day', 'allocation')]
+if args[0] == 'list':
+    data = json.loads(registry.read_text()) if registry.exists() else []
+elif args[0] == 'add':
+    assert args == ['add', source, '--ref', 'master', '--name', 'omahouse']
+    assert not registry.exists(), 'duplicate registration'
+    registry.write_text(json.dumps([dict(name='omahouse', git_url=source, requested_ref='master')]))
+    data = {}
+elif args[0] == 'sync':
+    if (root / 'offline').exists():
+        print('network unavailable', file=sys.stderr)
+        sys.exit(1)
+    data = {}
+elif args[0] == 'inspect':
+    data = dict(manifest=dict(scripts=[dict(id=i) for i in ids]))
+elif args[0] == 'install':
+    assert len(args) == 4 and args[3] == '--force'
+    if (root / 'partial').exists() and args[2] == 'omahouse.profile-push':
+        print('cannot install push', file=sys.stderr)
+        sys.exit(1)
+    (root / args[2]).write_text('current')
+    data = {}
+else:
+    raise AssertionError(args)
+print(json.dumps(dict(data=data)))
+)PY"));
+        QVERIFY(QFile::setPermissions(root + "/omakure", QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        qputenv(keys[0].constData(), (root + "/omakure").toUtf8());
+        qputenv(keys[1].constData(), getpwuid(geteuid())->pw_name);
+        qputenv(keys[2].constData(), root.toUtf8());
+        QString error;
+        QVERIFY(write("offline", ""));
+        QVERIFY(!Omakure::installBattery("omahouse", &error));
+        QVERIFY2(error.contains("network unavailable"), qPrintable(error));
+        QVERIFY(!QFile::exists(root + "/omahouse.sync"));
+        QVERIFY(QFile::remove(root + "/offline"));
+        QVERIFY(write("partial", ""));
+        QVERIFY(!Omakure::installBattery("omahouse", &error));
+        QVERIFY2(error.contains("cannot install push"), qPrintable(error));
+        QVERIFY(QFile::remove(root + "/partial"));
+        QVERIFY2(Omakure::installBattery("omahouse", &error), qPrintable(error));
+        QVERIFY(write("omahouse.profile-push", "old"));
+        QVERIFY2(Omakure::installBattery("omahouse", &error), qPrintable(error));
+        QFile pushed(root + "/omahouse.profile-push");
+        QVERIFY(pushed.open(QIODevice::ReadOnly));
+        QCOMPARE(pushed.readAll(), QByteArray("current"));
+        QVERIFY(write("registry", R"([{"name":"omahouse","git_url":"elsewhere","requested_ref":"master"}])"));
+        QVERIFY(!Omakure::installBattery("omahouse", &error));
+        QVERIFY2(error.contains("another source"), qPrintable(error));
+    }
+
     void aLineSurvivesTheJourney()
     {
         const Pairing sent = anOrdinaryOne();
