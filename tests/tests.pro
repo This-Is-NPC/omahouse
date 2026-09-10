@@ -31,6 +31,7 @@ SOURCES += \
     tst_webpolicy.cpp \
     tst_fleet.cpp \
     tst_kind.cpp \
+    tst_publication.cpp \
     tst_pairing.cpp \
     tst_polkit.cpp
 

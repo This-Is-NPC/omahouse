@@ -39,6 +39,7 @@ constexpr int kLedgerSchema = 1;
 constexpr int kMachineSchema = 1;
 /// `/etc/omahouse/machines.json` -- the household's list of computers.
 constexpr int kMachinesSchema = 1;
+constexpr int kPublicationSchema = 1;
 
 /// Reads a JSON object from `path`. `missing` tells "there is no file yet"
 /// apart from "the file is unreadable": the first is the ordinary state of a

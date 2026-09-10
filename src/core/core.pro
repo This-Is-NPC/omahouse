@@ -30,6 +30,7 @@ HEADERS += \
     Pairing.h \
     Policy.h \
     Profile.h \
+    Publication.h \
     Version.h \
     WebPolicy.h
 
@@ -47,5 +48,6 @@ SOURCES += \
     Pairing.cpp \
     Policy.cpp \
     Profile.cpp \
+    Publication.cpp \
     Version.cpp \
     WebPolicy.cpp

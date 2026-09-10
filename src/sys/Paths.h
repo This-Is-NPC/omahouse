@@ -93,6 +93,8 @@ QString stagedDir();
 /// manager could not reach is the reason a merge exists, and it has to be here
 /// before anybody can decide about it.
 QString elsewhereProfileFile(const QString &machine, const QString &user);
+QString publishedProfileFile(const QString &machine, const QString &user);
+QString resolvedProfileFile(const QString &machine, const QString &user);
 
 /// `<stateDir>/elsewhere` -- where every other machine's days are collected.
 QString elsewhereDir();

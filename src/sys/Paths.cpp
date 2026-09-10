@@ -115,6 +115,15 @@ QString elsewhereDir()
     return stateDir() + QStringLiteral("/elsewhere");
 }
 
+QString publishedProfileFile(const QString &machine, const QString &user)
+{
+    return QFileInfo(elsewhereProfileFile(machine, user)).dir().filePath(QStringLiteral("published.json"));
+}
+QString resolvedProfileFile(const QString &machine, const QString &user)
+{
+    return QFileInfo(elsewhereProfileFile(machine, user)).dir().filePath(QStringLiteral("resolved.json"));
+}
+
 QString elsewhereProfileFile(const QString &machine, const QString &user)
 {
     return elsewhereDir() + QLatin1Char('/') + machine + QLatin1Char('/') + user

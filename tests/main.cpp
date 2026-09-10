@@ -23,6 +23,8 @@ int runPairingTests(int argc, char **argv);
 int runKindTests(int argc, char **argv);
 int runPolkitTests(int argc, char **argv);
 
+int runPublicationTests(int argc, char **argv);
+
 int main(int argc, char **argv)
 {
     QCoreApplication application(argc, argv);
@@ -45,6 +47,7 @@ int main(int argc, char **argv)
     failures += runFleetTests(argc, argv);
     failures += runPairingTests(argc, argv);
     failures += runKindTests(argc, argv);
+    failures += runPublicationTests(argc, argv);
     failures += runPolkitTests(argc, argv);
     return failures == 0 ? 0 : 1;
 }
