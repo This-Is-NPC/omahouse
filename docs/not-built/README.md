@@ -3,8 +3,8 @@
 Two paths were designed for controlling and measuring a child's browsing. One
 was measured and refused; the other was measured and mostly shipped. A third
 page is not about browsing at all: it is what the same engine would need to
-govern a network of machines and people. This directory is where the parts that
-**do not exist** are written down, so that no page in this documentation can
+govern a network of machines and people. This directory records refused
+proposals and retained design history, so that no page in this documentation can
 leave a reader thinking something is there when it is not.
 
 Everything that does exist is documented as a feature: the how-to pages say how
@@ -98,40 +98,21 @@ extension is really dead in an incognito window (§4.2, §9 question 8), and wha
 a suspend and resume do to the reporting (§5.2, §9 question 9) — the round that
 measured the meter end to end deliberately did not exercise either.
 
-## Many machines and many people — designed and not started
+## Many machines and many people — built, with the design retained
 
-[**Profiles across a network**](profiles-across-a-network.md) is what it would
-take for one omahouse to govern many machines and many people: a lan house, an
-office, a lab. It was decided on 2026-09-08, and the page's own header says
-which of it has since been built: the three shapes of budget, the profile for
-anybody, the push, the stamp, the merge and the verb that asks for a pot are in;
-what is open is on that page and not here. One piece was built wrong on the way
-— a budget anchored at the login, which its §1 records and replaces.
+[**Profiles across a network**](profiles-across-a-network.md) records the model
+behind never-reset budgets, fallback profiles, remote policy, and shared time.
+Those capabilities are built, including explicit draft publication from the
+central CLI and Studio through the Battery. Each machine keeps enforcing its
+local policy when disconnected. Publishing is manual; collection and allocation
+can be scheduled. The current walkthrough is
+[linking another computer](../how-to-link-another-computer.md).
 
-The engine is already general — [`design.md` §4](../design.md) says the same
-schema with `default: "allow"` is a focus profile for an adult — so the page is
-about four gaps and not about a new product:
-
-- **a budget that never resets**, beside the daily one. Two hours that are gone
-  when they are gone, whatever the clock says and however often somebody logs in,
-  because the allowance belongs to the person;
-- **a profile that names no account**, so a machine can carry rules for whoever
-  logs in without naming forty people one at a time. It has a consequence in
-  another program: *no profile* stops meaning *no rules*, and omastore reads that
-  file;
-- **a profile that arrives from a central omahouse** and is cached locally, where
-  pulling at login is mandatory and a machine that cannot reach the centre does
-  not open a new session;
-- **one pool of time spent anywhere**, replacing the equal division of
-  [`how-to-schedule-household.md`](../how-to-schedule-household.md), whose own
-  words today are that `house` is *"a total of observations, not an authorization
-  to spend the same remainder everywhere"*.
-
-Its §8 records three things that were proposed on the way and refused — a
-drop-in directory with a precedence, a ceiling on disconnected spending, and
-Chromium's mandatory-versus-recommended split — each with the reason it stopped
-being necessary. That section is the one to read before proposing any of them
-again.
+The page remains here as a decision record, including the login-anchored budget
+that was replaced, and the reasons for refusing a drop-in directory, a second
+network receptor, and scheduled publication. Current behavior is authoritative in
+[`design.md`](../design.md); historical proposals on that page are not additional
+features waiting to be implemented.
 
 ---
 

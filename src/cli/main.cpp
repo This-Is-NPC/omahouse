@@ -3423,13 +3423,11 @@ int cmdProfileApplyStaged(const Globals &g, const QStringList &positionals)
     // Whether this push may overwrite what is here, and it is the difference
     // between an emergency exit and a loan.
     //
-    // The tiebreak says the most recent written wins, and a manager pushes on a
-    // schedule -- so recency favours the central by construction. An
-    // administrator who fixes something by hand at two o'clock is overwritten
-    // by the routine push at five past, with nobody deciding and nobody told.
-    // That defeats the thing the whole design is for: omahouse is installed
-    // whole on every machine so that somebody can sit down and fix it with the
-    // central unreachable, and a fix the next cycle erases was not a fix.
+    // A manager can issue a newer draft after an administrator fixes something
+    // by hand. Recency alone must not let that later push overwrite a policy
+    // nobody decided about. omahouse is installed whole on every machine so
+    // that somebody can sit down and fix it with the central unreachable; a
+    // later push that silently erases that fix would defeat the emergency exit.
     //
     // It is also what makes a merge possible at all. A push that overwrote
     // blind would destroy the evidence before anybody could be asked about it,

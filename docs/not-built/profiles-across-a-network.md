@@ -1,14 +1,13 @@
-# Profiles across a network — designed, and mostly not built
+# Profiles across a network — the design record
 
-> **Phases A and B shipped on 2026-09-08, and the last step of C on
-> 2026-09-09; §7 marks each step.** A budget can be `daily` or `never`, and
-> `omahouse limit --resets never` is what asks for one; a profile can name no account and
-> rule whoever sits at the machine; every profile records who wrote it and when;
-> a manager pushes one through a staging file and stands off a human edit it did
-> not make; a machine sends its own back in the same shape; and a merge answers
-> four things about the two copies. What is open in phase B is the manager's own
-> script, which lives in `omahouse-battery`. Phase C — one pool, reported and
-> read back — is designed here and not built.
+> **Built through draft publication on 2026-09-09; §7 marks the steps.**
+> Daily and never-reset budgets, fallback profiles, stamped policy, collection,
+> merge, shared household spending, and explicit draft publication are built.
+> The CLI and Studio choose destinations; `omahouse-battery` owns transport on
+> both ends. The manager script is `omahouse-profile-publish.py`, called by
+> `omahouse profile publish`. Current usage and implementation are documented in
+> [`design.md`](../design.md) and the linking walkthrough. The sections below
+> retain the decisions that led there, including models since replaced.
 >
 > The page also records a model that was built **wrong** and replaced the same
 > day: a budget anchored at the *login*, with a sitting in the ledger. §1 keeps
@@ -31,10 +30,9 @@
 > computers spent, and an allocation that divides a daily allowance between them.
 > The accounting across machines is built. The transport is built.
 >
-> **What does not exist.** A budget whose clock starts at login. A profile that
-> names no account. A profile that arrives from somewhere else. One pool of time
-> spent wherever the person sits. A tiebreak between two people who wrote the
-> same profile.
+> **Deliberately not built.** A login-resetting clock, an omahouse-owned network
+> receptor, and scheduled profile publication. Policy changes require an explicit
+> publication; a machine enforces its local rules while disconnected.
 >
 > §1 to §6 are the decisions and their reasons. §7 is the order of work. §8 is
 > what was proposed on the way here and refused, which is the part worth reading
@@ -516,14 +514,14 @@ different sums to report and to read back.
    session** and ask which have no profile of their own — a capability `Proc` did
    not have. *core, sys, cli, studio*
 6. **Done.** **Push from the manager, cache locally.** A cued script writes the profile;
-   the local file is the last version this machine was told; a cache past the
-   freshness limit opens no new session. *core, sys, cli, omahouse-battery*
+   the local file is the last version this machine was told and remains
+   enforceable while the manager is unreachable. *core, sys, cli, omahouse-battery*
 7. **Done.** **Written-at and written-by on the profile.** The tiebreak needs it
    and the merge screen needs it, and it is one field for both. Stamped in
    `saveProfiles` and only on the profiles that actually differ, because a stamp
    each verb has to remember is a stamp the next verb will not, and stamping all
    of them turns *who changed a rule* into *who ran a command last*. *core*
-8. **Done on the machine's side; the manager's script is open.** **Merge of
+8. **Done on both sides; step 19 records the publishing interface.** **Merge of
    locally created profiles.** The manager lists what a machine has and offers to
    take it in, and it answers **four** things rather than two: `new` (the machine
    has one the manager never issued), `changed` (both have one and the rules
@@ -603,6 +601,20 @@ different sums to report and to read back.
     manager's next statement was refused for consumption moving backwards;
     with that fix reverted the case fails at exactly that step. *tests, cli*
 
+19. **Done. A central draft is published to chosen machines.** The manager checks
+    all paired machines before pushing to any of them. Unresolved changes block
+    publication everywhere until `profile merge --take` or `--keep` acknowledges
+    the exact observed version and chosen central rules. Publication records are
+    advanced only after a successful push and readback; failed checks preserve
+    the last collected copy. `--all` chooses reached machines needing the draft.
+    The Studio shows household identity, machines without a selected person,
+    publication standing, and a multi-select `u publish` sheet. Transport lives
+    in the Battery, never in an omahouse receptor. Allocation remains local to
+    each machine and is excluded from policy comparisons; whole-version
+    `supersedes` still protects the receiver against a stale decision.
+    *core, sys, cli, studio, omahouse-battery, tests*
+
+
 **Omakure does not change.** It is the wire, and `collect` already travels on it.
 **The browser extension does not change.** A site budget uses the same machinery
 as an app budget, so a credit reaches it for free.
@@ -639,8 +651,16 @@ what omahouse sends.
 
 ## 8. What was proposed on the way here and refused
 
-Three ideas were argued and dropped. They are recorded because each of them is
+These ideas were argued and dropped. They are recorded because each of them is
 what a reader would reach for first.
+
+**A receptor script shipped by omahouse.** Refused by the owner on 2026-09-09:
+omahouse owns the rules and the decision; the Battery owns transport on both
+ends. Adding another receptor would split that responsibility.
+
+**Publishing on a schedule.** Refused: gathering observations and allocating
+consumption can be scheduled, but replacing somebody's rules is an explicit
+operator action. A routine synchronization must not choose policy conflicts.
 
 **A drop-in directory with a precedence.** `/etc/omahouse/profiles.d/*.json`
 composed over `profiles.json`, Chromium's shape, with a rule for which file wins
