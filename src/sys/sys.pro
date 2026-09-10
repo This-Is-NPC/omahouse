@@ -39,6 +39,7 @@ HEADERS += \
     Notify.h \
     Omakure.h \
     Paths.h \
+    PublicationStore.h \
     Presence.h \
     Proc.h \
     Users.h \
@@ -54,6 +55,7 @@ SOURCES += \
     Notify.cpp \
     Omakure.cpp \
     Paths.cpp \
+    PublicationStore.cpp \
     Presence.cpp \
     Proc.cpp \
     Users.cpp \

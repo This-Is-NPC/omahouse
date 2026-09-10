@@ -17,6 +17,7 @@
 #include "Pairing.h"
 #include "Day.h"
 #include "Paths.h"
+#include "PublicationStore.h"
 #include "Presence.h"
 #include "Proc.h"
 #include "Profile.h"
@@ -2716,6 +2717,25 @@ int cmdMachine(const Globals &g, const QStringList &positionals, const Options &
     return kUsage;
 }
 
+bool profilePublication(const Profile &draft, QVector<PublicationRow> *rows)
+{
+    Fleet fleet;
+    int status = kOk;
+    QString error;
+    if (!loadMachines(&fleet, &status)) return false;
+    if (!publicationRows(draft, fleet.all, rows, &error)) {
+        fail(error); return false;
+    }
+    return true;
+}
+
+bool managerHere()
+{
+    ThisMachine machine;
+    QString error;
+    return readThisMachine(paths::thisMachineFile(), &machine, &error) && machine.kind == Kind::Manager;
+}
+
 int cmdProfileList(const Globals &g)
 {
     int status = kOk;
@@ -2723,10 +2743,11 @@ int cmdProfileList(const Globals &g)
     if (!loadProfiles(&profiles, &status))
         return status;
 
+    const bool manager = managerHere();
     if (g.json) {
         QJsonArray array;
         for (const Profile &profile : profiles.all) {
-            array.append(QJsonObject {
+            QJsonObject row {
                 {QStringLiteral("user"), profile.user},
                 {QStringLiteral("displayName"), profile.displayName},
                 {QStringLiteral("enabled"), profile.enabled},
@@ -2734,7 +2755,14 @@ int cmdProfileList(const Globals &g)
                 {QStringLiteral("default"), verdictName(profile.defaultVerdict)},
                 {QStringLiteral("rules"), profile.rules.size()},
                 {QStringLiteral("budgets"), profile.budgets.size()},
-            });
+            };
+            if (manager) {
+                QVector<PublicationRow> publication;
+                if (!profilePublication(profile, &publication)) return kUsage;
+                row.insert("publication", publicationSummary(publication));
+                row.insert("unresolved", standingOf(publication).unresolved);
+            }
+            array.append(row);
         }
         printJson(array);
         return kOk;
@@ -2760,11 +2788,17 @@ int cmdProfileList(const Globals &g)
             QString::number(profile.rules.size()),
             QString::number(profile.budgets.size()),
         });
+        if (manager) {
+            QVector<PublicationRow> publication;
+            if (!profilePublication(profile, &publication)) return kUsage;
+            rows.last().append(publicationSummary(publication));
+        }
     }
-    printTable({QStringLiteral("USER"), QStringLiteral("NAME"), QStringLiteral("ENABLED"),
+    QStringList headers {QStringLiteral("USER"), QStringLiteral("NAME"), QStringLiteral("ENABLED"),
                 QStringLiteral("ENFORCE"), QStringLiteral("DEFAULT"), QStringLiteral("RULES"),
-                QStringLiteral("BUDGETS")},
-               rows, {false, false, false, false, false, true, true});
+                QStringLiteral("BUDGETS")};
+    if (manager) headers.append(QStringLiteral("PUBLISHED"));
+    printTable(headers, rows, {false, false, false, false, false, true, true});
     return kOk;
 }
 
@@ -2810,6 +2844,15 @@ int cmdProfileShow(const Globals &g, const QStringList &positionals)
         // condition inside this one.
         printJson(profilesToJson({*profile}));
         return kOk;
+    }
+
+    if (managerHere()) {
+        QVector<PublicationRow> publication;
+        if (!profilePublication(*profile, &publication)) return kUsage;
+        QVector<QStringList> rows;
+        for (const auto &row : publication) rows.append({row.machine, publicationSaid(row.state)});
+        printTable({QStringLiteral("MACHINE"), QStringLiteral("PUBLISHED")}, rows, {});
+        out() << "\n";
     }
 
     out() << QStringLiteral("omahouse profile — %1").arg(profile->user);
@@ -4782,35 +4825,14 @@ int cmdProfileMerge(const Globals &g, const QStringList &positionals, const Opti
         return status;
     const Profile *mine = profileFor(profiles, user);
 
-    struct Says {
-        QString machine;
-        bool collected = false;
-        bool has = false;
-        Profile profile;
-    };
+    using Says = Collected;
     QVector<Says> heard;
     for (const Machine &machine : fleet.all) {
-        Says said;
-        said.machine = machine.name;
-        QJsonObject document;
+        Collected said;
         QString error;
-        bool absent = false;
-        if (!readJsonObject(paths::elsewhereProfileFile(machine.name, user), &document, &error,
-                            &absent)) {
+        if (!readCollected(machine.name, user, &said, &error)) {
             fail(QStringLiteral("%1: %2").arg(verb, error));
             return kUsage;
-        }
-        if (!absent) {
-            QVector<Profile> read;
-            if (!profilesFromJson(document, &read, &error)) {
-                fail(QStringLiteral("%1: what %2 sent will not read: %3")
-                         .arg(verb, machine.name, error));
-                return kUsage;
-            }
-            said.collected = true;
-            said.has = !read.isEmpty();
-            if (said.has)
-                said.profile = read.constFirst();
         }
         heard.append(said);
     }

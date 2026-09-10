@@ -4078,6 +4078,39 @@ def check_the_reading_verbs_write_nothing(box):
     assert (fingerprint(box.config), fingerprint(box.state)) == before
 
 
+def publication_fixture(box):
+    box.write_profiles({"schemaVersion": 2, "profiles": []})
+    assert box.run("profile", "add", "kid").returncode == 0
+    (box.config / "machine.json").write_text(json.dumps({"schemaVersion": 1,
+        "kind": "manager", "name": "central", "since": "2026-09-09T10:00:00Z"}))
+    for machine in ("a", "b"):
+        result = box.run("machine", "add", machine, "--node", "omk1_abc", "--at", "localhost:8787")
+        assert result.returncode == 0, result.stderr
+    return json.loads(box.run("profile", "show", "kid", "--json").stdout)
+
+
+def check_profile_list_and_show_say_where_a_profile_stands(box):
+    draft = publication_fixture(box)
+    result = box.run("profile", "list")
+    assert "PUBLISHED" in result.stdout, result.stdout
+    assert "never" in result.stdout, result.stdout
+    assert "never published" in box.run("profile", "show", "kid").stdout
+    assert json.loads(box.run("profile", "show", "kid", "--json").stdout) == draft
+    directory = box.state / "elsewhere" / "a" / "kid"
+    directory.mkdir(parents=True)
+    (directory / "published.json").write_text(json.dumps({"schemaVersion": 1,
+        "publishedAt": "2026-09-09T10:00:00Z", "profile": draft["profiles"][0]}))
+    assert "up to date" in box.run("profile", "show", "kid").stdout
+    assert box.run("limit", "kid", "--session", "1h").returncode == 0
+    assert "1 behind" in box.run("profile", "list").stdout
+    changed = json.loads(json.dumps(draft))
+    changed["profiles"][0]["displayName"] = "Changed there"
+    (directory / "profile.json").write_text(json.dumps(changed))
+    row = json.loads(box.run("profile", "list", "--json").stdout)[0]
+    assert row["unresolved"] is True, row
+    assert "unresolved (a)" == row["publication"], row
+
+
 def main():
     assert CLI.is_file(), f"missing CLI at {CLI}"
     cases = [
@@ -4102,6 +4135,7 @@ def main():
         check_report_wants_a_user,
         check_profile_list_before_anything_is_configured,
         check_profile_list,
+        check_profile_list_and_show_say_where_a_profile_stands,
         check_profile_show,
         check_profile_refuses_what_it_does_not_do,
         check_a_profile_from_nothing_to_read_back,
