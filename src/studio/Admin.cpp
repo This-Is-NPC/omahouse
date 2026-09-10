@@ -86,6 +86,7 @@ void Admin::run(const QString &title, const QStringList &arguments)
         && (verbWritesState(verb) ? paths::stateDirIsTheSystems()
                                   : paths::configDirIsTheSystems());
 
+    m_output.clear();
     m_title = title;
     m_failed = false;
     m_message = needsRoot ? QStringLiteral("%1 — waiting for polkit").arg(title)
@@ -110,6 +111,11 @@ void Admin::run(const QString &title, const QStringList &arguments)
             [this, process](int code, QProcess::ExitStatus status) {
                 const QByteArray err = process->readAllStandardError();
                 const QByteArray out = process->readAllStandardOutput();
+                m_output.clear();
+                for (const auto &line : QString::fromUtf8(out).split(QLatin1Char('\n'))) {
+                    if (!line.trimmed().isEmpty())
+                        m_output.append(line);
+                }
                 m_process = nullptr;
                 process->deleteLater();
 
@@ -167,8 +173,9 @@ void Admin::complain(const QString &text)
 
 void Admin::clear()
 {
-    if (m_message.isEmpty())
+    if (m_message.isEmpty() && m_output.isEmpty())
         return;
+    m_output.clear();
     m_message.clear();
     m_failed = false;
     emit changed();

@@ -104,9 +104,10 @@ Window {
     /// by then.
     property string target: ""
     property string targetKind: ""
+    property string publishUser: ""
 
     readonly property bool blocked: helpSheet.visible || commandPalette.visible
-                                    || prompt.visible || confirm.visible || picker.visible
+                                    || prompt.visible || confirm.visible || picker.visible || publishSheet.visible
                                     || win.filtering
 
     // Where a cursor really is, as opposed to where it was last put.
@@ -149,8 +150,20 @@ Window {
         return {name: machine.name, id: "", state: machine.reachable ? "paired" : "not paired",
                 machineOnly: true, limited: false}
     })
-    readonly property var fleetRows: win.subject === "" ? win.narrow(win.machineRows, win.filterFleet)
-        : win.narrow((House.snapshot.fleet || {})[win.subject] || [], win.filterFleet)
+    readonly property var fleetRows: {
+        let rows = win.subject === "" ? win.machineRows : ((House.snapshot.fleet || {})[win.subject] || [])
+        if (win.subject !== "" && rows.length === 0)
+            rows = win.machineRows
+        const publication = win.person ? win.person.publication || [] : []
+        const decorated = rows.map(function (row) {
+            const copy = Object.assign({}, row)
+            const found = publication.find(function (one) { return one.machine === row.name })
+            copy.publication = found ? found.state : ""
+            return copy
+        })
+        return win.narrow(decorated, win.filterFleet)
+    }
+    readonly property bool fleetHasBudgets: win.fleetRows.some(function (row) { return !row.machineOnly })
     readonly property int fleetCursor: win.clamp(win.cursorFleet, win.fleetRows.length)
     readonly property var catalogue: win.subject === "" ? []
         : (House.snapshot.catalog[win.subject] || [])
@@ -221,6 +234,12 @@ Window {
             return rows
         }
         if (win.view === 1) {
+            const standing = person && person.standing ? person.standing : {unresolved: false, changedOn: []}
+            const resolve = standing.error || (standing.changedOn || []).join(", ")
+            if (win.household.kind === "manager") rows.push({ id: "publish", key: "u", hint: standing.unresolved ? "resolve " + resolve : "publish",
+                        label: standing.unresolved ? "resolve " + resolve + " before publishing" : "publish this draft",
+                        usable: win.household.kind === "manager" && win.machineRows.length > 0
+                                && person !== null && !standing.unresolved && !Admin.busy })
             rows.push({ id: "new", key: "n", hint: "new profile",
                         label: "put an account under rules", usable: true })
             rows.push({ id: "enforce", key: "e",
@@ -462,6 +481,14 @@ Window {
         const person = win.person
         const row = win.currentRow
 
+        if (id === "publish") {
+            if (win.household.kind !== "manager" || person === null
+                || !person.standing || person.standing.unresolved)
+                return
+            win.publishUser = person.user
+            publishSheet.open(person.publication || [], person.name)
+            return
+        }
         if (id === "fleet") {
             win.go(5)
             return
@@ -807,6 +834,7 @@ Window {
         target: Admin
         function onDone(ok) {
             House.reload()
+            publishSheet.showResult()
         }
     }
 
@@ -1078,7 +1106,7 @@ Window {
                             width: parent.width
                             wrapMode: Text.WordWrap
                             quiet: true
-                            text: win.subject === "" ? "The computers linked to this household."
+                            text: !win.fleetHasBudgets ? "The computers linked to this household."
                                   : "One pot, spent on any of them: every row of a budget "
                                   + "shows the same credit and the same balance, and USED "
                                   + "is that computer's share of having spent it. A recent "
@@ -1095,8 +1123,8 @@ Window {
                         Row {
                             objectName: "fleetColumns"
                             width: parent.width
-                            Label { width: parent.width * 0.45; text: win.subject === "" ? "MACHINE" : "MACHINE / BUDGET"; quiet: true }
-                            Label { visible: win.subject !== ""; text: "USED / CREDIT / LEFT"; quiet: true }
+                            Label { width: parent.width * 0.45; text: !win.fleetHasBudgets ? "MACHINE" : "MACHINE / BUDGET"; quiet: true }
+                            Label { visible: win.fleetHasBudgets; text: "USED / CREDIT / LEFT"; quiet: true }
                         }
                         ListView {
                             id: fleetList
@@ -1134,7 +1162,7 @@ Window {
                                     }
                                     Label {
                                         width: parent.width
-                                        text: fleetRow.modelData.state
+                                        text: fleetRow.modelData.state + (fleetRow.modelData.publication ? " · " + fleetRow.modelData.publication : "")
                                         quiet: true
                                         elide: Text.ElideRight
                                     }
@@ -1243,6 +1271,7 @@ Window {
                                     text: personRow.who.policy + " · " + personRow.who.teeth
                                           + " · " + personRow.who.programCount + " program"
                                           + (personRow.who.programCount === 1 ? "" : "s")
+                                          + (personRow.who.publicationSummary ? " · " + personRow.who.publicationSummary : "")
                                 }
                             }
 
@@ -1913,6 +1942,18 @@ Window {
         anchors.fill: parent
         returnFocus: win.takeFocus
         onConfirmed: function (topic) { win.settle(topic) }
+    }
+
+    Publish {
+        id: publishSheet
+        anchors.fill: parent
+        returnFocus: win.takeFocus
+        onChosen: function (machines) {
+            const args = ["profile", "publish", win.publishUser]
+            for (const machine of machines)
+                args.push("--to", machine)
+            Admin.run("publish " + win.publishUser, args)
+        }
     }
 
     Picker {

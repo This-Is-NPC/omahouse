@@ -35,6 +35,7 @@ class Admin : public QObject
     /// The last outcome, in words, for the status bar. Empty until something
     /// has been asked for.
     Q_PROPERTY(QString message READ message NOTIFY changed)
+    Q_PROPERTY(QStringList output READ output NOTIFY changed)
     Q_PROPERTY(bool failed READ failed NOTIFY changed)
     /// Whether a write goes out through `pkexec`. False on a tree that was
     /// pointed somewhere else by `$OMAHOUSE_CONFIG_DIR`, which is not a
@@ -51,6 +52,7 @@ public:
 
     bool busy() const { return m_process != nullptr; }
     QString message() const { return m_message; }
+    QStringList output() const { return m_output; }
     bool failed() const { return m_failed; }
     bool elevates() const;
     QString program() const { return m_program; }
@@ -76,6 +78,7 @@ private:
 
     QString m_program;
     QString m_message;
+    QStringList m_output;
     QString m_title;
     bool m_failed = false;
     QProcess *m_process = nullptr;

@@ -763,6 +763,14 @@ Every screen it draws is inventoried in [`screens.md`](screens.md).
 
 ---
 
+On the manager, the people view also reports draft publication standing.
+`u publish` opens a multi-select machine sheet and runs one privileged
+`profile publish` call for the chosen destinations. Unresolved profiles disable
+that action and identify the required merge. The sheet retains all CLI result
+lines; dismissing it while the command runs only hides it. `f machines` is
+available without a person and still lists machines for a profile without budgets.
+The header exposes the computer's household role and names its managed machines.
+
 ## 9. Packaging
 
 `packaging/` holds the unit, the polkit policy, the polkit rule, the desktop

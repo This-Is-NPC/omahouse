@@ -502,7 +502,9 @@ a race the offscreen run does not lose.
 
 ## Household machines
 
-Select an account as the operator and press **f**. Each row is one limited
+Press **f** as the operator to list household machines, even without selecting
+an account. With a person selected, each machine also shows that draft's publication
+standing; profiles without budgets still show their machines. Each budget row is one limited
 budget on one computer: that computer's consumption, the household's credit and
 what is left of it, followed by the observation state and timestamp.
 
@@ -534,3 +536,18 @@ to enroll computers and activate the Omakure schedule.
 The header names this computer's role: a manager shows how many computers it
 manages and their names; a managed computer says it is managed from another
 computer. The sentence elides before it can overlap the view tabs.
+
+## Publishing a draft
+
+On the manager's people view, **u publish** opens a selection sheet. Computers
+behind or never published start selected; up-to-date computers start unselected.
+Space toggles a row and Enter publishes the chosen destinations through one CLI
+call. Empty selection and Escape before submission change nothing. During the
+operation Escape hides the sheet; it does not cancel an in-flight publication.
+The result shows every nonempty output line from the CLI.
+
+An unresolved profile disables publication and names the computer whose version
+needs a merge decision. The people row says `unpublished`, `1 behind`, or
+`unresolved · changed on …`. Not-paired and changed-there rows cannot be selected.
+
+![The manager selecting station-02 to receive the draft, with its publication state shown.](img/32-operator-publish.png)

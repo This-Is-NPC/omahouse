@@ -4,15 +4,16 @@
 
 #include "AppScope.h"
 #include "Catalog.h"
+#include "Day.h"
 #include "Duration.h"
 #include "Kind.h"
-#include "Day.h"
 #include "Ledger.h"
 #include "Paths.h"
 #include "Policy.h"
 #include "Presence.h"
 #include "Proc.h"
 #include "Profile.h"
+#include "PublicationStore.h"
 #include "Users.h"
 #include "WebPolicy.h"
 
@@ -1037,6 +1038,35 @@ void House::refresh()
         }
         person.insert(QStringLiteral("hasSessionBudget"), !session.isEmpty());
         person.insert(QStringLiteral("session"), session);
+        if (here.kind == Kind::Manager) {
+            QVector<PublicationRow> publication;
+            QString publicationError;
+            const bool readable
+                = publicationRows(profile, household, &publication, &publicationError);
+            const auto standing = standingOf(publication);
+            QVariantList rows;
+            for (const auto &row : publication) {
+                rows.append(QVariantMap { { QStringLiteral("machine"), row.machine },
+                    { QStringLiteral("state"), publicationName(row.state) } });
+            }
+            person.insert(QStringLiteral("publication"), rows);
+            person.insert(QStringLiteral("standing"),
+                QVariantMap { { QStringLiteral("unresolved"), !readable || standing.unresolved },
+                    { QStringLiteral("changedOn"), standing.changedOn },
+                    { QStringLiteral("error"), publicationError } });
+            QString summary = publicationSummary(publication);
+            if (summary == QLatin1String("never"))
+                summary = QStringLiteral("unpublished");
+            if (standing.unresolved)
+                summary = QStringLiteral("unresolved · changed on %1")
+                              .arg(standing.changedOn.join(QStringLiteral(", ")));
+            if (!readable) {
+                summary = QStringLiteral("publication unreadable");
+                if (error.isEmpty())
+                    error = publicationError;
+            }
+            person.insert(QStringLiteral("publicationSummary"), summary);
+        }
         people.append(person);
     }
 

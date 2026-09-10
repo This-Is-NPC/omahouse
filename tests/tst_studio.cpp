@@ -160,6 +160,8 @@ private slots:
     void theFilterNarrowsOnlyTheListItWasTypedOn();
     void theSubjectFaceHasNothingToPress();
     void theWindowNeverWritesToTheMachine();
+    void publishGoesThroughTheCli();
+    void publishIsRefusedWhileUnresolved();
     void theMachinesViewOpensWithNobodySelected();
     void theHeaderSaysWhatThisComputerIs();
     void theHeaderKeepsOffTheTabsWhenNarrow();
@@ -1236,6 +1238,130 @@ QByteArray TestStudio::treeUnder(const QString &directory)
     return fingerprint;
 }
 
+void TestStudio::publishGoesThroughTheCli()
+{
+    QString error;
+    Profile profile;
+    profile.user = QStringLiteral("tstjulia");
+    profile.displayName = QStringLiteral("Julia");
+    QVERIFY(writeProfiles(paths::profilesFile(), { profile }, &error));
+    ThisMachine manager;
+    manager.kind = Kind::Manager;
+    manager.since = QDateTime::currentDateTimeUtc();
+    QVERIFY(writeThisMachine(paths::thisMachineFile(), manager, &error));
+    Machine station;
+    station.name = QStringLiteral("station-02");
+    station.nodeId = QStringLiteral("omk1_abc");
+    station.endpoint = QStringLiteral("localhost:8787");
+    Machine second = station;
+    second.name = QStringLiteral("the study");
+    QVERIFY(writeMachines(paths::machinesFile(), { station, second }, &error));
+
+    const QString recorded = m_tree.path() + QStringLiteral("/publish-arguments");
+    const QString recorder = m_tree.path() + QStringLiteral("/publish-cli");
+    QFile script(recorder);
+    QVERIFY(script.open(QIODevice::WriteOnly));
+    script.write(QStringLiteral("#!/bin/sh\nprintf '%s\\n' \"$@\" > '%1'\nprintf 'MACHINE "
+                                "RESULT\\nstation-02 published\\nthe study published\\n'\n")
+            .arg(recorded)
+            .toUtf8());
+    script.close();
+    QVERIFY(script.setPermissions(
+        QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+    qputenv("OMAHOUSE_CLI", recorder.toLocal8Bit());
+    QQmlApplicationEngine engine;
+    engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+    qputenv("OMAHOUSE_CLI", m_cli.toLocal8Bit());
+    QVERIFY(!engine.rootObjects().isEmpty());
+    auto *localWindow = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+    QVERIFY(localWindow);
+    QVERIFY(QTest::qWaitForWindowExposed(localWindow));
+    auto *admin
+        = engine.singletonInstance<Admin *>(QStringLiteral("omahouse"), QStringLiteral("Admin"));
+    QCOMPARE(admin->program(), recorder);
+    QSignalSpy done(admin, &Admin::done);
+    auto *chip = itemNamed(localWindow->contentItem(), QStringLiteral("command-publish"));
+    QVERIFY2(chip, "publish has no clickable command");
+    QCOMPARE(chip->property("key").toString(), QStringLiteral("u"));
+    QVERIFY(chip->property("usable").toBool());
+    QTest::keyClick(localWindow, Qt::Key_U);
+    settle();
+    auto *opened = itemNamed(localWindow->contentItem(), QStringLiteral("publishSheet"));
+    QVERIFY2(opened, "publish sheet missing");
+    QTRY_VERIFY(opened->isVisible());
+    QTest::keyClick(localWindow, Qt::Key_Escape);
+    QVERIFY(!QFile::exists(recorded));
+    QTest::mouseClick(localWindow, Qt::LeftButton, Qt::NoModifier,
+        chip->mapToScene(QPointF(chip->width() / 2, chip->height() / 2)).toPoint());
+    settle();
+    QTest::keyClick(localWindow, Qt::Key_Space);
+    QTest::keyClick(localWindow, Qt::Key_Down);
+    QTest::keyClick(localWindow, Qt::Key_Space);
+    QTest::keyClick(localWindow, Qt::Key_Return);
+    settle();
+    QVERIFY(!QFile::exists(recorded));
+    QTest::keyClick(localWindow, Qt::Key_Space);
+    QTest::keyClick(localWindow, Qt::Key_Up);
+    QTest::keyClick(localWindow, Qt::Key_Space);
+    const QByteArray before = treeUnder(paths::configDir()) + treeUnder(paths::stateDir());
+    QTest::keyClick(localWindow, Qt::Key_Return);
+    QTRY_COMPARE(done.count(), 1);
+    QFile calls(recorded);
+    QVERIFY(calls.open(QIODevice::ReadOnly));
+    QCOMPARE(calls.readAll(),
+        QByteArray("profile\npublish\ntstjulia\n--to\nstation-02\n--to\nthe study\n"));
+    QCOMPARE(admin->property("output").toStringList(),
+        QStringList({ "MACHINE RESULT", "station-02 published", "the study published" }));
+    auto *sheet = itemNamed(localWindow->contentItem(), QStringLiteral("publishSheet"));
+    QVERIFY(sheet->property("finished").toBool());
+    QCOMPARE(sheet->property("output").toStringList().size(), 3);
+    QCOMPARE(treeUnder(paths::configDir()) + treeUnder(paths::stateDir()), before);
+    QFile::remove(paths::thisMachineFile());
+    QFile::remove(paths::machinesFile());
+    m_house->reload();
+}
+
+void TestStudio::publishIsRefusedWhileUnresolved()
+{
+    QString error;
+    Profile profile;
+    profile.user = QStringLiteral("tstjulia");
+    QVERIFY(writeProfiles(paths::profilesFile(), { profile }, &error));
+    ThisMachine manager;
+    manager.kind = Kind::Manager;
+    manager.since = QDateTime::currentDateTimeUtc();
+    QVERIFY(writeThisMachine(paths::thisMachineFile(), manager, &error));
+    Machine station;
+    station.name = QStringLiteral("station-02");
+    station.nodeId = QStringLiteral("omk1_abc");
+    station.endpoint = QStringLiteral("localhost:8787");
+    QVERIFY(writeMachines(paths::machinesFile(), { station }, &error));
+    profile.displayName = QStringLiteral("Changed there");
+    const QString path = paths::elsewhereProfileFile(station.name, profile.user);
+    QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+    QVERIFY(writeProfiles(path, { profile }, &error));
+    m_house->reload();
+    settle();
+    const QVariantList commands = root()->property("commands").toList();
+    bool found = false;
+    for (const auto &value : commands) {
+        const auto command = value.toMap();
+        if (command.value("id").toString() != QLatin1String("publish"))
+            continue;
+        found = true;
+        QVERIFY(!command.value("usable").toBool());
+        QVERIFY(command.value("label").toString().contains("station-02"));
+    }
+    QVERIFY2(found, "publish has no command");
+    key('u');
+    auto *sheet = itemNamed(window()->contentItem(), QStringLiteral("publishSheet"));
+    QVERIFY(sheet && !sheet->isVisible());
+    QVERIFY(m_admin->message().contains("station-02"));
+    QFile::remove(paths::thisMachineFile());
+    QFile::remove(paths::machinesFile());
+    m_house->reload();
+}
+
 void TestStudio::theMachinesViewOpensWithNobodySelected()
 {
     QString error;
@@ -1252,6 +1378,12 @@ void TestStudio::theMachinesViewOpensWithNobodySelected()
     QCOMPARE(rows.size(), 1);
     QCOMPARE(rows.first().toMap().value("name").toString(), QStringLiteral("station-02"));
     QCOMPARE(rows.first().toMap().value("state").toString(), QStringLiteral("paired"));
+    Profile profile;
+    profile.user = QStringLiteral("tstjulia");
+    QVERIFY(writeProfiles(paths::profilesFile(), { profile }, &error));
+    m_house->reload();
+    settle();
+    QCOMPARE(root()->property("fleetRows").toList().size(), 1);
     QFile::remove(paths::machinesFile());
     m_house->reload();
 }
@@ -2147,6 +2279,8 @@ void TestStudio::writesTheOperatorShots()
         if (profile.user == QLatin1String("nobody")) profile.allocation = document;
     QVERIFY(writeProfiles(paths::profilesFile(), enrolledProfiles, &fleetError));
     Machine station; station.name = QStringLiteral("station-02");
+    station.nodeId = QStringLiteral("omk1_station02");
+    station.endpoint = QStringLiteral("station-02:8787");
     QVERIFY(writeMachines(paths::machinesFile(), {station}, &fleetError));
     Ledger remote;
     remote.user = QStringLiteral("nobody"); remote.date = QDate::currentDate();
@@ -2172,6 +2306,12 @@ void TestStudio::writesTheOperatorShots()
     QVERIFY(writeThisMachine(paths::thisMachineFile(), shotManager, &fleetError));
     m_house->reload();
     shoot(QStringLiteral("31-operator-machines"));
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    key('u');
+    QVERIFY(awaitItem(QStringLiteral("publishSheet")));
+    shoot(QStringLiteral("32-operator-publish"));
+    key(Qt::Key_Escape);
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(5)));
     QFile::remove(paths::thisMachineFile());
     QMetaObject::invokeMethod(root(), "setFilter", Q_ARG(QVariant, QVariant(QString())));
     QVERIFY(writeProfiles(paths::profilesFile(), originalProfiles, &fleetError));
