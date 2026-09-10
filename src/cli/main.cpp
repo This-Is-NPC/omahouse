@@ -142,6 +142,8 @@ struct Options {
     /// a file here, the other prints bytes to send -- and a flag whose output
     /// depends on a second flag is the shape `--name` and `--as` were split to
     /// avoid.
+    QStringList to;
+    bool all = false;
     QString take;
     QString keep;
     /// The Battery whose scripts a prepared machine will run when cued. Named
@@ -257,17 +259,33 @@ bool parseOptions(const QStringList &args, Options *options, QStringList *positi
         bool Options::*field;
     };
     static const Flag flags[] = {
-        {"--create-user", &Options::createUser}, {"--keep-account", &Options::keepAccount},
-        {"--on", &Options::on},                  {"--off", &Options::off},
-        {"--allow", &Options::allow},            {"--deny", &Options::deny},
-        {"--once", &Options::once},              {"--dry-run", &Options::dryRun},
-        {"--all-but-listed", &Options::allButListed},
-        {"--only-listed", &Options::onlyListed},
+        { "--create-user", &Options::createUser },
+        { "--keep-account", &Options::keepAccount },
+        { "--on", &Options::on },
+        { "--off", &Options::off },
+        { "--allow", &Options::allow },
+        { "--deny", &Options::deny },
+        { "--all", &Options::all },
+        { "--once", &Options::once },
+        { "--dry-run", &Options::dryRun },
+        { "--all-but-listed", &Options::allButListed },
+        { "--only-listed", &Options::onlyListed },
     };
 
     for (int i = 0; i < args.size(); ++i) {
         const QString argument = args.at(i);
         bool handled = false;
+        if (argument == QLatin1String("--to") || argument.startsWith(QLatin1String("--to="))) {
+            const QString target
+                = argument == QLatin1String("--to") ? args.value(++i) : argument.mid(5);
+            if (target.isEmpty() || target.startsWith(QLatin1Char('-'))) {
+                fail(QStringLiteral("--to wants a machine"));
+                return false;
+            }
+            options->to.append(target);
+            options->given.append(QStringLiteral("--to"));
+            continue;
+        }
 
         for (const Value &value : values) {
             const QString name = QString::fromLatin1(value.name);
@@ -3633,6 +3651,7 @@ int cmdProfileDefault(const Globals &g, const QStringList &positionals, const Op
 /// list, and the three are one act about documents going different ways.
 int cmdProfileCollect(const Globals &g, const QStringList &positionals);
 int cmdProfileMerge(const Globals &g, const QStringList &positionals, const Options &options);
+int cmdProfilePublish(const Globals &g, const QStringList &positionals, const Options &options);
 
 int cmdProfile(const Globals &g, const QStringList &positionals, const Options &options)
 {
@@ -3662,6 +3681,12 @@ int cmdProfile(const Globals &g, const QStringList &positionals, const Options &
                               QStringLiteral("profile add")))
             return kUsage;
         return cmdProfileAdd(g, positionals.mid(1), options);
+    }
+    if (subcommand == QLatin1String("publish")) {
+        if (!onlyTheseOptions(options, { QStringLiteral("--to"), QStringLiteral("--all") },
+                QStringLiteral("profile publish")))
+            return kUsage;
+        return cmdProfilePublish(g, positionals.mid(1), options);
     }
     if (subcommand == QLatin1String("merge")) {
         if (!onlyTheseOptions(options, {QStringLiteral("--take"), QStringLiteral("--keep")},
@@ -4691,86 +4716,28 @@ int cmdProfileCollect(const Globals &g, const QStringList &positionals)
         return kUsage;
     }
 
-    QJsonParseError parsing {};
-    const QJsonDocument document = QJsonDocument::fromJson(raw, &parsing);
-    if (!document.isObject()) {
-        fail(QStringLiteral("%1: what came in is not a profile: %2")
-                 .arg(verb, parsing.errorString()));
-        return kUsage;
-    }
-
-    // Read by the reader `profiles.json` gets, so a machine newer than this one
-    // is refused rather than misread -- which is the whole reason
-    // `profile show --json` carries the envelope.
-    QVector<Profile> arrived;
-    QString error;
-    if (!profilesFromJson(document.object(), &arrived, &error)) {
-        fail(QStringLiteral("%1: %2").arg(verb, error));
-        return kUsage;
-    }
-    if (arrived.size() > 1) {
-        fail(QStringLiteral("%1: %2 sent %3 profiles and this takes one, or none")
-                 .arg(verb, machine).arg(arrived.size()));
-        return kUsage;
-    }
-    // **None is an answer, and it is the one the ordinary shape cannot give.**
-    //
-    // An administrator with the central unreachable may *remove* a profile --
-    // it is the bluntest thing the emergency exit is for, and the one a
-    // household most needs to find out about. From here that shows up as the
-    // machine having nothing to send, which on the manager is indistinguishable
-    // from that machine not having reported at all. Absence saying two things
-    // is the shape this project keeps cutting, and treating it as "nothing
-    // happened" is the silent half: it erases a deliberate removal and nobody
-    // notices.
-    //
-    // So an empty list is taken and filed, and it means *this machine says it
-    // has none*. It is the same document with nothing in the array -- no second
-    // shape to learn -- and it is what lets a merge tell a removal from a
-    // silence, which is the posture `collect` already keeps about a missing
-    // day.
-    if (arrived.isEmpty()) {
-        const QString path = paths::elsewhereProfileFile(machine, user);
-        if (!mayWrite(verb, path, paths::stateDirIsTheSystems(), g))
-            return kUsage;
-        if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
-            fail(QStringLiteral("%1: cannot make %2").arg(verb, QFileInfo(path).absolutePath()));
-            return kUsage;
-        }
-        if (!writeJsonAtomically(path, profilesToJson({}), &error)) {
-            fail(QStringLiteral("%1: %2").arg(verb, error));
-            return kUsage;
-        }
-        if (g.json) {
-            printJson(QJsonObject {{QStringLiteral("machine"), machine},
-                                   {QStringLiteral("user"), user},
-                                   {QStringLiteral("has"), QJsonValue()},
-                                   {QStringLiteral("path"), path}});
-            return kOk;
-        }
-        out() << QStringLiteral("%1: says it has no profile for %2, and that is written "
-                                "down.\n").arg(machine, user);
-        return kOk;
-    }
-    // Checked against what was asked for rather than trusted, exactly as a day
-    // is: a profile filed under the wrong name is somebody else's rules in a
-    // place the merge will read them as this person's.
-    if (arrived.constFirst().user != user) {
-        fail(QStringLiteral("%1: that profile belongs to %2, and it was offered as %3's")
-                 .arg(verb, arrived.constFirst().user, user));
-        return kUsage;
-    }
-
     const QString path = paths::elsewhereProfileFile(machine, user);
     if (!mayWrite(verb, path, paths::stateDirIsTheSystems(), g))
         return kUsage;
-    if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
-        fail(QStringLiteral("%1: cannot make %2").arg(verb, QFileInfo(path).absolutePath()));
-        return kUsage;
-    }
-    if (!writeJsonAtomically(path, profilesToJson({arrived.constFirst()}), &error)) {
+    QString error;
+    if (!fileCollected(machine, user, raw, &error)) {
         fail(QStringLiteral("%1: %2").arg(verb, error));
         return kUsage;
+    }
+    Collected arrived;
+    if (!readCollected(machine, user, &arrived, &error)) {
+        fail(error);
+        return kUsage;
+    }
+    if (!arrived.has) {
+        if (g.json)
+            printJson(QJsonObject { { "machine", machine }, { "user", user },
+                { "has", QJsonValue() }, { "path", path } });
+        else
+            out() << QStringLiteral(
+                "%1: says it has no profile for %2, and that is written down.\n")
+                         .arg(machine, user);
+        return kOk;
     }
 
     if (g.json) {
@@ -4807,6 +4774,293 @@ int cmdProfileCollect(const Globals &g, const QStringList &positionals)
 /// collected from. It is said out loud and never folded into "no differences",
 /// which is `omahouse house`'s posture about a day nobody sent and the same
 /// reason -- a total quietly missing a computer reads exactly like agreement.
+int cmdProfilePublish(const Globals &g, const QStringList &positionals, const Options &options)
+{
+    const QString verb = QStringLiteral("profile publish");
+    if (positionals.size() != 1 || (options.to.isEmpty() == !options.all)) {
+        fail(QStringLiteral(
+            "profile publish: name one user and either --to <machine> (repeatable) or --all"));
+        return kUsage;
+    }
+    if (!mayWrite(verb, paths::machineTokensFile(), paths::configDirIsTheSystems(), g))
+        return kUsage;
+    if (!managerHere()) {
+        fail(QStringLiteral("profile publish: this computer is not the household's manager"));
+        return kUsage;
+    }
+    const QString user = positionals.first();
+    int status = kOk;
+    Profiles profiles;
+    Fleet fleet;
+    if (!loadProfiles(&profiles, &status) || !loadMachines(&fleet, &status))
+        return status;
+    const Profile *found = profileFor(profiles, user);
+    if (!found) {
+        fail(QStringLiteral("profile publish: no draft for %1").arg(user));
+        return kMissing;
+    }
+    const Profile draft = *found;
+    QStringList targets = options.to;
+    targets.removeDuplicates();
+    for (const auto &target : targets) {
+        const int index = indexOfMachine(fleet.all, target);
+        if (index < 0 || !fleet.all[index].reachable()) {
+            fail(QStringLiteral("profile publish: %1 is unknown or not paired").arg(target));
+            return kMissing;
+        }
+    }
+    if (!QFileInfo::exists(QDir(Omakure::workspace()).filePath("omahouse-profile-publish.py"))) {
+        fail(QStringLiteral(
+            "the household's Battery is not installed here — as the node account with "
+            "OMAKURE_SCRIPTS_DIR set to the node workspace: omakure battery install omahouse "
+            "omahouse.sync; omakure battery install omahouse omahouse.profile-publish"));
+        return kUsage;
+    }
+    QDir().mkpath(paths::stateDir());
+    QLockFile publicationLock(paths::stateDir() + QStringLiteral("/publication.lock"));
+    if (!publicationLock.tryLock(5000)) {
+        fail(QStringLiteral("profile publish: another publication is in progress"));
+        return kUsage;
+    }
+    const auto battery = [&](const QStringList &arguments, QJsonArray *rows, QString *error) {
+        QString output, stderr;
+        int exitCode = 0;
+        if (!Omakure::runBatteryScript(QStringLiteral("omahouse-profile-publish.py"), arguments,
+                &output, &stderr, &exitCode, error))
+            return false;
+        if (exitCode != 0) {
+            *error = stderr.isEmpty() ? output : stderr;
+            return false;
+        }
+        const auto document = QJsonDocument::fromJson(output.toUtf8());
+        if (!document.isArray()) {
+            *error = QStringLiteral("the Battery did not return machine rows");
+            return false;
+        }
+        *rows = document.array();
+        return true;
+    };
+    QStringList checking { "--action", "send", "--user", user };
+    QStringList paired;
+    for (const auto &machine : fleet.all)
+        if (machine.reachable()) {
+            paired.append(machine.name);
+            checking << "--machine" << machine.name;
+        }
+    QJsonArray fetched;
+    QString error;
+    if (!paired.isEmpty() && !battery(checking, &fetched, &error)) {
+        fail(QStringLiteral("profile publish: %1").arg(error));
+        return kUsage;
+    }
+    QHash<QString, QString> said;
+    QSet<QString> checked;
+    QJsonArray notChecked;
+    // Each requested machine must answer exactly once. A malformed or omitted
+    // row cannot turn an unchecked profile into permission to overwrite it.
+    QHash<QString, QJsonObject> answers;
+    for (const auto &value : fetched) {
+        const auto row = value.toObject();
+        const auto machine = row.value("machine").toString();
+        if (!paired.contains(machine) || answers.contains(machine)) {
+            fail(QStringLiteral(
+                "profile publish: the Battery returned an unexpected or duplicate machine"));
+            return kUsage;
+        }
+        answers.insert(machine, row);
+    }
+    for (const auto &machine : paired) {
+        const auto row = answers.value(machine);
+        QString reason;
+        if (row.isEmpty() || !row.value("reached").toBool()) {
+            reason = row.value("stderr").toString();
+            if (reason.isEmpty())
+                reason = QStringLiteral("no answer");
+            said[machine] = QStringLiteral("unreachable — %1").arg(reason);
+        } else if (!row.value("declared").toBool()) {
+            reason = QStringLiteral(
+                "its node declares no omahouse.profile-push/send — as the node account there with "
+                "OMAKURE_SCRIPTS_DIR set to its node workspace: omakure battery install omahouse "
+                "omahouse.profile-push; omakure battery install omahouse omahouse.profile-send");
+            said[machine] = QStringLiteral("refused: %1").arg(reason);
+        } else if (!row.value("exitCode").isDouble() || row.value("exitCode").toInt() != 0) {
+            reason = row.value("stderr").toString();
+            if (reason.isEmpty())
+                reason = QStringLiteral("profile send failed");
+            said[machine] = QStringLiteral("refused: %1").arg(reason);
+        } else if (!fileCollected(
+                       machine, user, row.value("stdout").toString().toUtf8(), &reason)) {
+            said[machine] = QStringLiteral("refused: %1").arg(reason);
+        } else {
+            checked.insert(machine);
+            continue;
+        }
+        notChecked.append(QJsonObject { { "machine", machine }, { "reason", reason } });
+    }
+    QHash<QString, Collected> snapshots;
+    QVector<PublicationRow> publication;
+    for (const auto &machine : fleet.all) {
+        Collected collected;
+        Published published;
+        bool noPublication = false;
+        if (!readCollected(machine.name, user, &collected, &error)
+            || !readPublished(machine.name, user, &published, &noPublication, &error)) {
+            fail(error);
+            return kUsage;
+        }
+        QJsonObject decision;
+        bool noDecision = false;
+        Resolution resolution;
+        if (!readJsonObject(
+                paths::resolvedProfileFile(machine.name, user), &decision, &error, &noDecision)
+            || (!noDecision && !Resolution::fromJson(decision, &resolution, &error))) {
+            fail(error);
+            return kUsage;
+        }
+        snapshots.insert(machine.name, collected);
+        publication.append({ machine.name,
+            publicationOf(draft, noPublication ? nullptr : &published, collected,
+                machine.reachable(), noDecision ? nullptr : &resolution) });
+    }
+    auto standing = standingOf(publication);
+    if (options.all)
+        for (const auto &row : publication)
+            if (checked.contains(row.machine)
+                && (row.state == Publication::NeverPublished || row.state == Publication::Behind))
+                targets.append(row.machine);
+    bool success = !standing.unresolved;
+    if (!standing.unresolved)
+        for (const auto &target : targets) {
+            if (!checked.contains(target)) {
+                success = false;
+                continue;
+            }
+            Publication state = Publication::NotPaired;
+            for (const auto &row : publication)
+                if (row.machine == target)
+                    state = row.state;
+            if (state == Publication::UpToDate) {
+                said[target] = QStringLiteral("up to date");
+                continue;
+            }
+            // Do not keep the profiles lock over a Battery call: the transport
+            // calls the CLI for tokens. A changed draft aborts the remaining sends.
+            Profiles current;
+            if (!loadProfiles(&current, &status))
+                return status;
+            const auto *now = profileFor(current, user);
+            if (!now || now->toJson() != draft.toJson()) {
+                said[target]
+                    = QStringLiteral("refused: draft changed during publication; publish again");
+                success = false;
+                break;
+            }
+            const Collected observed = snapshots.value(target);
+            auto document = profilesToJson({ draft });
+            if (observed.has)
+                document.insert(QStringLiteral("supersedes"), observed.profile.toJson());
+            QJsonArray pushed;
+            if (!battery(
+                    { "--action", "push", "--machine", target, "--document",
+                        QString::fromUtf8(QJsonDocument(document).toJson(QJsonDocument::Compact)) },
+                    &pushed, &error)) {
+                said[target] = QStringLiteral("refused: %1").arg(error);
+                success = false;
+                continue;
+            }
+            const auto result = pushed.size() == 1 ? pushed.first().toObject() : QJsonObject { };
+            if (result.value("machine").toString() != target || !result.value("reached").toBool()
+                || !result.value("declared").toBool() || !result.value("exitCode").isDouble()
+                || result.value("exitCode").toInt() != 0) {
+                said[target]
+                    = (result.value("reached").toBool() ? QStringLiteral("refused: %1")
+                                                        : QStringLiteral("unreachable — %1"))
+                          .arg(result.value("stderr").toString(QStringLiteral("push failed")));
+                success = false;
+                continue;
+            }
+            // The receiver stamps what it accepts. Only its real answer can be
+            // used as a future supersedes; inventing a stamp here loses that gate.
+            QJsonArray confirmation;
+            if (!battery({ "--action", "send", "--user", user, "--machine", target }, &confirmation,
+                    &error)) {
+                said[target] = QStringLiteral("applied, confirmation unavailable: %1").arg(error);
+                success = false;
+                continue;
+            }
+            const auto reply
+                = confirmation.size() == 1 ? confirmation.first().toObject() : QJsonObject { };
+            QVector<Profile> confirmed;
+            const auto envelope
+                = QJsonDocument::fromJson(reply.value("stdout").toString().toUtf8());
+            if (reply.value("machine").toString() != target || !reply.value("reached").toBool()
+                || !reply.value("declared").toBool() || !reply.value("exitCode").isDouble()
+                || reply.value("exitCode").toInt() != 0 || !envelope.isObject()
+                || !profilesFromJson(envelope.object(), &confirmed, &error) || confirmed.size() != 1
+                || confirmed.first().withoutTheStamp() != draft.withoutTheStamp()) {
+                said[target]
+                    = QStringLiteral("applied, confirmation unavailable or rules changed there");
+                success = false;
+                continue;
+            }
+            if (!fileCollected(target, user, reply.value("stdout").toString().toUtf8(), &error)
+                || !writeJsonAtomically(paths::publishedProfileFile(target, user),
+                    Published { QDateTime::currentDateTimeUtc(), draft }.toJson(), &error)) {
+                said[target]
+                    = QStringLiteral("applied, could not record publication: %1").arg(error);
+                success = false;
+                continue;
+            }
+            said[target] = QStringLiteral("published");
+        }
+    // Published state describes what is on disk now, including a central edit
+    // made while the last machine was accepting the snapshot.
+    Profiles finalProfiles;
+    if (!loadProfiles(&finalProfiles, &status))
+        return status;
+    const Profile *finalDraft = profileFor(finalProfiles, user);
+    if (finalDraft && !publicationRows(*finalDraft, fleet.all, &publication, &error)) {
+        fail(error);
+        return kUsage;
+    }
+    if (!finalDraft || finalDraft->toJson() != draft.toJson()) {
+        success = false;
+        for (const auto &target : targets)
+            if (said.value(target) == QLatin1String("published"))
+                said[target] = QStringLiteral("published snapshot; draft changed, publish again");
+    }
+    standing = standingOf(publication);
+    success = success && !standing.unresolved;
+    QJsonArray machines;
+    QVector<QStringList> table;
+    for (const auto &row : publication) {
+        const QString answer = said.value(row.machine,
+            standing.unresolved ? QStringLiteral("not published — resolve first")
+                                : publicationSaid(row.state));
+        machines.append(QJsonObject { { "machine", row.machine },
+            { "state", publicationName(row.state) }, { "said", answer } });
+        table.append({ row.machine, publicationSaid(row.state), answer });
+    }
+    if (g.json)
+        printJson(QJsonObject { { "user", user }, { "unresolved", standing.unresolved },
+            { "changedOn", QJsonArray::fromStringList(standing.changedOn) },
+            { "notChecked", notChecked }, { "machines", machines } });
+    else {
+        if (standing.unresolved)
+            out() << QStringLiteral("%1 is unresolved: changed on %2. Use omahouse profile merge "
+                                    "%1 --take <machine> or --keep <machine>.\\n")
+                         .arg(user, standing.changedOn.join(", "))
+                         .replace("\\n", "\n");
+        for (const auto &entry : notChecked) {
+            const auto row = entry.toObject();
+            out() << row.value("machine").toString() << ": not checked — "
+                  << row.value("reason").toString() << "\n";
+        }
+        printTable({ "MACHINE", "STATE", "RESULT" }, table, { });
+    }
+    return success ? kOk : kUsage;
+}
+
 int cmdProfileMerge(const Globals &g, const QStringList &positionals, const Options &options)
 {
     const QString verb = QStringLiteral("profile merge");
@@ -4907,6 +5161,12 @@ int cmdProfileMerge(const Globals &g, const QStringList &positionals, const Opti
             profiles.all = kept;
             if (!saveProfiles(verb, profiles.all))
                 return kUsage;
+            QString resolutionError;
+            if (said->has
+                && !resolveCollected(about, user, *said, said->profile, &resolutionError)) {
+                fail(resolutionError);
+                return kUsage;
+            }
             out() << (said->has
                           ? QStringLiteral("%1's profile from %2 is now this machine's.\n")
                                 .arg(user, about)
@@ -4920,6 +5180,11 @@ int cmdProfileMerge(const Globals &g, const QStringList &positionals, const Opti
             fail(QStringLiteral("%1: this machine has no profile for %2, so there is nothing "
                                 "to send. A push carries a profile and cannot carry its "
                                 "absence.").arg(verb, user));
+            return kUsage;
+        }
+        QString resolutionError;
+        if (!resolveCollected(about, user, *said, *mine, &resolutionError)) {
+            fail(resolutionError);
             return kUsage;
         }
         QJsonObject document = profilesToJson({*mine});
@@ -6132,6 +6397,8 @@ Writing, and root needed — the studio gets there by pkexec:
                            omahouse day julia | ssh study omahouse collect …
   profile add '*'          rules for whoever sits here without their own.
                            Quote it: bare, the shell eats it
+  profile publish <user> --to <machine>... | --all
+                           Check every paired computer, then publish the draft.
   profile merge <user> [--take <machine>] [--keep <machine>]
                            what each computer says about one profile: new,
                            changed, gone, or nothing collected. --take brings
@@ -6243,8 +6510,9 @@ int dispatch(const Globals &g, const QStringList &args)
 
     // The scheduler may apply a statement while an operator edits a rule. Both
     // replace profiles.json, so serialize the entire read/modify/write cycle.
-    const bool profileWrite = QStringList{"allow", "deny", "limit"}.contains(verb)
-        || (verb == QLatin1String("profile") && !QStringList{"show", "list"}.contains(rest.value(1)))
+    const bool profileWrite = QStringList { "allow", "deny", "limit" }.contains(verb)
+        || (verb == QLatin1String("profile")
+            && !QStringList { "show", "list", "publish" }.contains(rest.value(1)))
         || (verb == QLatin1String("web") && rest.value(1) != QLatin1String("show"))
         || (verb == QLatin1String("allocation") && rest.value(1) != QLatin1String("show"));
     QLockFile profileLock(paths::profilesFile() + QStringLiteral(".lock"));

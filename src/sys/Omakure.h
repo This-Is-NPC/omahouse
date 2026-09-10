@@ -43,6 +43,9 @@ public:
     /// The account every call is made as. `omakure`, or
     /// `$OMAHOUSE_OMAKURE_USER`.
     static QString account();
+    static QString workspace();
+    static bool runBatteryScript(const QString &script, const QStringList &arguments,
+        QString *output, QString *stderr, int *exitCode, QString *error, int timeoutMs = 120000);
     /// The binary, resolved through PATH. Empty when there is none, which is
     /// the answer `machine prepare` turns into "install Omakure first".
     static QString binary();

@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QStandardPaths>
 
 #include <cerrno>
@@ -31,15 +32,6 @@ QString consoleBind()
     const QByteArray set = qgetenv("OMAHOUSE_OMAKURE_API_PORT");
     return QStringLiteral("0.0.0.0:%1")
             .arg(set.isEmpty() ? QStringLiteral("8787") : QString::fromLocal8Bit(set));
-}
-
-/// The workspace, which is never the state directory. See Omakure.h.
-QString workspace()
-{
-    const QByteArray set = qgetenv("OMAHOUSE_OMAKURE_WORKSPACE");
-    if (!set.isEmpty())
-        return QString::fromLocal8Bit(set);
-    return QStringLiteral("/var/lib/omakure-workspace");
 }
 
 /// Long enough for `node init` to make a key pair on a slow machine, and short
@@ -66,6 +58,61 @@ bool amTheAccount(const QString &name)
 }
 
 } // namespace
+
+QString Omakure::workspace()
+{
+    return environmentOr(
+        "OMAHOUSE_OMAKURE_WORKSPACE", QStringLiteral("/var/lib/omakure-workspace"));
+}
+
+bool Omakure::runBatteryScript(const QString &script, const QStringList &arguments, QString *output,
+    QString *stderr, int *exitCode, QString *error, int timeoutMs)
+{
+    const QString path = QDir(workspace()).filePath(script);
+    if (!QFileInfo::exists(path)) {
+        *error = QStringLiteral(
+            "the household's Battery is not installed here — as the node account with "
+            "OMAKURE_SCRIPTS_DIR set to the node workspace: omakure battery install omahouse "
+            "omahouse.sync; omakure battery install omahouse omahouse.profile-publish");
+        return false;
+    }
+    QString launcher = QStringLiteral("python3");
+    QStringList argv = QStringList { path } + arguments;
+    if (!amTheAccount(account())) {
+        if (geteuid() != 0) {
+            *error = QStringLiteral("the Battery has to run as %1 or root").arg(account());
+            return false;
+        }
+        launcher = QStringLiteral("sudo");
+        argv = QStringList { "-n", "-u", account(), "env", "HOME=" + workspace(),
+            "OMAKURE_SCRIPTS_DIR=" + workspace(), "python3", path }
+            + arguments;
+    }
+    QProcess asking;
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("HOME"), workspace());
+    environment.insert(QStringLiteral("OMAKURE_SCRIPTS_DIR"), workspace());
+    asking.setProcessEnvironment(environment);
+    asking.start(launcher, argv);
+    if (!asking.waitForStarted(kStartTimeout)) {
+        *error = QStringLiteral("cannot run the Battery: %1").arg(asking.errorString());
+        return false;
+    }
+    if (!asking.waitForFinished(timeoutMs)) {
+        asking.kill();
+        asking.waitForFinished();
+        *error = QStringLiteral("the Battery did not answer in %1s").arg(timeoutMs / 1000);
+        return false;
+    }
+    *output = QString::fromUtf8(asking.readAllStandardOutput());
+    *stderr = QString::fromUtf8(asking.readAllStandardError()).trimmed();
+    *exitCode = asking.exitCode();
+    if (asking.exitStatus() != QProcess::NormalExit) {
+        *error = QStringLiteral("the Battery stopped unexpectedly: %1").arg(*stderr);
+        return false;
+    }
+    return true;
+}
 
 QString Omakure::configDir()
 {

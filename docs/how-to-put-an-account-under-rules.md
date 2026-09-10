@@ -11,6 +11,10 @@ on with.
 
 ---
 
+On a manager, the profile is a draft for the other computers until you run
+`sudo omahouse profile publish kid --to "the kitchen laptop"`. Each managed
+computer keeps enforcing its last published rules while you edit here.
+
 ## Before you start
 
 - **omahouse is installed and the daemon is running.**

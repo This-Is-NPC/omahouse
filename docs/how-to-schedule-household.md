@@ -207,3 +207,6 @@ browser scope.
 The data goes through the paired node's authenticated console API. It does not
 travel through Omakure's Health Plane or Remote Cue acknowledgements. Protect
 that LAN/API transport using the same deployment requirements as pairing.
+
+Gathering keeps publication standing fresh in the console. Publishing checks all
+paired computers again and is always a manual action, never a scheduled one.

@@ -4111,6 +4111,161 @@ def check_profile_list_and_show_say_where_a_profile_stands(box):
     assert "unresolved (a)" == row["publication"], row
 
 
+def fake_publication_battery(box):
+    draft = publication_fixture(box)
+    workspace = box.root / "workspace"
+    workspace.mkdir()
+    world = workspace / "world.json"
+    world.write_text(json.dumps({"a": {"profiles": [], "schemaVersion": 2},
+                                 "b": {"profiles": [], "schemaVersion": 2}}))
+    (workspace / "omahouse-profile-publish.py").write_text('''import argparse, json
+from pathlib import Path
+p=argparse.ArgumentParser(); p.add_argument("--action"); p.add_argument("--user"); p.add_argument("--machine",action="append"); p.add_argument("--document")
+a=p.parse_args(); root=Path(__file__).parent; world=json.loads((root/"world.json").read_text()); rows=[]
+for machine in a.machine:
+    value=world[machine]; code=value.get("pushExitCode" if a.action == "push" else "sendExitCode",0)
+    row=dict(machine=machine,reached=not value.get("offline",False),declared=not value.get("undeclared",False),exitCode=(None if value.get("offline") else 1 if value.get("undeclared") else code),stdout="",stderr=value.get("reason",""))
+    if row["reached"] and row["declared"]:
+        if a.action == "push":
+            doc=json.loads(a.document)
+            with (root/"pushes.jsonl").open("a") as f: f.write(json.dumps(dict(machine=machine,document=doc))+"\\n")
+            if code == 0:
+                world[machine]={"schemaVersion":2,"profiles":doc["profiles"]}
+                world[machine]["profiles"][0]["writtenBy"]="omakure"
+                world[machine]["profiles"][0]["writtenAt"]="2026-09-09T12:00:00Z"
+                if value.get("readbackOffline"): world[machine]["offline"]=True
+                if value.get("readbackChanged"): world[machine]["profiles"][0]["displayName"]="Changed after push"
+                (root/"world.json").write_text(json.dumps(world))
+        else: row["stdout"]=json.dumps({k:v for k,v in value.items() if k in ("schemaVersion","profiles")})
+    rows.append(row)
+print(json.dumps(rows))
+''')
+    env = {"OMAHOUSE_OMAKURE_WORKSPACE": str(workspace), "OMAHOUSE_OMAKURE_USER": USER}
+    def run(*args):
+        return box.run(*args, extra_env=env)
+    return draft, workspace, world, run
+
+
+def check_publish_refuses_what_it_cannot_do(box):
+    _, workspace, _, run = fake_publication_battery(box)
+    for args in [("kid",), ("absent", "--to", "a"), ("kid", "--to", "missing"),
+                 ("kid", "--to", "a", "--all")]:
+        result = run("profile", "publish", *args)
+        assert result.returncode != 0, result.stdout
+    assert box.run("machine", "add", "unpaired").returncode == 0
+    assert run("profile", "publish", "kid", "--to", "unpaired").returncode != 0
+    (workspace / "omahouse-profile-publish.py").unlink()
+    result = run("profile", "publish", "kid", "--to", "a")
+    assert "omakure battery install" in result.stderr, result.stderr
+
+
+def check_publish_lands_a_draft(box):
+    draft, workspace, world, run = fake_publication_battery(box)
+    result = run("profile", "publish", "kid", "--to", "a", "--json")
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "published" in result.stdout, result.stdout
+    pushes = lambda: [json.loads(line) for line in (workspace / "pushes.jsonl").read_text().splitlines()]
+    assert pushes()[0]["document"] == draft, pushes()
+    published = box.state / "elsewhere" / "a" / "kid" / "published.json"
+    assert json.loads(published.read_text())["profile"] == draft["profiles"][0]
+    assert "up to date" in run("profile", "show", "kid").stdout
+    assert run("limit", "kid", "--session", "1h").returncode == 0
+    assert "1 behind" in run("profile", "list").stdout
+    observed = json.loads(world.read_text())["a"]["profiles"][0]
+    result = run("profile", "publish", "kid", "--to", "a")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert pushes()[-1]["document"]["supersedes"] == observed, pushes()
+    before = published.read_bytes()
+    assert run("limit", "kid", "--session", "2h").returncode == 0
+    remote = json.loads(world.read_text()); remote["a"]["pushExitCode"] = 1; remote["a"]["reason"] = "changed during push"; world.write_text(json.dumps(remote))
+    result = run("profile", "publish", "kid", "--to", "a")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert published.read_bytes() == before
+    assert len(pushes()) == 3, pushes()
+
+
+def check_publish_checks_everywhere_before_pushing_anywhere(box):
+    draft, workspace, world, run = fake_publication_battery(box)
+    assert run("profile", "publish", "kid", "--all").returncode == 0
+    remote = json.loads(world.read_text()); remote["a"]["profiles"][0]["displayName"] = "Remote edit"; world.write_text(json.dumps(remote))
+    before = (workspace / "pushes.jsonl").read_bytes()
+    result = run("profile", "publish", "kid", "--to", "b", "--json")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert json.loads(result.stdout)["changedOn"] == ["a"], result.stdout
+    assert (workspace / "pushes.jsonl").read_bytes() == before
+    assert run("profile", "merge", "kid", "--take", "a").returncode == 0
+    result = run("profile", "publish", "kid", "--to", "b")
+    assert result.returncode == 0, result.stdout + result.stderr
+    # Keeping the old central rules must force a push, even if its publication baseline matches.
+    assert run("profile", "publish", "kid", "--to", "a").returncode == 0
+    remote = json.loads(world.read_text()); remote["a"]["profiles"][0]["displayName"] = "Another edit"; world.write_text(json.dumps(remote))
+    assert run("profile", "publish", "kid", "--to", "a").returncode == 1
+    kept = run("profile", "merge", "kid", "--keep", "a")
+    assert kept.returncode == 0, kept.stderr
+    assert json.loads(kept.stdout)["supersedes"]["displayName"] == "Another edit"
+    result = run("profile", "publish", "kid", "--to", "a")
+    assert result.returncode == 0 and "published" in result.stdout, result.stdout + result.stderr
+    assert "unresolved" not in run("profile", "list").stdout
+
+
+def check_publish_names_what_it_could_not_check(box):
+    _, _, world, run = fake_publication_battery(box)
+    remote = json.loads(world.read_text()); remote["a"]["offline"] = True; remote["a"]["reason"] = "offline"; world.write_text(json.dumps(remote))
+    result = run("profile", "publish", "kid", "--to", "a", "--json")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.strip().startswith("{"), result.stderr
+    data = json.loads(result.stdout)
+    assert data["notChecked"] and "unreachable" in result.stdout, result.stdout
+    remote["a"] = {"undeclared": True, "reason": "omahouse.profile-push"}; world.write_text(json.dumps(remote))
+    result = run("profile", "publish", "kid", "--to", "a")
+    assert result.returncode == 1 and "install" in result.stdout, result.stdout + result.stderr
+
+
+def check_publish_does_not_invent_a_confirmation(box):
+    _, workspace, world, run = fake_publication_battery(box)
+    assert run("profile", "publish", "kid", "--to", "a").returncode == 0
+    record = box.state / "elsewhere" / "a" / "kid" / "published.json"
+    before = record.read_bytes()
+    assert run("limit", "kid", "--session", "1h").returncode == 0
+    remote = json.loads(world.read_text())
+    remote["a"]["readbackOffline"] = True
+    world.write_text(json.dumps(remote))
+    result = run("profile", "publish", "kid", "--to", "a")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "applied, confirmation unavailable" in result.stdout, result.stdout
+    assert record.read_bytes() == before
+    assert len((workspace / "pushes.jsonl").read_text().splitlines()) == 2
+
+
+def check_publish_keeps_an_unreachable_conflict_unresolved(box):
+    draft, workspace, world, run = fake_publication_battery(box)
+    remote = json.loads(world.read_text()); remote["a"] = draft
+    remote["a"]["profiles"][0]["displayName"] = "Remote edit"
+    world.write_text(json.dumps(remote))
+    assert run("profile", "publish", "kid", "--to", "b").returncode == 1
+    remote["a"]["offline"] = True; world.write_text(json.dumps(remote))
+    result = run("profile", "publish", "kid", "--to", "b", "--json")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert json.loads(result.stdout)["changedOn"] == ["a"]
+    assert not (workspace / "pushes.jsonl").exists()
+    assert run("profile", "merge", "kid", "--keep", "a").returncode == 0
+    # A later observed stamp is a different explicit decision, even with the same remote rules.
+    remote["a"].pop("offline"); remote["a"]["profiles"][0]["writtenBy"] = "changed again"
+    world.write_text(json.dumps(remote))
+    result = run("profile", "publish", "kid", "--to", "b", "--json")
+    assert result.returncode == 1 and json.loads(result.stdout)["unresolved"], result.stdout
+    assert not (workspace / "pushes.jsonl").exists()
+
+
+def check_publish_all_skips_what_is_up_to_date(box):
+    _, workspace, _, run = fake_publication_battery(box)
+    assert run("profile", "publish", "kid", "--all").returncode == 0
+    before = (workspace / "pushes.jsonl").read_bytes()
+    result = run("profile", "publish", "kid", "--all")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (workspace / "pushes.jsonl").read_bytes() == before
+
+
 def main():
     assert CLI.is_file(), f"missing CLI at {CLI}"
     cases = [
@@ -4135,6 +4290,14 @@ def main():
         check_report_wants_a_user,
         check_profile_list_before_anything_is_configured,
         check_profile_list,
+        check_publish_refuses_what_it_cannot_do,
+        check_publish_lands_a_draft,
+        check_publish_checks_everywhere_before_pushing_anywhere,
+        check_publish_names_what_it_could_not_check,
+        check_publish_all_skips_what_is_up_to_date,
+        check_publish_does_not_invent_a_confirmation,
+        check_publish_keeps_an_unreachable_conflict_unresolved,
+
         check_profile_list_and_show_say_where_a_profile_stands,
         check_profile_show,
         check_profile_refuses_what_it_does_not_do,

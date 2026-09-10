@@ -130,6 +130,19 @@ Only one profile per account: two would be two sets of rules nobody could point 
 
   An account that is already there is left alone and said so; a useradd that fails is the profile not being written.
 
+## `omahouse profile publish`
+
+- **Usage:** `omahouse profile publish [--to <machine>] [--all] <user>`
+
+Profiles edited on the manager are drafts. Publishing checks every paired computer first; an unresolved change anywhere blocks every push. Resolve it with profile merge --take or --keep. Publishing is never scheduled. --all selects reached, paired computers that are behind or never published; unavailable computers are reported under not checked.
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--to <machine>`** — A paired destination; repeat to choose several
+- **`--all`** — Publish to all reached computers needing the draft
+
 ## `omahouse profile merge`
 
 - **Usage:** `omahouse profile merge`

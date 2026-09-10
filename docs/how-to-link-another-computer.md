@@ -115,26 +115,44 @@ this machine
 
 ---
 
-## 3. Put the same person under rules on both
+## 3. Write a draft here and publish it
 
-The profile is per machine, because the rules are the machine's and a manager
-that held them would be a manager whose absence is a machine with no rules. So
-write it in both places — [how to put an account under
-rules](how-to-put-an-account-under-rules.md) is the whole of it, and here it is
-twice:
+The Battery source must be available on both computers. Replace
+`/path/to/omahouse-battery` below with its local checkout on that computer.
+Register and sync it on each computer as the node account first:
 
-```bash
-sudo omahouse profile add kid --name "Kid"
-sudo omahouse limit kid --session 2h
-
-ssh arch@192.168.1.20 sudo omahouse profile add kid --name "Kid"
-ssh arch@192.168.1.20 sudo omahouse limit kid --session 2h
+```sh
+sudo -u omakure env HOME=/var/lib/omakure-workspace OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace omakure battery add /path/to/omahouse-battery --ref master --name omahouse
+sudo -u omakure env HOME=/var/lib/omakure-workspace OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace omakure battery sync omahouse
 ```
 
-**`2h` is two hours in the household, not two hours per computer.** That is the
-whole reason the next step exists.
+On the central computer:
 
----
+```sh
+sudo omahouse profile add kid --name Kid
+sudo omahouse limit kid --session 2h
+sudo -u omakure env HOME=/var/lib/omakure-workspace OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace omakure battery install omahouse omahouse.sync
+sudo -u omakure env HOME=/var/lib/omakure-workspace OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace omakure battery install omahouse omahouse.profile-publish
+```
+
+On the managed computer, install its Battery endpoints as the node account:
+
+```sh
+sudo -u omakure env HOME=/var/lib/omakure-workspace OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace omakure battery install omahouse omahouse.profile-send
+sudo -u omakure env HOME=/var/lib/omakure-workspace OMAKURE_SCRIPTS_DIR=/var/lib/omakure-workspace omakure battery install omahouse omahouse.profile-push
+```
+
+Then, on the central:
+
+```sh
+sudo omahouse profile publish kid --to "the kitchen laptop"
+```
+
+Edits here remain drafts until published. The command checks every paired computer
+first. If someone changed rules there, it names the machine and asks for
+`omahouse profile merge kid --take "the kitchen laptop"` or `--keep` before any
+computer receives the draft. Repeat `--to` for several destinations; `--all`
+selects reachable computers needing an update.
 
 ## 4. Read the day across both
 
@@ -253,7 +271,7 @@ The fiscalised person's own face cannot open this view.
   there. `ssh arch@192.168.1.20 sudo useradd -m kid` is the whole of it, and
   omahouse deliberately does not do it for you: creating accounts on somebody
   else's computer from here is not a thing to do by accident.
-- **It does not move the profile.** Two computers, two `profiles.json`. See
+- **Publishing is explicit and never scheduled.** Two computers, two `profiles.json`. See
   step 3.
 - **It does not schedule the collecting.** Enable the explicit
   [Battery schedule](how-to-schedule-household.md) for collection, reservation

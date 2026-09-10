@@ -335,6 +335,19 @@ focus profile for an adult. Nothing in the engine changes.
 
 ---
 
+### Publication records
+
+Each `elsewhere/<machine>/<user>/published.json` records schema version 1,
+`publishedAt`, and the exact central `profile` last successfully published and
+confirmed. `profile.json` remains the machine's collected wire envelope, including
+its own stamp. Publication compares rules without stamps.
+
+A merge writes `resolved.json` with schema version 1, the exact observed profile
+(or null for absence), and the chosen central rules without a stamp. This resolves
+only that observation and that choice; changing either requires another decision.
+It does not claim a successful publication. Keeping central rules can therefore
+leave a machine behind even when those rules equal the last publication.
+
 ## 5. Enforcement
 
 `omahouse watch`, as root, on a two second cycle:
@@ -711,6 +724,12 @@ the journal.
 
 ---
 
+`profile publish <user> --to <machine>…` (or `--all`) runs only on the manager.
+It reports per-machine standing and results; `--json` adds `user`, `unresolved`,
+`changedOn`, `notChecked`, and `machines` rows with `machine`, `state`, `said`.
+`profile list` adds a publication summary on a manager. `profile show` adds the
+machine table, while its JSON envelope stays unchanged.
+
 ## 8. The studio
 
 One Qt Quick window, two faces, chosen by whoever opened it. Whoever is in
@@ -750,6 +769,35 @@ Every screen it draws is inventoried in [`screens.md`](screens.md).
 entry, the icon and the `.install`. The install script creates `/etc/omahouse` and
 `/var/lib/omahouse`, adds the PAM line of §2, enables `omahouse.service`, and
 takes all of it out again on removal.
+
+### Publishing a draft
+
+The central is the source of truth. Editing a profile there makes a draft;
+`omahouse profile publish kid --to "the kitchen laptop"` delivers it explicitly.
+The CLI decides and the Battery carries it: there is no omahouse receptor or
+network client. Install `omahouse.sync` and `omahouse.profile-publish` in the
+manager's Battery workspace, and `omahouse.profile-send` and
+`omahouse.profile-push` on each managed node.
+
+Every publish checks all paired machines before pushing anywhere. A collected
+change against the last publication makes the profile unresolved everywhere;
+before the first publication, an empty remote envelope is an ordinary empty
+machine. A failed check keeps the last collected copy standing. Use
+`profile merge kid --take <machine>` to bring its rules here, or `--keep` to keep
+the central draft. Keep still prints the wire document and also records the
+explicit decision. Neither merge publishes.
+
+Targets up to date are skipped. `--all` selects only reached, paired machines
+behind or never published; unavailable machines remain visible as not checked.
+Explicit unavailable targets fail. Each push carries the exact checked remote
+profile as `supersedes`. Concurrent publications are serialized separately from
+profile editing; an edit during publication stops remaining sends and asks for
+another publication. Successful pushes are read back before recording completion,
+so the next collected stamp is the receiver's real stamp. A lost confirmation is
+reported as applied but unconfirmed, never as a remote refusal.
+
+Publishing is never scheduled. Gathering can keep the table fresh, but publishing
+checks again and never treats a new conflict as permission to overwrite it.
 
 ### A profile travelling the other way, and one document shape for both
 
