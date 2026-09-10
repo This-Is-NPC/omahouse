@@ -2,6 +2,12 @@
 #include "Json.h"
 namespace omahouse
 {
+QJsonObject publicationRules(const Profile& profile)
+{
+    auto rules = profile.withoutTheStamp();
+    rules.remove(QStringLiteral("allocation"));
+    return rules;
+}
 QString publicationName(Publication state)
 {
     switch (state)
@@ -71,24 +77,24 @@ Publication publicationOf(const Profile& draft, const Published* published,
 {
     if (!paired)
         return Publication::NotPaired;
-    const auto rules = draft.withoutTheStamp();
+    const auto rules = publicationRules(draft);
     const bool changed = collected.collected
         && (published ? (!collected.has
-                            || collected.profile.withoutTheStamp()
-                                != published->profile.withoutTheStamp())
-                      : (collected.has && collected.profile.withoutTheStamp() != rules));
+                            || publicationRules(collected.profile)
+                                != publicationRules(published->profile))
+                      : (collected.has && publicationRules(collected.profile) != rules));
     if (changed)
     {
         if (!resolved || resolved->observed != collected.observed() || resolved->draft != rules)
             return Publication::ChangedThere;
         // Keeping a draft that equals the last publication still needs a push:
         // the machine is running the version the operator just rejected.
-        if (!collected.has || collected.profile.withoutTheStamp() != rules)
+        if (!collected.has || publicationRules(collected.profile) != rules)
             return Publication::Behind;
     }
     if (!published)
         return Publication::NeverPublished;
-    return rules == published->profile.withoutTheStamp() ? Publication::UpToDate
+    return rules == publicationRules(published->profile) ? Publication::UpToDate
                                                          : Publication::Behind;
 }
 Standing standingOf(const QVector<PublicationRow>& rows)

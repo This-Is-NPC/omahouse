@@ -3461,6 +3461,17 @@ int cmdProfileApplyStaged(const Globals &g, const QStringList &positionals)
             existing = &one;
     }
 
+    // A supplied snapshot is a condition even when the last writer was the
+    // node. A synchronization may have changed the allocation or restamped a
+    // policy after it was collected; neither makes that old snapshot current.
+    if (document.contains(QStringLiteral("supersedes"))
+        && (!document.value(QStringLiteral("supersedes")).isObject() || supersedes.isEmpty()
+            || !existing || supersedes != existing->toJson())) {
+        fail(QStringLiteral("%1: %2 changed since it was collected; collect and decide again.")
+                 .arg(verb, incoming.user));
+        return kUsage;
+    }
+
     if (existing && existing->writtenBy != Omakure::account()) {
         const QString stampedAt =
             existing->writtenAt.isValid()
@@ -3483,11 +3494,16 @@ int cmdProfileApplyStaged(const Globals &g, const QStringList &positionals)
         }
     }
 
+    // Allocation is this machine's enrollment and current balance, changed
+    // only by allocation verbs. Preserve the live copy under the profiles
+    // lock, including a cycle that finished after the sender read the profile.
+    Profile accepted = incoming;
+    accepted.allocation = existing ? existing->allocation : QJsonObject{};
     const bool replaced = existing != nullptr;
     if (existing)
-        *existing = incoming;
+        *existing = accepted;
     else
-        profiles.all.append(incoming);
+        profiles.all.append(accepted);
 
     // Whose name ends up on it is `saveProfiles`, and it is the node account:
     // `sudo` says who asked in `SUDO_UID`, and a push has no person. That is
@@ -3506,7 +3522,7 @@ int cmdProfileApplyStaged(const Globals &g, const QStringList &positionals)
     }
 
     if (g.json) {
-        printJson(incoming.toJson());
+        printJson(accepted.toJson());
         return kOk;
     }
     out() << QStringLiteral("%1: %2 from the household, %3.\n")
@@ -4949,14 +4965,16 @@ int cmdProfilePublish(const Globals &g, const QStringList &positionals, const Op
             if (!loadProfiles(&current, &status))
                 return status;
             const auto *now = profileFor(current, user);
-            if (!now || now->toJson() != draft.toJson()) {
+            if (!now || publicationRules(*now) != publicationRules(draft)) {
                 said[target]
                     = QStringLiteral("refused: draft changed during publication; publish again");
                 success = false;
                 break;
             }
             const Collected observed = snapshots.value(target);
-            auto document = profilesToJson({ draft });
+            Profile delivered = draft;
+            delivered.allocation = observed.has ? observed.profile.allocation : QJsonObject{};
+            auto document = profilesToJson({ delivered });
             if (observed.has)
                 document.insert(QStringLiteral("supersedes"), observed.profile.toJson());
             QJsonArray pushed;
@@ -4997,7 +5015,7 @@ int cmdProfilePublish(const Globals &g, const QStringList &positionals, const Op
                 || !reply.value("declared").toBool() || !reply.value("exitCode").isDouble()
                 || reply.value("exitCode").toInt() != 0 || !envelope.isObject()
                 || !profilesFromJson(envelope.object(), &confirmed, &error) || confirmed.size() != 1
-                || confirmed.first().withoutTheStamp() != draft.withoutTheStamp()) {
+                || publicationRules(confirmed.first()) != publicationRules(draft)) {
                 said[target]
                     = QStringLiteral("applied, confirmation unavailable or rules changed there");
                 success = false;
@@ -5023,7 +5041,7 @@ int cmdProfilePublish(const Globals &g, const QStringList &positionals, const Op
         fail(error);
         return kUsage;
     }
-    if (!finalDraft || finalDraft->toJson() != draft.toJson()) {
+    if (!finalDraft || publicationRules(*finalDraft) != publicationRules(draft)) {
         success = false;
         for (const auto &target : targets)
             if (said.value(target) == QLatin1String("published"))
@@ -5098,7 +5116,7 @@ int cmdProfileMerge(const Globals &g, const QStringList &positionals, const Opti
     // `changed` forever with nothing to decide about any of them. The stamp is
     // in the table beside the answer, which is where who wrote each and when
     // belongs; it is not what the answer is about. The same comparison
-    // `stampWhatChanged` makes, for the same reason.
+    // Runtime allocation is also local to each machine, not policy to merge.
     const auto kindOf = [&](const Says &said) -> QString {
         if (!said.collected)
             return QStringLiteral("not collected");
@@ -5106,7 +5124,7 @@ int cmdProfileMerge(const Globals &g, const QStringList &positionals, const Opti
             return QStringLiteral("new");
         if (!said.has && mine)
             return QStringLiteral("gone");
-        if (said.has && mine && said.profile.withoutTheStamp() != mine->withoutTheStamp())
+        if (said.has && mine && publicationRules(said.profile) != publicationRules(*mine))
             return QStringLiteral("changed");
         return QStringLiteral("same");
     };
@@ -5156,14 +5174,16 @@ int cmdProfileMerge(const Globals &g, const QStringList &positionals, const Opti
             // Taking a machine's *absence* is taking a removal: somebody with
             // the manager unreachable decided this account has no rules, and
             // agreeing with them means the same here.
+            Profile taken = said->profile;
+            taken.allocation = mine ? mine->allocation : QJsonObject{};
             if (said->has)
-                kept.append(said->profile);
+                kept.append(taken);
             profiles.all = kept;
             if (!saveProfiles(verb, profiles.all))
                 return kUsage;
             QString resolutionError;
             if (said->has
-                && !resolveCollected(about, user, *said, said->profile, &resolutionError)) {
+                && !resolveCollected(about, user, *said, taken, &resolutionError)) {
                 fail(resolutionError);
                 return kUsage;
             }
@@ -5187,7 +5207,9 @@ int cmdProfileMerge(const Globals &g, const QStringList &positionals, const Opti
             fail(resolutionError);
             return kUsage;
         }
-        QJsonObject document = profilesToJson({*mine});
+        Profile delivered = *mine;
+        delivered.allocation = said->has ? said->profile.allocation : QJsonObject{};
+        QJsonObject document = profilesToJson({delivered});
         // What the manager believes is over there, whole. The machine compares
         // it with what it actually has, so a decision made against a version
         // that has since changed lands nowhere rather than on the wrong one.

@@ -4266,6 +4266,107 @@ def check_publish_all_skips_what_is_up_to_date(box):
     assert (workspace / "pushes.jsonl").read_bytes() == before
 
 
+def check_publication_keeps_allocations_on_their_own_machine(box):
+    _, workspace, world, run = fake_publication_battery(box)
+    assert run('limit', 'kid', '--session', '1h').returncode == 0
+    result = run('allocation', 'init', 'kid')
+    assert result.returncode == 0, result.stderr
+    central = json.loads(result.stdout)['allocation']
+    result = run('profile', 'publish', 'kid', '--to', 'a')
+    assert result.returncode == 0, result.stdout + result.stderr
+    remote = json.loads(world.read_text())
+    assert 'allocation' not in remote['a']['profiles'][0], 'a new client must not inherit central enrollment'
+    remote['a']['profiles'][0]['allocation'] = {'authority': central['authority'], 'machine': 'a'}
+    target = remote['a']['profiles'][0]['allocation']
+    world.write_text(json.dumps(remote))
+    result = run('profile', 'publish', 'kid', '--to', 'a')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'unresolved' not in run('profile', 'list').stdout
+    assert run('limit', 'kid', '--session', '2h').returncode == 0
+    result = run('profile', 'publish', 'kid', '--to', 'a')
+    assert result.returncode == 0, result.stdout + result.stderr
+    remote = json.loads(world.read_text())
+    assert remote['a']['profiles'][0]['allocation'] == target
+    assert json.loads(run('allocation', 'show', 'kid').stdout)['allocation'] == central
+    remote['a']['profiles'][0]['displayName'] = 'Remote rules'
+    world.write_text(json.dumps(remote))
+    assert run('profile', 'publish', 'kid', '--to', 'b').returncode == 1
+    taken = run('profile', 'merge', 'kid', '--take', 'a')
+    assert taken.returncode == 0, taken.stderr
+    assert json.loads(run('allocation', 'show', 'kid').stdout)['allocation'] == central
+    merged = json.loads(run('profile', 'merge', 'kid', '--json').stdout)
+    assert next(row for row in merged['machines'] if row['machine'] == 'a')['is'] == 'same'
+    result = run('profile', 'publish', 'kid', '--to', 'b')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'allocation' not in json.loads(world.read_text())['b']['profiles'][0]
+    remote = json.loads(world.read_text())
+    remote['a']['profiles'][0]['displayName'] = 'Rejected rules'
+    world.write_text(json.dumps(remote))
+    assert run('profile', 'publish', 'kid', '--to', 'a').returncode == 1
+    kept = run('profile', 'merge', 'kid', '--keep', 'a')
+    assert kept.returncode == 0, kept.stderr
+    assert json.loads(kept.stdout)['profiles'][0]['allocation'] == target
+    result = run('profile', 'publish', 'kid', '--to', 'a')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(world.read_text())['a']['profiles'][0]['allocation'] == target
+    assert json.loads(run('allocation', 'show', 'kid').stdout)['allocation'] == central
+
+
+def check_a_stage_preserves_local_allocation(box):
+    box.write_profiles({'schemaVersion': 2, 'profiles': []})
+    stage = box.config / 'staged'
+    stage.mkdir()
+    household = {'SUDO_UID': '2', 'OMAHOUSE_OMAKURE_USER': 'daemon'}
+    def push(profile, **extra):
+        (stage / 'profile.json').write_text(json.dumps({'schemaVersion': 2, 'profiles': [profile], **extra}))
+        return box.run('profile', 'apply-staged', '--json', extra_env=household)
+    central = {'authority': 'house', 'machine': 'here'}
+    incoming = {'user': 'nobody', 'displayName': 'New rules', 'allocation': central}
+    result = push(incoming)
+    assert result.returncode == 0, result.stderr
+    local = json.loads(box.run('profile', 'show', 'nobody', '--json').stdout)['profiles'][0]
+    assert 'allocation' not in local, 'a profile push must not enroll an empty receiver'
+    assert 'allocation' not in json.loads(result.stdout)
+    assert box.run('limit', 'nobody', '--session', '1h').returncode == 0
+    enrolled = box.run('allocation', 'enroll', 'nobody', '--node', 'house', '--name', 'laptop')
+    assert enrolled.returncode == 0, enrolled.stderr
+    local = json.loads(box.run('profile', 'show', 'nobody', '--json').stdout)['profiles'][0]
+    allocation = local['allocation']
+    result = push(incoming, supersedes=local)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['allocation'] == allocation
+    assert json.loads(box.run('profile', 'show', 'nobody', '--json').stdout)['profiles'][0]['allocation'] == allocation
+
+
+def check_a_supplied_snapshot_is_checked_even_for_node_writes(box):
+    box.write_profiles({'schemaVersion': 2, 'profiles': []})
+    stage = box.config / 'staged'
+    stage.mkdir()
+    household = {'SUDO_UID': '2', 'OMAHOUSE_OMAKURE_USER': 'daemon'}
+    def push(display, **extra):
+        (stage / 'profile.json').write_text(json.dumps({'schemaVersion': 2,
+            'profiles': [{'user': 'nobody', 'displayName': display}], **extra}))
+        return box.run('profile', 'apply-staged', extra_env=household)
+    def current():
+        return json.loads(box.run('profile', 'show', 'nobody', '--json').stdout)['profiles'][0]
+    assert push('Observed').returncode == 0
+    observed = current()
+    assert push('Another node write').returncode == 0
+    changed = current()
+    assert changed['writtenBy'] == 'daemon'
+    result = push('Must not land', supersedes=observed)
+    assert result.returncode == 1, 'a node stamp must not bypass supplied supersedes: ' + result.stdout
+    assert current() == changed
+    for invalid in ({}, None, 'not a profile'):
+        result = push('Invalid snapshot', supersedes=invalid)
+        assert result.returncode == 1, result.stdout
+        assert current() == changed
+    assert box.run('profile', 'remove', 'nobody', '--keep-account').returncode == 0
+    result = push('Must not recreate', supersedes=changed)
+    assert result.returncode == 1, 'a removed observed profile must not be recreated blindly'
+    assert json.loads(box.run('profile', 'list', '--json').stdout) == []
+
+
 def main():
     assert CLI.is_file(), f"missing CLI at {CLI}"
     cases = [
@@ -4299,6 +4400,9 @@ def main():
         check_publish_keeps_an_unreachable_conflict_unresolved,
 
         check_profile_list_and_show_say_where_a_profile_stands,
+        check_publication_keeps_allocations_on_their_own_machine,
+        check_a_stage_preserves_local_allocation,
+        check_a_supplied_snapshot_is_checked_even_for_node_writes,
         check_profile_show,
         check_profile_refuses_what_it_does_not_do,
         check_a_profile_from_nothing_to_read_back,

@@ -117,6 +117,6 @@ bool resolveCollected(const QString& machine, const QString& user, const Collect
         return false;
     }
     return writeJsonAtomically(
-        path, Resolution { collected.observed(), draft.withoutTheStamp() }.toJson(), error);
+        path, Resolution { collected.observed(), publicationRules(draft) }.toJson(), error);
 }
 }

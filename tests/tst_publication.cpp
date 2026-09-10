@@ -30,6 +30,26 @@ private slots:
         collected.has = false;
         QCOMPARE(publicationOf(draft, &published, collected, true), Publication::ChangedThere);
     }
+    void allocationsAreNotPublicationRules()
+    {
+        Profile draft;
+        draft.user = "kid";
+        draft.allocation = QJsonObject { { "authority", "house" }, { "machine", "here" } };
+        Published published;
+        published.profile = draft;
+        Collected collected;
+        collected.collected = true;
+        collected.has = true;
+        collected.profile = draft;
+        collected.profile.allocation["machine"] = "laptop";
+        QCOMPARE(publicationOf(draft, &published, collected, true), Publication::UpToDate);
+        collected.profile.allocation["revision"] = 42;
+        QCOMPARE(publicationOf(draft, &published, collected, true), Publication::UpToDate);
+        draft.enabled = false;
+        QCOMPARE(publicationOf(draft, &published, collected, true), Publication::Behind);
+        collected.profile.displayName = "Changed policy";
+        QCOMPARE(publicationOf(draft, &published, collected, true), Publication::ChangedThere);
+    }
     void standing()
     {
         QCOMPARE(publicationSummary({ { "unpaired", Publication::NotPaired } }), QString("never"));

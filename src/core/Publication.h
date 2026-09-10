@@ -11,6 +11,8 @@ enum class Publication
     Behind,
     ChangedThere
 };
+// Policy shared between machines, excluding stamps and local runtime allocation.
+QJsonObject publicationRules(const Profile& profile);
 QString publicationName(Publication state);
 QString publicationSaid(Publication state);
 struct Published

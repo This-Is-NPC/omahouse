@@ -796,6 +796,21 @@ another publication. Successful pushes are read back before recording completion
 so the next collected stamp is the receiver's real stamp. A lost confirmation is
 reported as applied but unconfirmed, never as a remote refusal.
 
+Publication and merge compare policy without its write stamp or `allocation`.
+Allocation is runtime state bound to one machine: the central is `here`, each
+client has its own fleet name, and scheduled cycles advance its balance and
+revision. Those changes are not policy conflicts. Publishing and `merge --keep`
+carry the target's allocation; `merge --take` retains the central's allocation.
+The receiver preserves its current allocation while holding the profiles lock,
+so a profile push never enrolls a machine or moves another machine's balance.
+Only allocation verbs change that runtime state.
+
+A supplied `supersedes` must match the receiver's whole current profile, even
+when the last writer was the node account. A changed or removed observed copy
+requires another check; a node's stamp cannot waive this condition. Explicit
+merge resolutions also remain bound to the whole observation, so a scheduled
+cycle between resolving and publishing can require another resolution.
+
 Publishing is never scheduled. Gathering can keep the table fresh, but publishing
 checks again and never treats a new conflict as permission to overwrite it.
 
@@ -921,13 +936,14 @@ was a loan. It would also destroy the evidence a merge exists to show, so the
 merge would list nothing forever and never look wrong, because nothing is the
 ordinary answer.
 
-Three ways through and nothing else: there is no profile here yet; the last write
-here was a push; or the document carries a `supersedes` holding the profile the
-manager believes is here, and it is exactly what is here. The last is somebody on
-the manager having looked at this machine's version and decided — the second pass
-of a merge, and the only way a hand-made profile is replaced. It carries the
-whole profile and not its stamp, because the stamp has a second's resolution and
-a machine edited twice inside one second would read as unchanged.
+A document carrying `supersedes` is accepted only when that whole profile is
+still present, regardless of its last writer. Without a supplied snapshot, a
+new profile or a replacement of a node-written profile can be accepted; a
+hand-made profile requires the matching snapshot. This is somebody on the
+manager having looked at this machine's version and decided. It compares the
+whole profile, because a stamp has a second's resolution and a machine edited
+twice inside one second would otherwise read as unchanged. Runtime allocation
+stays on the receiving machine in every case.
 
 ---
 
