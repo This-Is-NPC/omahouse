@@ -59,6 +59,7 @@ class House : public QObject
     /// the subject sees theirs and no one else's, because profiles.json is
     /// readable by everybody and a window is not a reason to publish the rest of
     /// the household.
+    Q_PROPERTY(QVariantMap household READ household NOTIFY changed)
     Q_PROPERTY(QVariantList people READ people NOTIFY changed)
     /// `programs`, `sites`, `today` and `catalog`, each an object keyed by user
     /// name.
@@ -79,6 +80,7 @@ public:
     QString faceReason() const { return m_faceReason; }
     QString error() const { return m_error; }
     QVariantList people() const { return m_snapshot.value(QStringLiteral("people")).toList(); }
+    QVariantMap household() const { return m_snapshot.value(QStringLiteral("household")).toMap(); }
     QVariantMap snapshot() const { return m_snapshot; }
     QString reach() const;
 

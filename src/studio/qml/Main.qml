@@ -41,6 +41,17 @@ Window {
     // ------------------------------------------------------------------ state
     readonly property bool operating: House.face === "operator"
     readonly property var people: House.people
+    readonly property var household: House.household
+    readonly property string householdSentence: {
+        if (win.household.kind === "managed")
+            return " · managed from another computer"
+        if (win.household.kind !== "manager")
+            return ""
+        const machines = win.household.machines || []
+        const names = machines.map(function (machine) { return machine.name })
+        return " · manages " + machines.length + " computer" + (machines.length === 1 ? "" : "s")
+               + (names.length ? " · " + names.join(", ") : "")
+    }
     property int view: 1
     property int cursorPeople: 0
     property int cursorPrograms: 0
@@ -859,7 +870,7 @@ Window {
                         // password". Neither is a thing to leave somebody to
                         // work out from what does and does not happen.
                         text: House.user + " · " + House.face + " · " + House.faceReason
-                              + (Admin.elevates ? " · writes through pkexec" : "")
+                              + (Admin.elevates ? " · writes through pkexec" : "") + win.householdSentence
                     }
                 }
 

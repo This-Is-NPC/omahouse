@@ -530,3 +530,7 @@ Credit added here is delivered by the next successful Battery cycle. The window
 reads local snapshots and uses the existing privileged CLI for writes; it does
 not run a scheduler. Follow [the explicit setup](how-to-schedule-household.md)
 to enroll computers and activate the Omakure schedule.
+
+The header names this computer's role: a manager shows how many computers it
+manages and their names; a managed computer says it is managed from another
+computer. The sentence elides before it can overlap the view tabs.

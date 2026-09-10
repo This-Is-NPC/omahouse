@@ -856,7 +856,7 @@ void House::refresh()
     //
     // Both are read once, outside the loop over profiles: they are facts about
     // the computer and not about anybody's account. A machine that is `Alone`
-    // or `Managed` reads neither list and adds nothing up -- `house` is the
+    // or `Managed` adds nothing up -- `house` is the
     // manager's question (Kind.h), and a managed machine drawing a household
     // total would be drawing it out of days it is not the one that collects.
     ThisMachine here;
@@ -867,7 +867,7 @@ void House::refresh()
         error = QStringLiteral("machine: %1").arg(machineError);
     }
     QVector<Machine> household;
-    if (here.kind == Kind::Manager) {
+    {
         QString listError;
         bool noList = false;
         if (!readMachines(paths::machinesFile(), &household, &listError, &noList)) {
@@ -958,7 +958,7 @@ void House::refresh()
         // starts existing when there is something to add to it.
         QStringList notHeardFrom;
         QVector<HouseBudget> house;
-        if (!household.isEmpty())
+        if (here.kind == Kind::Manager && !household.isEmpty())
             house = houseOf(profile, ledger, household, today, &notHeardFrom, &error);
 
         const QVariantList programRows = programsOf(profile, ledger, scopes, byId);
@@ -1041,6 +1041,15 @@ void House::refresh()
     }
 
     QVariantMap snapshot;
+    QVariantList machineRows;
+    for (const auto &machine : household) {
+        machineRows.append(QVariantMap{{QStringLiteral("name"), machine.name},
+                                      {QStringLiteral("reachable"), machine.reachable()}});
+    }
+    snapshot.insert(QStringLiteral("household"), QVariantMap{
+        {QStringLiteral("kind"), kindName(here.kind)},
+        {QStringLiteral("name"), here.name},
+        {QStringLiteral("machines"), machineRows}});
     snapshot.insert(QStringLiteral("people"), people);
     snapshot.insert(QStringLiteral("programs"), programs);
     snapshot.insert(QStringLiteral("sites"), sites);

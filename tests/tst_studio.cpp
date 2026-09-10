@@ -160,6 +160,7 @@ private slots:
     void theFilterNarrowsOnlyTheListItWasTypedOn();
     void theSubjectFaceHasNothingToPress();
     void theWindowNeverWritesToTheMachine();
+    void theHeaderSaysWhatThisComputerIs();
     void theHeaderKeepsOffTheTabsWhenNarrow();
     void writesTheOperatorShots();
     void writesTheSubjectShots();
@@ -1234,6 +1235,35 @@ QByteArray TestStudio::treeUnder(const QString &directory)
     return fingerprint;
 }
 
+void TestStudio::theHeaderSaysWhatThisComputerIs()
+{
+    QString error;
+    Machine laptop;
+    laptop.name = QStringLiteral("the kid's laptop");
+    laptop.nodeId = QStringLiteral("omk1_abc");
+    laptop.endpoint = QStringLiteral("localhost:8787");
+    QVERIFY(writeMachines(paths::machinesFile(), {laptop}, &error));
+    ThisMachine machine;
+    machine.name = QStringLiteral("the study");
+    machine.kind = Kind::Manager;
+    machine.since = QDateTime::currentDateTimeUtc();
+    QVERIFY(writeThisMachine(paths::thisMachineFile(), machine, &error));
+    m_house->reload(); settle();
+    auto *header = awaitItem(QStringLiteral("faceLabel"));
+    QVERIFY(header);
+    QVERIFY2(header->property("text").toString().contains(QStringLiteral("manages 1 computer · the kid's laptop")), qPrintable(header->property("text").toString()));
+    QCOMPARE(m_house->property("household").toMap().value("machines").toList().size(), 1);
+    machine.kind = Kind::Managed; machine.managedBy = QStringLiteral("omk1_manager");
+    QVERIFY(writeThisMachine(paths::thisMachineFile(), machine, &error));
+    m_house->reload(); settle();
+    QVERIFY(header->property("text").toString().contains(QStringLiteral("managed from another computer")));
+    QFile::remove(paths::thisMachineFile());
+    QFile::remove(paths::machinesFile());
+    m_house->reload(); settle();
+    QVERIFY(!header->property("text").toString().contains(QStringLiteral("manages")));
+    QVERIFY(!header->property("text").toString().contains(QStringLiteral("managed from")));
+}
+
 void TestStudio::theHeaderKeepsOffTheTabsWhenNarrow()
 {
     // Tiled at half a 1440 px screen the header's two halves -- who this is
@@ -2114,7 +2144,14 @@ void TestStudio::writesTheOperatorShots()
     key('f');
     QMetaObject::invokeMethod(root(), "setFilter",
                               Q_ARG(QVariant, QVariant(QStringLiteral("session"))));
+    ThisMachine shotManager;
+    shotManager.kind = Kind::Manager;
+    shotManager.name = QStringLiteral("the study");
+    shotManager.since = QDateTime::currentDateTimeUtc();
+    QVERIFY(writeThisMachine(paths::thisMachineFile(), shotManager, &fleetError));
+    m_house->reload();
     shoot(QStringLiteral("31-operator-machines"));
+    QFile::remove(paths::thisMachineFile());
     QMetaObject::invokeMethod(root(), "setFilter", Q_ARG(QVariant, QVariant(QString())));
     QVERIFY(writeProfiles(paths::profilesFile(), originalProfiles, &fleetError));
     QVERIFY(writeMachines(paths::machinesFile(), {}, &fleetError));
