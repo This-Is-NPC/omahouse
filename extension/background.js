@@ -4,7 +4,7 @@
 // as it is. The browser is the only thing on the machine that knows the name of
 // the site somebody is looking at -- not the compositor, whose window title is
 // whatever the page decided to write there, and not the network, which
-// `docs/not-built/network-control-per-account.md` §3.2 measured putting 4.5% of
+// `docs/design.md` §3.2 measured putting 4.5% of
 // a playing video's bytes in the set named after it. So the name has to come
 // from in here. Every
 // other question is answered outside, by the daemon that is already root:
@@ -74,7 +74,7 @@ const RECONNECT_MS = 5000;
 // -- the registrable domain ---------------------------------------------------
 //
 // The privacy boundary, and it is kept here rather than at the far end.
-// `docs/the-browser-half.md` §5.4: the URL never leaves the browser process, so
+// `docs/design.md` §5.4: the URL never leaves the browser process, so
 // there is no path -- no bug, no compromised host, no file left readable -- by
 // which the page somebody was on can be read out of omahouse. What crosses the
 // wire is `youtube.com`, and the difference between that and
@@ -171,7 +171,7 @@ function open() {
         port = null;
         // Not measured: the browser spike held the port for thirty
         // minutes without one of these, and a suspend and resume was never
-        // exercised (`docs/the-browser-half.md` §9, question 9). So the
+        // exercised (`docs/design.md` §9, question 9). So the
         // reconnection here is written for a case nobody has seen rather than
         // for one somebody has, and it is deliberately the dullest possible
         // shape: wait, open again, report again.
@@ -213,7 +213,7 @@ async function report(why) {
         site = NOTHING;
     }
     // Sent whether or not it changed, and there is no debounce on the way out.
-    // `docs/the-browser-half.md` §5.7 warned that `windows.onFocusChanged` sends
+    // `docs/design.md` §5.7 warned that `windows.onFocusChanged` sends
     // a spurious `WINDOW_ID_NONE` before every window-to-window switch on some
     // Linux window managers and that the lie would have to be damped.
     // the browser spike measured it on this compositor: twenty real

@@ -10,7 +10,7 @@
 #
 # -- why there is no key to keep ----------------------------------------------
 #
-# `docs/the-browser-half.md` §6.3 named the signing key as a cost of self-hosting
+# `docs/design.md` §6.3 named the signing key as a cost of self-hosting
 # and did not decide it. The two ways to pay it:
 #
 #   (a) A release key held by whoever cuts releases. The `.crx` is signed once,
@@ -25,7 +25,7 @@
 #       public half, so a key per machine is an id per machine -- and the policy
 #       is written here, after the key exists, naming the id that key produced.
 #       **There is no key to hold.** There is nothing to leak that would reach a
-#       second machine, because the key that signs julia's meter cannot sign
+#       second machine, because the key that signs kid's meter cannot sign
 #       anything her neighbour's Chromium would accept.
 #
 # **This is (b).** The one thing it needed before it could be chosen was a
@@ -287,7 +287,7 @@ install -Dm644 "$work/omahouse-meter.json" "$policy"
 # than shipped as a file, because until the key existed there was no id to put
 # in it.
 #
-# In `/etc` and not in a home directory -- `docs/the-browser-half.md` §5.5: a host
+# In `/etc` and not in a home directory -- `docs/design.md` §5.5: a host
 # manifest under `~/.config` is one the child owns and can rewrite, and this one
 # is root's.
 install -d -m 0755 "$(dirname "$host_manifest")"

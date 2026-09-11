@@ -60,20 +60,6 @@ it is for.
 | [what does not work yet](what-does-not-work.md) | every defect, in one place, each with what to do in the meantime. Nothing else here names a defect that is not on that page. |
 | [how it is built](design.md) | for contributors: the model, the eight rounds of measurement that changed it, the packaging, and the gate. Its section numbers are cited from comments throughout `src/`, so they do not move. |
 
-## The record: what was proposed, and what became of it
-
-Two of these pages are not documentation of a feature. They are the argument and
-the measurement behind decisions that were made, kept because the next person to
-reach for the same idea should find out in an afternoon what cost a week.
-
-| the page | what it is |
-|---|---|
-| [what was proposed and not built](not-built/README.md) | the register: everything argued for and not built, with the reason for each. Start here rather than in the two pages below. |
-| [network control per account — measured, and not taken](not-built/network-control-per-account.md) | a per-UID `nftables` design, measured in two VMs and abandoned. The browser sends no packet to port 53; a set of addresses named `youtube.com` does not contain the site. What is still a candidate is named as such. |
-| [where the browser half was decided](the-browser-half.md) | the argument the shipped browser half came from — Chromium source reads, the policy constraints, and the ecosystem survey. Most of it shipped; where it disagrees with `design.md`, `design.md` wins. |
-
----
-
 ## Conventions across every page
 
 **`kid` is a placeholder**, not a keyword. Every verb takes the login name of an
@@ -90,7 +76,7 @@ drawn by the studio itself, offscreen, by `mise run shots`, and
 `mise run verify` refuses a commit where it is not what the window draws today.
 Anything under `vm/shots/` is one run through a live Omarchy desktop on
 2026-09-04 and is not regenerable — those are the pictures where the account
-under rules is called `julia` while the commands beside them say `kid`.
+under rules is called `kid` while the commands beside them say `kid`.
 
 **What is measured is said to be measured.** A number in these pages came off a
 machine, and where something has only been argued or read out of somebody

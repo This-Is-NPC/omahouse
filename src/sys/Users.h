@@ -29,7 +29,7 @@ QString currentUser();
 /// Whoever asked for this, which is not always whoever is running it. Under
 /// `pkexec` the process is root and the person is not, and polkit says who they
 /// were in `$PKEXEC_UID`. That is the name a grant is signed with, because "root
-/// gave julia ten minutes" is not the line an operator wants to read back in a
+/// gave kid ten minutes" is not the line an operator wants to read back in a
 /// month.
 QString operatorUser();
 

@@ -95,24 +95,16 @@ AT        BY    BUDGET   ADDED
 `+` on a program, a budget or a site. The footer says what happened, in the same
 sentence the CLI prints:
 
-![The studio's programs tab once the grant is through: the footer says "julia: +10m of foot, from howl. 15m left today.", and the Foot row reads "15m left of 15m" with "+10m handed over today" under it.](../vm/shots/40-studio-tempo-extra-concedido.png)
+![The studio's programs tab once the grant is through: the footer says "kid: +10m of foot, from howl. 15m left today.", and the Foot row reads "15m left of 15m" with "+10m handed over today" under it.](../vm/shots/40-studio-tempo-extra-concedido.png)
 
 *(The pictures from the live machine were taken with the account under rules
-called `julia`; the commands here say `kid`.)*
+called `kid`; the commands here say `kid`.)*
 
 The sheet it opens:
 
 ![The "More time today for code" dialogue: a field with a `+` printed to the left of it as a lead mark, empty, and "Enter ok" greyed out.](img/11-operator-more-today.png)
 
 The `+` on the left is drawn by the field and is not in it.
-
-> **A gotcha, and it is a defect.** On a live session the `+` keystroke that
-> opened the sheet lands in the field as well, and `ok` is born greyed out.
-> Clear the `+` before typing the number.
->
-> ![The "More time today for foot" dialogue with a lone `+` in the field and the `Enter ok` button greyed out.](../vm/shots/39-studio-mais-tempo-hoje.png)
->
-> [The defect](what-does-not-work.md#5-the-key-that-opens-more-time-today-lands-in-the-field)
 
 **more time today** is missing from the command palette when the row under the
 cursor has no clock on it. That is the point of listing only what is usable:

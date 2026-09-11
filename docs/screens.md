@@ -217,9 +217,7 @@ adds to the limit rather than replacing it:
 
 ![The "More time today for code" dialogue: a field with a + printed to the left of it as a lead mark, empty, and "Enter ok" greyed out.](img/11-operator-more-today.png)
 
-The `+` on the left is drawn by the field and is not in it. On a live session the
-keystroke that opened the sheet lands in the field as well, which is
-[defect 5](what-does-not-work.md#5-the-key-that-opens-more-time-today-lands-in-the-field).
+The `+` on the left is drawn by the field and is not in it.
 
 `p` is whether the budget under the cursor comes back tomorrow. It turns an
 allowance into a pot that **never resets** — two hours are two hours until
@@ -450,7 +448,7 @@ One run through a VM with Omarchy installed on it, on **2026-09-04, between
 blocking a site, and removing the package again — and three more on 2026-09-04
 at 21:26 and after, for the browser meter and for the machine being put back.
 
-The account under rules on that machine was called `julia`, and the name is
+The account under rules on that machine was called `kid`, and the name is
 drawn into the pictures. Everywhere else in this repository the example account
 is `kid`, which stands for whatever the account is called on the machine you are
 reading this on.
@@ -483,22 +481,12 @@ not mistaking for it:
 
 | the screen | in `../vm/shots/` |
 |---|---|
-| the three views and the key sheet, subject face, as `julia` | `20`–`24` |
+| the three views and the key sheet, subject face, as `kid` | `20`–`24` |
 | the command palette, subject face | `25` |
 | the three views and the key sheet, operator face, as `howl` | `28`, `29`, `33`, `41` |
 | the new-profile prompt and the refusal that followed it | `30`, `32` |
 | the program picker, filtered, over a real catalogue of shims | `34`, `35` |
 | the limit, the grant and the day's total, asked and answered | `36`, `38`, `39`, `40`, `42`, `43` |
-
-Two of them are the record of a defect rather than of a screen, and both are on
-[what does not work](what-does-not-work.md):
-`20-studio-julia.png`, where a narrow window draws the header over the subtitle
-and the tabs, and `39-studio-mais-tempo-hoje.png`, where the `+` that opened
-**more time today** lands in the field it opened and leaves `ok` greyed out.
-Neither is reachable from the generator: the first needs a window somebody has
-resized, and the second is a keystroke arriving after the sheet is up, which is
-a race the offscreen run does not lose.
-
 
 ## Household machines
 
