@@ -34,7 +34,7 @@ if a previous run left rules on it, and the first thing it did was find that
 while promising "no fleet identity". Both are on its list now.
 
 **Two red runs came first, and both were the case being wrong rather than the
-code.** The first failed at setup — `profile add: julia already has a profile` —
+code.** The first failed at setup — `profile add: kid already has a profile` —
 because a previous run had died before its teardown and left the peer dirty and
 running. The second failed on the new assertion after waiting three minutes for
 a number that could not move: the case claimed the far machine's daemon was

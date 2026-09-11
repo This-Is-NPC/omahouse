@@ -97,7 +97,7 @@ def collected(vm, dad):
     # household's number from it, and the household's number is what a sum is
     # measured against.
     vm.make_profile({"session": 120}, default="allow")
-    dad.root(f"omahouse profile add {child} --name Julia")
+    dad.root(f"omahouse profile add {child} --name Kid")
     dad.root(f"omahouse limit {child} --session 120m")
     vm.seed_ledger({"session": 1800})
 

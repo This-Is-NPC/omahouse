@@ -133,7 +133,7 @@ def profile_document():
         "profiles": [
             {
                 "user": USER,
-                "displayName": "Júlia",
+                "displayName": "Kid",
                 "enabled": True,
                 "enforce": True,
                 "default": "deny",
@@ -693,7 +693,7 @@ def check_status_with_a_profile(box):
 
     shown = box.run("status", USER)
     assert shown.returncode == 0, shown.stderr
-    assert "Júlia" in shown.stdout
+    assert "Kid" in shown.stdout
     assert "enforcing, default deny" in shown.stdout
 
     # The verdict each app would get: two rules, and everything else falling to
@@ -726,7 +726,7 @@ def check_status_json(box):
     assert document["uid"] == UID
     assert document["date"] == TODAY.isoformat()
     assert document["session"] is True
-    assert document["profile"]["displayName"] == "Júlia"
+    assert document["profile"]["displayName"] == "Kid"
 
     ids = {scope["id"]: scope for scope in document["scopes"]}
     assert ids["chromium"]["processes"] == 19
@@ -978,11 +978,11 @@ def check_profile_list(box):
     listed = box.run("profile", "list")
     assert listed.returncode == 0, listed.stderr
     assert columns(listed.stdout.splitlines()[0])[0] == "USER"
-    assert row_for(listed.stdout, USER) == [USER, "Júlia", "yes", "yes", "deny", "2", "3"]
+    assert row_for(listed.stdout, USER) == [USER, "Kid", "yes", "yes", "deny", "2", "3"]
 
     document = json.loads(box.run("--json", "profile", "list").stdout)
     assert document == [{
-        "user": USER, "displayName": "Júlia", "enabled": True, "enforce": True,
+        "user": USER, "displayName": "Kid", "enabled": True, "enforce": True,
         "default": "deny", "rules": 2, "budgets": 3,
     }]
 
@@ -991,7 +991,7 @@ def check_profile_show(box):
     box.write_profiles()
     shown = box.run("profile", "show", USER)
     assert shown.returncode == 0, shown.stderr
-    assert f"omahouse profile — {USER} (Júlia)" in shown.stdout
+    assert f"omahouse profile — {USER} (Kid)" in shown.stdout
     assert row_for(shown.stdout, "default") == ["default", "deny"]
     assert row_for(shown.stdout, "grace") == ["grace", "20s"]
     assert "10m, 5m, 1m left" in shown.stdout
@@ -1060,7 +1060,7 @@ def check_a_profile_from_nothing_to_read_back(box):
     that writes a file only this program can read is a verb that has quietly
     invented its own format.
     """
-    made = box.run("profile", "add", "julia", "--name", "Júlia")
+    made = box.run("profile", "add", "kid", "--name", "Kid")
     assert made.returncode == 0, made.stderr
     assert str(box.config / "profiles.json") in made.stdout
     # A new profile observes, and it allows -- docs/design.md §5 and §4. Somebody who
@@ -1069,7 +1069,7 @@ def check_a_profile_from_nothing_to_read_back(box):
     assert "observing" in made.stdout
     # And the account it names does not exist yet, which is said rather than
     # refused: a profile can be written before its account and outlive it.
-    assert "no account named julia" in made.stderr
+    assert "no account named kid" in made.stderr
 
     written = json.loads((box.config / "profiles.json").read_text())
     # The profile file's own number, which moved when a profile could mean
@@ -1084,20 +1084,20 @@ def check_a_profile_from_nothing_to_read_back(box):
     assert stamped_at.startswith(TODAY.isoformat()), stamped_at
     assert stamped_by, stamped_by
     assert fresh == {
-        "user": "julia", "displayName": "Júlia", "enabled": True, "enforce": False,
+        "user": "kid", "displayName": "Kid", "enabled": True, "enforce": False,
         "default": "allow", "warnAt": [10, 5, 1], "grace": 20,
         "rules": [], "budgets": [],
     }
 
     # The four editing verbs of docs/design.md §7, in the order somebody configuring
     # would reach for them.
-    assert box.run("profile", "default", "julia", "--deny").returncode == 0
-    assert box.run("allow", "julia", "chromium", "--limit", "45m").returncode == 0
-    assert box.run("allow", "julia", "code").returncode == 0
-    assert box.run("deny", "julia", "steam").returncode == 0
-    assert box.run("limit", "julia", "--session", "2h").returncode == 0
-    assert box.run("limit", "julia", "--budget", "code=1h30m").returncode == 0
-    assert box.run("profile", "enforce", "julia", "--on").returncode == 0
+    assert box.run("profile", "default", "kid", "--deny").returncode == 0
+    assert box.run("allow", "kid", "chromium", "--limit", "45m").returncode == 0
+    assert box.run("allow", "kid", "code").returncode == 0
+    assert box.run("deny", "kid", "steam").returncode == 0
+    assert box.run("limit", "kid", "--session", "2h").returncode == 0
+    assert box.run("limit", "kid", "--budget", "code=1h30m").returncode == 0
+    assert box.run("profile", "enforce", "kid", "--on").returncode == 0
 
     profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
     assert profile["default"] == "deny"
@@ -1118,33 +1118,33 @@ def check_a_profile_from_nothing_to_read_back(box):
     ]
 
     # And it reads back through the verbs that were written before it existed.
-    shown = box.run("profile", "show", "julia")
+    shown = box.run("profile", "show", "kid")
     assert shown.returncode == 0, shown.stderr
     assert row_for(shown.stdout, "session") == ["session", "*", "2h00m", "daily", "logs out"]
     assert row_for(shown.stdout, "chromium") == ["chromium", "chromium", "45m", "daily", "closes"]
-    assert json.loads(box.run("--json", "profile", "show", "julia").stdout)["profiles"] \
+    assert json.loads(box.run("--json", "profile", "show", "kid").stdout)["profiles"] \
         == [profile]
-    assert row_for(box.run("profile", "list").stdout, "julia")[:5] == \
-        ["julia", "Júlia", "yes", "yes", "deny"]
+    assert row_for(box.run("profile", "list").stdout, "kid")[:5] == \
+        ["kid", "Kid", "yes", "yes", "deny"]
 
     # Editing a rule that is already there changes it in place. Two lines about
     # one app would leave the second dead.
-    assert box.run("deny", "julia", "chromium").returncode == 0
+    assert box.run("deny", "kid", "chromium").returncode == 0
     edited = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
     assert edited["rules"][0] == {"match": "chromium", "verdict": "deny"}
     assert len(edited["rules"]) == 3
     # And a new limit on a budget that exists is only the number: what it does
     # when it runs out was decided once.
-    assert box.run("limit", "julia", "--budget", "chromium=30m").returncode == 0
+    assert box.run("limit", "kid", "--budget", "chromium=30m").returncode == 0
     edited = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
     assert edited["budgets"][0] == {"id": "chromium", "match": ["chromium"],
                                     "dailyMinutes": 30, "onExhausted": "close"}
 
     # Taken off the books again, and what was counted is left where it is.
-    removed = box.run("profile", "remove", "julia", "--keep-account")
+    removed = box.run("profile", "remove", "kid", "--keep-account")
     assert removed.returncode == 0, removed.stderr
     assert json.loads((box.config / "profiles.json").read_text())["profiles"] == []
-    assert box.run("profile", "show", "julia").returncode == 2
+    assert box.run("profile", "show", "kid").returncode == 2
 
 
 def check_grant_writes_the_days_ledger(box):
@@ -1153,17 +1153,17 @@ def check_grant_writes_the_days_ledger(box):
     Ten minutes, with the app open, without restarting anything. It lands in the
     day's own file, so it expires when the file does.
     """
-    box.run("profile", "add", "julia")
-    box.run("limit", "julia", "--session", "2h")
+    box.run("profile", "add", "kid")
+    box.run("limit", "kid", "--session", "2h")
 
-    given = box.run("grant", "julia", "--session", "10m")
+    given = box.run("grant", "kid", "--session", "10m")
     assert given.returncode == 0, given.stderr
     assert "+10m" in given.stdout
     assert "2h10m left today" in given.stdout
 
-    ledger = json.loads((box.state / "julia" / f"{TODAY.isoformat()}.json").read_text())
+    ledger = json.loads((box.state / "kid" / f"{TODAY.isoformat()}.json").read_text())
     assert ledger["schemaVersion"] == 1
-    assert ledger["user"] == "julia"
+    assert ledger["user"] == "kid"
     assert ledger["date"] == TODAY.isoformat()
     assert len(ledger["grants"]) == 1
     grant = ledger["grants"][0]
@@ -1173,16 +1173,16 @@ def check_grant_writes_the_days_ledger(box):
     assert grant["at"].startswith(TODAY.isoformat())
 
     # A second one adds to the first rather than replacing it.
-    assert box.run("grant", "julia", "--budget", "session=5m").returncode == 0
-    ledger = json.loads((box.state / "julia" / f"{TODAY.isoformat()}.json").read_text())
+    assert box.run("grant", "kid", "--budget", "session=5m").returncode == 0
+    ledger = json.loads((box.state / "kid" / f"{TODAY.isoformat()}.json").read_text())
     assert [g["minutes"] for g in ledger["grants"]] == [10, 5]
 
     # And the report reads it back.
-    reported = box.run("report", "julia")
+    reported = box.run("report", "kid")
     assert "GRANTS" in reported.stdout
     assert "+10m" in reported.stdout
 
-    document = json.loads(box.run("--json", "grant", "julia", "--session", "5m").stdout)
+    document = json.loads(box.run("--json", "grant", "kid", "--session", "5m").stdout)
     assert document["budget"] == "session"
     assert document["minutes"] == 5
     assert document["limitSeconds"] == 120 * 60 + 20 * 60
@@ -1190,7 +1190,7 @@ def check_grant_writes_the_days_ledger(box):
     # A budget nobody wrote is refused rather than invented: time added to a
     # counter the daemon never looks at would read on the report as though it had
     # been given.
-    nowhere = box.run("grant", "julia", "--budget", "minecraft=15m")
+    nowhere = box.run("grant", "kid", "--budget", "minecraft=15m")
     assert nowhere.returncode == 2, nowhere.stderr
     assert "no budget called minecraft" in nowhere.stderr
 
@@ -2066,9 +2066,9 @@ def check_it_refuses_to_write_without_privilege(box):
         print("test_cli.py: running as root, so the refusal to write could not be asserted")
         return
 
-    for args in (("profile", "add", "julia"), ("allow", "julia", "code"),
-                 ("limit", "julia", "--session", "2h"),
-                 ("grant", "julia", "--session", "10m")):
+    for args in (("profile", "add", "kid"), ("allow", "kid", "code"),
+                 ("limit", "kid", "--session", "2h"),
+                 ("grant", "kid", "--session", "10m")):
         refused = box.run(*args, system_roots=True)
         assert refused.returncode == 1, (args, refused.returncode)
         assert refused.stdout == "", args
@@ -2078,7 +2078,7 @@ def check_it_refuses_to_write_without_privilege(box):
         assert " ".join(args) in refused.stderr, args
     # Moving one root does not excuse the other: a ledger in $TMPDIR is not a
     # licence to write /etc.
-    half = box.run("profile", "add", "julia", system_roots=True,
+    half = box.run("profile", "add", "kid", system_roots=True,
                    extra_env={"OMAHOUSE_STATE_DIR": str(box.state)})
     assert half.returncode == 1, half.stderr
     assert "needs root" in half.stderr
@@ -2095,27 +2095,27 @@ def check_create_user_is_built_but_never_run_here(box):
     end of it, in the nspawn box of testing.md.
     """
     script, recorded = box.fake_useradd()
-    made = box.run("profile", "add", "julia", "--create-user",
+    made = box.run("profile", "add", "kid", "--create-user",
                    extra_env={"OMAHOUSE_USERADD": str(script)})
     assert made.returncode == 0, made.stderr
-    assert recorded.read_text().split() == ["-m", "julia"]
+    assert recorded.read_text().split() == ["-m", "kid"]
     assert str(script) in made.stderr
     assert json.loads((box.config / "profiles.json").read_text())["profiles"][0]["user"] \
-        == "julia"
+        == "kid"
 
     # And no account was created on the machine that ran the suite, which is the
     # thing the injection exists to guarantee.
     try:
-        pwd.getpwnam("julia")
+        pwd.getpwnam("kid")
         raise AssertionError("the suite created a real account")
     except KeyError:
         pass
 
     # A useradd that fails is the profile not being written.
     failing = box.root / "useradd-that-fails"
-    failing.write_text("#!/bin/sh\necho 'useradd: user julia already exists' >&2\nexit 9\n")
+    failing.write_text("#!/bin/sh\necho 'useradd: user kid already exists' >&2\nexit 9\n")
     failing.chmod(0o755)
-    box.run("profile", "remove", "julia", "--keep-account")
+    box.run("profile", "remove", "kid", "--keep-account")
     refused = box.run("profile", "add", "otavio", "--create-user",
                       extra_env={"OMAHOUSE_USERADD": str(failing)})
     assert refused.returncode == 1, refused.stderr
@@ -2130,15 +2130,15 @@ def check_a_length_of_time_is_refused_rather_than_guessed(box):
 
     Refusing costs one retyped word, and the message says which word.
     """
-    box.run("profile", "add", "julia")
+    box.run("profile", "add", "kid")
     written = {"2h": 120, "45m": 45, "90": 90, "1h30m": 90}
     for text, minutes in written.items():
-        assert box.run("limit", "julia", "--budget", f"code={text}").returncode == 0
+        assert box.run("limit", "kid", "--budget", f"code={text}").returncode == 0
         budget = json.loads((box.config / "profiles.json").read_text())["profiles"][0]["budgets"]
         assert budget[0]["dailyMinutes"] == minutes, text
 
     for bad in ("forever", "1h30", "30s", "1.5h", "0m", "25h", "-45m", "3d"):
-        refused = box.run("limit", "julia", "--budget", f"code={bad}")
+        refused = box.run("limit", "kid", "--budget", f"code={bad}")
         assert refused.returncode == 1, (bad, refused.returncode)
         assert refused.stdout == "", bad
         assert "not a length of time" in refused.stderr, (bad, refused.stderr)
@@ -2147,38 +2147,38 @@ def check_a_length_of_time_is_refused_rather_than_guessed(box):
     assert budget[0]["dailyMinutes"] == 90
 
     # And an option with no value at all says what it wanted.
-    empty = box.run("limit", "julia", "--session")
+    empty = box.run("limit", "kid", "--session")
     assert empty.returncode == 1
     assert "--session wants a length of time" in empty.stderr
 
 
 def check_the_writing_verbs_want_a_profile_that_is_there(box):
     """2 and not 1: a script has to tell `no such profile` from `bad command`."""
-    for args in (("allow", "julia", "code"), ("deny", "julia", "code"),
-                 ("limit", "julia", "--session", "2h"),
-                 ("grant", "julia", "--session", "10m"),
-                 ("profile", "enforce", "julia", "--on"),
-                 ("profile", "default", "julia", "--deny")):
+    for args in (("allow", "kid", "code"), ("deny", "kid", "code"),
+                 ("limit", "kid", "--session", "2h"),
+                 ("grant", "kid", "--session", "10m"),
+                 ("profile", "enforce", "kid", "--on"),
+                 ("profile", "default", "kid", "--deny")):
         missing = box.run(*args)
         assert missing.returncode == 2, (args, missing.returncode)
         assert "no profile" in missing.stderr, args
-        assert "profile add julia" in missing.stderr, args
+        assert "profile add kid" in missing.stderr, args
 
-    gone = box.run("profile", "remove", "julia")
+    gone = box.run("profile", "remove", "kid")
     assert gone.returncode == 2
-    assert "no profile for julia" in gone.stderr
+    assert "no profile for kid" in gone.stderr
 
     # Two profiles for one account is a profile nobody could point at.
-    box.run("profile", "add", "julia")
-    twice = box.run("profile", "add", "julia")
+    box.run("profile", "add", "kid")
+    twice = box.run("profile", "add", "kid")
     assert twice.returncode == 1
     assert "already has a profile" in twice.stderr
     assert len(json.loads((box.config / "profiles.json").read_text())["profiles"]) == 1
 
     # A switch verb wants to be told which way.
-    for args in (("profile", "enforce", "julia"), ("profile", "enforce", "julia", "--on", "--off"),
-                 ("profile", "default", "julia"),
-                 ("profile", "default", "julia", "--allow", "--deny")):
+    for args in (("profile", "enforce", "kid"), ("profile", "enforce", "kid", "--on", "--off"),
+                 ("profile", "default", "kid"),
+                 ("profile", "default", "kid", "--allow", "--deny")):
         vague = box.run(*args)
         assert vague.returncode == 1, args
         assert "one of them" in vague.stderr, args
@@ -2206,10 +2206,10 @@ def check_web_writes_a_policy_and_takes_it_away_again(box):
     the failure this whole slice is written against, and the smallest version of
     it is a managed policy left on the machine holding nothing.
     """
-    assert box.run("profile", "add", "julia").returncode == 0
+    assert box.run("profile", "add", "kid").returncode == 0
     assert box.policy() is None, "a fresh profile asks the browser for nothing"
 
-    blocked = box.run("web", "block", "julia", "youtube.com")
+    blocked = box.run("web", "block", "kid", "youtube.com")
     assert blocked.returncode == 0, blocked.stderr
     assert box.policy() == {"URLBlocklist": ["youtube.com"]}, box.policy()
     assert "is blocked" in blocked.stdout
@@ -2231,7 +2231,7 @@ def check_web_writes_a_policy_and_takes_it_away_again(box):
     # apply.
     assert oct((box.chromium / "omahouse.json").stat().st_mode)[-3:] == "644"
 
-    back = box.run("web", "allow", "julia", "youtube.com")
+    back = box.run("web", "allow", "kid", "youtube.com")
     assert back.returncode == 0, back.stderr
     assert box.policy() is None, "the last block taken back has to take the file with it"
     # An allowlist with nothing blocked beside it is inert, and the line says so
@@ -2246,17 +2246,17 @@ def check_web_writes_a_policy_and_takes_it_away_again(box):
 
 def check_web_only_listed_and_incognito(box):
     """The two switches, and what each of them puts in the file."""
-    box.run("profile", "add", "julia")
+    box.run("profile", "add", "kid")
 
-    closed = box.run("web", "julia", "--only-listed")
+    closed = box.run("web", "kid", "--only-listed")
     assert closed.returncode == 0, closed.stderr
     assert "only the listed sites open" in closed.stdout
     assert box.policy() == {"URLBlocklist": ["*"]}, box.policy()
 
-    box.run("web", "allow", "julia", "wikipedia.org")
+    box.run("web", "allow", "kid", "wikipedia.org")
     assert box.policy() == {"URLBlocklist": ["*"], "URLAllowlist": ["wikipedia.org"]}
 
-    denied = box.run("web", "incognito", "julia", "--deny")
+    denied = box.run("web", "incognito", "kid", "--deny")
     assert denied.returncode == 0, denied.stderr
     assert box.policy()["IncognitoModeAvailability"] == 1
 
@@ -2264,13 +2264,13 @@ def check_web_only_listed_and_incognito(box):
     # being more permissive than it was asked to be -- overriding somebody
     # else's managed policy to turn incognito back on -- is a direction it never
     # takes by itself.
-    allowed = box.run("web", "incognito", "julia", "--allow")
+    allowed = box.run("web", "incognito", "kid", "--allow")
     assert allowed.returncode == 0, allowed.stderr
     assert "IncognitoModeAvailability" not in box.policy()
     assert "hide which site, not the time" in allowed.stdout
 
     # And the whole way back: every site opens, no rules left that block, no file.
-    box.run("web", "julia", "--all-but-listed")
+    box.run("web", "kid", "--all-but-listed")
     assert box.policy() is None, box.policy()
 
 
@@ -2284,14 +2284,14 @@ def check_web_composes_profiles_that_disagree(box):
     box.write_profiles({
         "schemaVersion": 2,
         "profiles": [
-            {"user": "julia", "web": {"default": "allow",
+            {"user": "kid", "web": {"default": "allow",
                                    "rules": [{"match": "youtube.com", "verdict": "allow"}]}},
             {"user": "pedro", "web": {"default": "allow",
                                       "rules": [{"match": "youtube.com", "verdict": "deny"}]}},
         ],
     })
 
-    overruled = box.run("web", "allow", "julia", "youtube.com")
+    overruled = box.run("web", "allow", "kid", "youtube.com")
     assert overruled.returncode == 0, overruled.stderr
     assert "pedro disagrees" in overruled.stderr, overruled.stderr
     assert "no precedence" in overruled.stderr
@@ -2303,44 +2303,44 @@ def check_web_composes_profiles_that_disagree(box):
 
 def check_removing_the_last_profile_removes_the_policy(box):
     """`profile remove` is the other way the machine comes back to nothing."""
-    box.run("profile", "add", "julia")
-    box.run("web", "block", "julia", "youtube.com")
+    box.run("profile", "add", "kid")
+    box.run("web", "block", "kid", "youtube.com")
     assert box.policy() is not None
 
-    gone = box.run("profile", "remove", "julia")
+    gone = box.run("profile", "remove", "kid")
     assert gone.returncode == 0, gone.stderr
     assert box.policy() is None, "the last profile's web rules went with it"
 
 
 def check_web_refuses_what_it_does_not_do(box):
     """A whole URL, a bare word, `*`, no switch, both switches, no profile."""
-    box.run("profile", "add", "julia")
+    box.run("profile", "add", "kid")
 
     for typed in ("https://youtube.com", "youtube.com/watch", "youtube com"):
-        refused = box.run("web", "block", "julia", typed)
+        refused = box.run("web", "block", "kid", typed)
         assert refused.returncode == 1, typed
         assert "is not a domain" in refused.stderr, typed
         assert box.policy() is None, typed
 
-    dotless = box.run("web", "block", "julia", "youtube")
+    dotless = box.run("web", "block", "kid", "youtube")
     assert dotless.returncode == 1
     assert "youtube.com?" in dotless.stderr
 
     # `*` is a mode and not a rule, and there is one way to say it.
-    star = box.run("web", "block", "julia", "*")
+    star = box.run("web", "block", "kid", "*")
     assert star.returncode == 1
     assert "--only-listed" in star.stderr
 
-    for args in (("web", "julia"), ("web", "julia", "--only-listed", "--all-but-listed"),
-                 ("web", "incognito", "julia"),
-                 ("web", "incognito", "julia", "--allow", "--deny")):
+    for args in (("web", "kid"), ("web", "kid", "--only-listed", "--all-but-listed"),
+                 ("web", "incognito", "kid"),
+                 ("web", "incognito", "kid", "--allow", "--deny")):
         vague = box.run(*args)
         assert vague.returncode == 1, args
         assert "one of them" in vague.stderr or "which user" in vague.stderr, args
 
     # An option that belongs to another verb is a usage error and not a word
     # quietly dropped.
-    stray = box.run("web", "block", "julia", "youtube.com", "--limit", "45m")
+    stray = box.run("web", "block", "kid", "youtube.com", "--limit", "45m")
     assert stray.returncode == 1
     assert "takes no --limit" in stray.stderr
 
@@ -2368,8 +2368,8 @@ def check_the_browser_policy_of_this_machine_is_never_touched(box):
     Nothing is asserted about /etc/chromium itself, because the point of the
     case is that nothing goes near it. What is asserted is the refusal, by name.
     """
-    box.run("profile", "add", "julia")
-    left_alone = box.run("web", "block", "julia", "youtube.com",
+    box.run("profile", "add", "kid")
+    left_alone = box.run("web", "block", "kid", "youtube.com",
                          extra_env={"OMAHOUSE_CHROMIUM_POLICY_DIR":
                                     "/etc/chromium/policies/managed"})
 
@@ -2386,7 +2386,7 @@ def check_status_says_the_policy_is_for_the_whole_machine(box):
     """`status` prints the sites, and says the reach once and without hedging.
 
     Over the account that ran the suite, because `status` resolves a name
-    through NSS and `julia` is not on this machine. The profile is written to
+    through NSS and `kid` is not on this machine. The profile is written to
     the file rather than through `profile add`, which refuses an account in
     wheel.
     """
@@ -2449,7 +2449,7 @@ def watching_profile(enforce=False, default="deny"):
         "schemaVersion": 2,
         "profiles": [{
             "user": USER,
-            "displayName": "Júlia",
+            "displayName": "Kid",
             "enabled": True,
             "enforce": enforce,
             "default": default,
@@ -2631,7 +2631,7 @@ def check_watch_decides_the_teeth_and_never_bites_a_tree_it_was_lent(box):
     # The ones a rule allows are not refused, whatever else is true of them.
     assert not any(said.startswith("chromium is not") for said in summaries)
     for said in box.said():
-        assert said[1] == "It is not one of the programs released for Júlia."
+        assert said[1] == "It is not one of the programs released for Kid."
 
     # Decided, named, and not done. The unit is in the line because it is the
     # directory `cgroup.kill` would have been written in.
@@ -3097,8 +3097,8 @@ def check_limit_writes_a_budget_about_a_site(box):
     fields an app budget already had. `kind` is there because there is no shape
     that tells `org.freedesktop.Platform` from `youtube.com`.
     """
-    box.run("profile", "add", "julia", "--name", "Júlia")
-    written = box.run("limit", "julia", "--site", "youtube.com=30m")
+    box.run("profile", "add", "kid", "--name", "Kid")
+    written = box.run("limit", "kid", "--site", "youtube.com=30m")
     assert written.returncode == 0, written.stderr
     assert "stops opening" in written.stdout, written.stdout
     # Said once, where somebody is deciding it, and on stderr where every other
@@ -3114,14 +3114,14 @@ def check_limit_writes_a_budget_about_a_site(box):
 
     # An app budget beside it, and it says nothing new about its kind: a
     # `"kind": "app"` on every budget would rewrite every profiles.json there is.
-    box.run("limit", "julia", "--budget", "chromium=45m")
+    box.run("limit", "kid", "--budget", "chromium=45m")
     profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
     budgets = {one["id"]: one for one in profile["budgets"]}
     assert "kind" not in budgets["chromium"], budgets
 
     # A domain read the way `web block` reads one, by the same routine, so that a
     # site cannot be named one way here and another way there.
-    box.run("limit", "julia", "--site", "WWW.Reddit.com=10m")
+    box.run("limit", "kid", "--site", "WWW.Reddit.com=10m")
     profile = json.loads((box.config / "profiles.json").read_text())["profiles"][0]
     assert any(one["id"] == "www.reddit.com" for one in profile["budgets"]), profile
 
@@ -3129,27 +3129,27 @@ def check_limit_writes_a_budget_about_a_site(box):
 def check_limit_refuses_what_it_cannot_do_about_a_site(box):
     """The refusals, and the one that matters is the id that already means the
     other thing."""
-    box.run("profile", "add", "julia", "--name", "Júlia")
+    box.run("profile", "add", "kid", "--name", "Kid")
 
-    both = box.run("limit", "julia", "--session", "2h", "--site", "youtube.com=30m")
+    both = box.run("limit", "kid", "--session", "2h", "--site", "youtube.com=30m")
     assert both.returncode != 0
     assert "One of them" in both.stderr, both.stderr
 
-    url = box.run("limit", "julia", "--site", "https://youtube.com/watch=30m")
+    url = box.run("limit", "kid", "--site", "https://youtube.com/watch=30m")
     assert url.returncode != 0
     assert "not a domain" in url.stderr, url.stderr
 
-    nodot = box.run("limit", "julia", "--site", "youtube=30m")
+    nodot = box.run("limit", "kid", "--site", "youtube=30m")
     assert nodot.returncode != 0
     assert "no dot in it" in nodot.stderr, nodot.stderr
 
-    star = box.run("limit", "julia", "--site", "*=30m")
+    star = box.run("limit", "kid", "--site", "*=30m")
     assert star.returncode != 0, star.stdout
 
     # One id, one thing. There is no shape that tells an app id from a domain, so
     # the same id meaning both would be two rows of the report that are one row.
-    box.run("limit", "julia", "--site", "youtube.com=30m")
-    clash = box.run("limit", "julia", "--budget", "youtube.com=45m")
+    box.run("limit", "kid", "--site", "youtube.com=30m")
+    clash = box.run("limit", "kid", "--budget", "youtube.com=45m")
     assert clash.returncode != 0
     assert "about a site" in clash.stderr, clash.stderr
 

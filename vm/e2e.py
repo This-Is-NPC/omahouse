@@ -411,7 +411,7 @@ class VM:
     def root(self, command, **kwargs):
         return self.ssh(f"sudo {command}", **kwargs)
 
-    def julia(self, command, **kwargs):
+    def kid(self, command, **kwargs):
         """As the fiscalised account, inside its own session.
 
         The environment is the session's, because that is the whole point: a
@@ -479,7 +479,7 @@ class VM:
         account under rules. `user` is for the one thing that is not: on this
         machine the greeter's own compositor is Hyprland running as `sddm`, and
         a session belongs to whoever SDDM let through -- so "is there a session"
-        has to name whose, or it asks about julia while howl is the one logging
+        has to name whose, or it asks about kid while howl is the one logging
         in and answers no forever.
         """
         who = user or self.subject
@@ -549,7 +549,7 @@ class VM:
         a rule and a budget are written about.
         """
         before = set(self.scopes())
-        self.julia(
+        self.kid(
             f"setsid --fork sh -c 'cd /tmp && exec uwsm app -- /usr/local/bin/{app} {args}' "
             "</dev/null >/dev/null 2>&1", check=False)
         for _ in range(self.pace["patience_seconds"] * 2):
@@ -577,8 +577,8 @@ class VM:
         running. The next run then fails somewhere far from the cause: the real
         one said
 
-            FAIL  sudo omahouse profile add julia --name Julia
-            profile add: julia already has a profile
+            FAIL  sudo omahouse profile add kid --name Kid
+            profile add: kid already has a profile
 
         which sends whoever reads it to look at `profile add`, and `profile add`
         is right. **A failure that points at the wrong place is worse than a
@@ -678,7 +678,7 @@ class VM:
         `omahouse`, which is the point: the rules under test are the ones a
         person could have written.
         """
-        self.root(f"omahouse profile add {self.subject} --name Julia")
+        self.root(f"omahouse profile add {self.subject} --name Kid")
         self.root(f"omahouse profile default {self.subject} --{default}")
         for app in rules:
             self.root(f"omahouse allow {self.subject} {shlex.quote(app)}")
@@ -975,7 +975,7 @@ def wait_for_the_session(vm, timeout=None):
     # the whole boot budget for a process that will never appear.
     deadline = time.time() + (timeout or vm.pace["boot_seconds"])
     while time.time() < deadline and not vm.pid_of("mako"):
-        vm.julia("setsid --fork sh -c 'cd /tmp && exec mako' </dev/null >/dev/null 2>&1",
+        vm.kid("setsid --fork sh -c 'cd /tmp && exec mako' </dev/null >/dev/null 2>&1",
                  check=False)
         time.sleep(2)
     if not vm.pid_of("mako"):
@@ -985,7 +985,7 @@ def wait_for_the_session(vm, timeout=None):
         # One attempt in the foreground, only to be able to quote why. Without
         # it the refusal names mako when the answer is almost always something
         # about the session it belongs to.
-        why = vm.julia("timeout 3 mako", check=False)[1].strip()[:200]
+        why = vm.kid("timeout 3 mako", check=False)[1].strip()[:200]
         raise Blocked(
             "mako would not start in the subject's session.\n"
             f"    it said:   {why or '(nothing)'}\n"
@@ -996,7 +996,7 @@ def wait_for_the_session(vm, timeout=None):
     # something answering on the session bus, and `makoctl` asking mako a
     # question is the only honest way to know that from here.
     while time.time() < deadline:
-        if vm.julia("makoctl list", check=False)[0] == 0:
+        if vm.kid("makoctl list", check=False)[0] == 0:
             break
         time.sleep(1)
     else:
@@ -1006,7 +1006,7 @@ def wait_for_the_session(vm, timeout=None):
     # Omarchy -- there is no quickshell on it -- but pipewire is the other unit
     # `session_slice_untouched` is about, and a case that only ever saw the
     # compositor would be a weaker case than the one that was asked for.
-    vm.julia("systemctl --user start pipewire.service wireplumber.service", check=False)
+    vm.kid("systemctl --user start pipewire.service wireplumber.service", check=False)
 
     if not vm.sessions():
         raise Blocked(f"{vm.subject} has no logind session")
@@ -1066,7 +1066,7 @@ def log_in_on_omarchy(vm):
         return
 
     # SDDM's `state.conf` decides whose name the greeter is asking about, and the
-    # greeter does not show it. It is checked rather than assumed: typing julia's
+    # greeter does not show it. It is checked rather than assumed: typing kid's
     # password at a greeter asking about howl is a failed login and a confusing
     # screenshot.
     state = vm.root("cat /var/lib/sddm/state.conf", check=False)[1]

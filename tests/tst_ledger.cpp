@@ -25,8 +25,8 @@ const char *kSpecProfiles = R"({
   "schemaVersion": 2,
   "profiles": [
     {
-      "user": "julia",
-      "displayName": "Júlia",
+      "user": "kid",
+      "displayName": "Kid",
       "enabled": true,
       "enforce": true,
       "default": "deny",
@@ -48,7 +48,7 @@ const char *kSpecProfiles = R"({
 
 const char *kSpecLedger = R"({
   "schemaVersion": 1,
-  "user": "julia",
+  "user": "kid",
   "date": "2026-09-03",
   "budgets": { "session": 4210, "minecraft": 2400, "firefox": 1830 },
   "grants": [
@@ -104,7 +104,7 @@ private slots:
     void debitsOncePerBudgetAndNotOncePerProcess()
     {
         Profile profile;
-        profile.user = QStringLiteral("julia");
+        profile.user = QStringLiteral("kid");
         profile.enforce = true;
 
         Budget session;
@@ -127,7 +127,7 @@ private slots:
         };
 
         Ledger ledger;
-        ledger.user = QStringLiteral("julia");
+        ledger.user = QStringLiteral("kid");
         ledger.date = QDate(2026, 9, 3);
 
         const Outcome outcome = evaluate(profile, scopes, ledger, at(19, 0), 2);
@@ -149,7 +149,7 @@ private slots:
     void startsTheDayOverWhenTheDateTurns()
     {
         Profile profile;
-        profile.user = QStringLiteral("julia");
+        profile.user = QStringLiteral("kid");
         profile.enforce = true;
         Budget session;
         session.id = QStringLiteral("session");
@@ -159,7 +159,7 @@ private slots:
         profile.budgets = {session};
 
         Ledger yesterday;
-        yesterday.user = QStringLiteral("julia");
+        yesterday.user = QStringLiteral("kid");
         yesterday.date = QDate(2026, 9, 2);
         yesterday.seconds.insert(QStringLiteral("session"), 120 * 60);
         yesterday.grants.append(Grant{QDateTime(QDate(2026, 9, 2), QTime(19, 12)),
@@ -177,7 +177,7 @@ private slots:
                      yesterday, QDateTime(QDate(2026, 9, 3), QTime(0, 0, 2)), 2);
 
         QCOMPARE(outcome.ledger.date, QDate(2026, 9, 3));
-        QCOMPARE(outcome.ledger.user, QStringLiteral("julia"));
+        QCOMPARE(outcome.ledger.user, QStringLiteral("kid"));
         QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("session")), 2);
         // Yesterday's ten granted minutes were yesterday's, and yesterday's
         // warnings do not count as this morning's.
@@ -193,30 +193,30 @@ private slots:
         QVERIFY2(profilesFromJson(parse(kSpecProfiles), &profiles, &error), qPrintable(error));
         QCOMPARE(profiles.size(), 1);
 
-        const Profile julia = profiles.at(0);
-        QCOMPARE(julia.user, QStringLiteral("julia"));
-        QCOMPARE(julia.displayName, QString::fromUtf8("Júlia"));
-        QVERIFY(julia.enabled);
-        QVERIFY(julia.enforce);
-        QCOMPARE(julia.defaultVerdict, Verdict::Deny);
-        QCOMPARE(julia.warnAt, QVector<int>({10, 5, 1}));
-        QCOMPARE(julia.graceSeconds, 20);
-        QCOMPARE(julia.rules.size(), 3);
-        QCOMPARE(julia.rules.at(0).match, QStringLiteral("minecraft-launcher"));
-        QCOMPARE(julia.rules.at(0).verdict, Verdict::Allow);
-        QCOMPARE(julia.budgets.size(), 3);
-        QCOMPARE(julia.budgets.at(0).id, QStringLiteral("session"));
-        QCOMPARE(julia.budgets.at(0).match, QStringList{QStringLiteral("*")});
-        QCOMPARE(julia.budgets.at(0).dailyMinutes, 120);
-        QCOMPARE(julia.budgets.at(0).onExhausted, OnExhausted::Logout);
-        QCOMPARE(julia.budgets.at(1).onExhausted, OnExhausted::Close);
+        const Profile kid = profiles.at(0);
+        QCOMPARE(kid.user, QStringLiteral("kid"));
+        QCOMPARE(kid.displayName, QString::fromUtf8("Kid"));
+        QVERIFY(kid.enabled);
+        QVERIFY(kid.enforce);
+        QCOMPARE(kid.defaultVerdict, Verdict::Deny);
+        QCOMPARE(kid.warnAt, QVector<int>({10, 5, 1}));
+        QCOMPARE(kid.graceSeconds, 20);
+        QCOMPARE(kid.rules.size(), 3);
+        QCOMPARE(kid.rules.at(0).match, QStringLiteral("minecraft-launcher"));
+        QCOMPARE(kid.rules.at(0).verdict, Verdict::Allow);
+        QCOMPARE(kid.budgets.size(), 3);
+        QCOMPARE(kid.budgets.at(0).id, QStringLiteral("session"));
+        QCOMPARE(kid.budgets.at(0).match, QStringList{QStringLiteral("*")});
+        QCOMPARE(kid.budgets.at(0).dailyMinutes, 120);
+        QCOMPARE(kid.budgets.at(0).onExhausted, OnExhausted::Logout);
+        QCOMPARE(kid.budgets.at(1).onExhausted, OnExhausted::Close);
 
         // Out and back in: the writer's own file has to read as the same profile,
         // or an operator editing a profile loses part of it every time.
         QVector<Profile> again;
         QVERIFY2(profilesFromJson(profilesToJson(profiles), &again, &error), qPrintable(error));
         QCOMPARE(again.size(), 1);
-        QCOMPARE(again.at(0).toJson(), julia.toJson());
+        QCOMPARE(again.at(0).toJson(), kid.toJson());
 
         // A budget with no limit survives as one, rather than coming back as a
         // budget of zero minutes that is over before the day starts.
@@ -238,7 +238,7 @@ private slots:
         QString error;
         QVERIFY2(Ledger::fromJson(parse(kSpecLedger), &ledger, &error), qPrintable(error));
 
-        QCOMPARE(ledger.user, QStringLiteral("julia"));
+        QCOMPARE(ledger.user, QStringLiteral("kid"));
         QCOMPARE(ledger.date, QDate(2026, 9, 3));
         QCOMPARE(ledger.secondsFor(QStringLiteral("session")), 4210);
         QCOMPARE(ledger.secondsFor(QStringLiteral("minecraft")), 2400);
@@ -264,7 +264,7 @@ private slots:
         // The marks a warning leaves behind survive the file too, because they
         // are the only thing that keeps the next tick from saying it again.
         Ledger marked;
-        marked.user = QStringLiteral("julia");
+        marked.user = QStringLiteral("kid");
         marked.date = QDate(2026, 9, 3);
         Event warned;
         warned.at = at(19, 25);
@@ -299,7 +299,7 @@ private slots:
         QVERIFY(!old.toJson().contains(QStringLiteral("presence")));
 
         Ledger day;
-        day.user = QStringLiteral("julia");
+        day.user = QStringLiteral("kid");
         day.date = QDate(2026, 9, 3);
         day.addSeconds(QStringLiteral("session"), 600);
         day.addPresenceSeconds(QStringLiteral("using"), 400);
@@ -343,7 +343,7 @@ private slots:
                  "a ledger with no pot wrote one, which rewrites every file on disk");
 
         Ledger day;
-        day.user = QStringLiteral("julia");
+        day.user = QStringLiteral("kid");
         day.date = QDate(2026, 9, 3);
         day.addSeconds(QStringLiteral("session"), 600);
         day.addKeptSeconds(QStringLiteral("pot"), 400);
@@ -382,10 +382,10 @@ private slots:
         // The daemon writes /var/lib/omahouse/<user>/<date>.json, and the
         // directory of a user who has never been counted does not exist yet.
         const QString path =
-            root.filePath(QStringLiteral("var/lib/omahouse/julia/2026-09-03.json"));
+            root.filePath(QStringLiteral("var/lib/omahouse/kid/2026-09-03.json"));
 
         Ledger first;
-        first.user = QStringLiteral("julia");
+        first.user = QStringLiteral("kid");
         first.date = QDate(2026, 9, 3);
         first.seconds.insert(QStringLiteral("session"), 4210);
 

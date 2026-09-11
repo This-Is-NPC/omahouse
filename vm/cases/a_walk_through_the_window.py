@@ -15,7 +15,7 @@ The camera is held until `FILM: rolling`. Everything before that -- the package
 going on, the greeter, the password -- is minutes of nothing worth watching.
 
 **The operator's session, not the subject's.** `docs/screens.md` §1 to §7 are
-about the face somebody in wheel gets, and julia's face has nothing to press on
+about the face somebody in wheel gets, and kid's face has nothing to press on
 purpose. So SDDM is pointed at howl before the greeter is answered, and put back
 where it was afterwards.
 """
@@ -40,7 +40,7 @@ def run(vm):
         # Whatever happened, the greeter goes back to asking about the subject.
         # A demo that dies halfway and leaves SDDM pointed at the operator
         # blocks the next run before it even starts, and the message it gives is
-        # about julia rather than about the demo -- measured, twice.
+        # about kid rather than about the demo -- measured, twice.
         vm.root(f"-u root sh -c \"pkill -x omahouse-studio; "
                 f"sed -i 's/^User=.*/User={subject}/' /var/lib/sddm/state.conf\"",
                 check=False)

@@ -27,10 +27,10 @@ private slots:
         QCOMPARE(paths::configDir(), QStringLiteral("/etc/omahouse"));
         QCOMPARE(paths::profilesFile(), QStringLiteral("/etc/omahouse/profiles.json"));
         QCOMPARE(paths::stateDir(), QStringLiteral("/var/lib/omahouse"));
-        QCOMPARE(paths::userStateDir(QStringLiteral("julia")),
-                 QStringLiteral("/var/lib/omahouse/julia"));
-        QCOMPARE(paths::ledgerFile(QStringLiteral("julia"), QDate(2026, 9, 3)),
-                 QStringLiteral("/var/lib/omahouse/julia/2026-09-03.json"));
+        QCOMPARE(paths::userStateDir(QStringLiteral("kid")),
+                 QStringLiteral("/var/lib/omahouse/kid"));
+        QCOMPARE(paths::ledgerFile(QStringLiteral("kid"), QDate(2026, 9, 3)),
+                 QStringLiteral("/var/lib/omahouse/kid/2026-09-03.json"));
     }
 
     // Both roots move on their own, because a run that reads a real
@@ -43,8 +43,8 @@ private slots:
         QCOMPARE(paths::stateDir(), QStringLiteral("/var/lib/omahouse"));
 
         qputenv("OMAHOUSE_STATE_DIR", "/tmp/omahouse-state");
-        QCOMPARE(paths::ledgerFile(QStringLiteral("julia"), QDate(2026, 12, 31)),
-                 QStringLiteral("/tmp/omahouse-state/julia/2026-12-31.json"));
+        QCOMPARE(paths::ledgerFile(QStringLiteral("kid"), QDate(2026, 12, 31)),
+                 QStringLiteral("/tmp/omahouse-state/kid/2026-12-31.json"));
     }
 
     // Which root a write is going to, which is what tells "this needs root" from

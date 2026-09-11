@@ -68,8 +68,8 @@ def _run(vm):
     seconds = vm.pace["site_seconds"]
     patience = vm.pace["patience_seconds"]
 
-    julia = vm.subject
-    day = f"/var/lib/omahouse/{julia}/{vm.today()}.json"
+    kid = vm.subject
+    day = f"/var/lib/omahouse/{kid}/{vm.today()}.json"
     policy = "/etc/chromium/policies/managed/omahouse.json"
 
     def hypr(command):
@@ -77,7 +77,7 @@ def _run(vm):
         if not listed:
             raise Failed(f"no Hyprland instance under /run/user/{vm.uid}/hypr")
         return vm.root(
-            f"-u {julia} env XDG_RUNTIME_DIR=/run/user/{vm.uid} WAYLAND_DISPLAY=wayland-1 "
+            f"-u {kid} env XDG_RUNTIME_DIR=/run/user/{vm.uid} WAYLAND_DISPLAY=wayland-1 "
             f"HYPRLAND_INSTANCE_SIGNATURE={listed[0]} hyprctl {command}", check=False)[1]
 
     def title():
@@ -131,7 +131,7 @@ def _run(vm):
     # machine that has been on since lunch.
     vm.stop_daemon()
     minutes = vm.whole_minutes(seconds)
-    vm.root(f"omahouse limit {julia} --site {SITE}={minutes}m")
+    vm.root(f"omahouse limit {kid} --site {SITE}={minutes}m")
     # The demonstration profile's own grace is twenty seconds, which is the one a
     # household would really set and is `[pace.long]`'s. The quick regime asks
     # for its own, and it is the only field of the profile this case changes.
@@ -140,7 +140,7 @@ def _run(vm):
     # One budget covers both of Chromium's ids -- `vm/provision-omarchy.sh`
     # writes it with one `allow` -- so there is one to hand more of.
     for what in ("--session 180m", "--budget chromium=180m"):
-        vm.root(f"omahouse grant {julia} {what}")
+        vm.root(f"omahouse grant {kid} {what}")
 
     # It loads. This is the before, and without it the after proves nothing: a
     # window title that never said `Example Domain` is a page that never opened,
@@ -196,7 +196,7 @@ def _run(vm):
     # from today's ledger that the site is no longer out of time and makes the
     # file say so. The turn of the day is the same path, and is proved by the
     # unit suite with an injected `now` rather than by waiting until midnight.
-    vm.root(f"omahouse grant {julia} --budget {SITE}=10m")
+    vm.root(f"omahouse grant {kid} --budget {SITE}=10m")
     vm.wait_for(lambda: blocklist() is None, patience,
                 f"{policy} to be taken off the machine once the site had time again")
     print(f"      back     {policy} is gone, and nothing was asked to remove it")
