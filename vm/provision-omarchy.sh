@@ -230,18 +230,18 @@ EOSH
 
 # -- 3. the two accounts ------------------------------------------------------
 
-say "howl the operator, julia the subject"
+say "howl the operator, kid the subject"
 guest 'sudo bash -s' <<'EOSH'
 set -e
 # docs/design.md §1: the operator is whoever is in wheel, and the subject is an account
-# with no privilege at all. julia is not in wheel and `omahouse profile add`
+# with no privilege at all. kid is not in wheel and `omahouse profile add`
 # would refuse her if she were.
-id julia >/dev/null 2>&1 || useradd -m -s /bin/bash julia
-echo 'julia:julia' | chpasswd
+id kid >/dev/null 2>&1 || useradd -m -s /bin/bash kid
+echo 'kid:kid' | chpasswd
 
 # /etc/skel arrived with omarchy-settings, after cloud-init had already made
 # howl. Both homes get it, and `cp -n` leaves anything already there alone.
-for u in howl julia; do
+for u in howl kid; do
     home=$(getent passwd "$u" | cut -d: -f6)
     cp -rn /etc/skel/. "$home"/ 2>/dev/null || true
     chown -R "$u:$u" "$home"
@@ -256,13 +256,13 @@ for u in howl julia; do
 done
 
 # The Omarchy SDDM theme has no user picker -- it is a password box for
-# `userModel.lastUser` and nothing else. So the greeter is pointed at julia,
+# `userModel.lastUser` and nothing else. So the greeter is pointed at kid,
 # who is the account this machine is for; howl gets in over ssh, on a tty, or by
 # `vm-login-as howl` below.
 install -d -o sddm -g sddm /var/lib/sddm
 cat > /var/lib/sddm/state.conf <<EOF
 [Last]
-User=julia
+User=kid
 Session=/usr/local/share/wayland-sessions/omarchy.desktop
 EOF
 chown sddm:sddm /var/lib/sddm/state.conf
@@ -361,7 +361,7 @@ EOSH
 
 # -- 5. the profile somebody can watch happen ---------------------------------
 
-say "julia's profile"
+say "kid's profile"
 # Short enough to see, and long enough to sit down first. The ids are the ones
 # a real Omarchy session actually produces, which is not what the poc predicted:
 # one Chromium window makes TWO scopes with two different ids --
@@ -379,19 +379,19 @@ say "julia's profile"
 # `org.chromium.Chromium` any more.
 guest 'sudo bash -s' <<'EOSH'
 set -e
-omahouse profile add julia --name "Júlia" 2>/dev/null || true
-omahouse profile default julia --deny
-omahouse allow julia xdg-terminal-exec
-omahouse allow julia omahouse
-omahouse allow julia chromium org.chromium.Chromium --limit 3m
+omahouse profile add kid --name "Kid" 2>/dev/null || true
+omahouse profile default kid --deny
+omahouse allow kid xdg-terminal-exec
+omahouse allow kid omahouse
+omahouse allow kid chromium org.chromium.Chromium --limit 3m
 # Omarchy's own two -- `udiskie` and `omarchy-hyprland-monitor-watch`, launched
 # by `default/hypr/autostart.lua` through `uwsm-app --` -- used to need a rule
 # each here, because they arrive as app scopes and were judged exactly like a
 # game. They are session furniture now (`src/core/Furniture.h`): not judged, and
 # not on their own evidence that anybody is at the keyboard. Nothing to write.
-omahouse limit julia --session 10m
-omahouse profile enforce julia --on
-omahouse profile show julia
+omahouse limit kid --session 10m
+omahouse profile enforce kid --on
+omahouse profile show kid
 EOSH
 
 say "done. $DOMAIN is at $ADDRESS"

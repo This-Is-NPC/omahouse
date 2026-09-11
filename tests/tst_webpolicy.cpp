@@ -53,13 +53,13 @@ private slots:
     void noProfileAsksForAnything()
     {
         QVERIFY(!chromiumPolicyFor({}).needed());
-        QVERIFY(!chromiumPolicyFor({person(QStringLiteral("julia"))}).needed());
+        QVERIFY(!chromiumPolicyFor({person(QStringLiteral("kid"))}).needed());
     }
 
     void oneBlockedSite()
     {
         const ChromiumPolicy policy = chromiumPolicyFor(
-            {person(QStringLiteral("julia"),
+            {person(QStringLiteral("kid"),
                     webThat(Verdict::Allow, {block(QStringLiteral("youtube.com"))}))});
 
         QVERIFY(policy.needed());
@@ -80,7 +80,7 @@ private slots:
     void anAllowlistWithNothingBlockedIsNoPolicyAtAll()
     {
         const ChromiumPolicy policy = chromiumPolicyFor(
-            {person(QStringLiteral("julia"),
+            {person(QStringLiteral("kid"),
                     webThat(Verdict::Allow, {open(QStringLiteral("wikipedia.org"))}))});
 
         QVERIFY(!policy.needed());
@@ -95,7 +95,7 @@ private slots:
     void onlyTheListedSitesOpen()
     {
         const ChromiumPolicy policy = chromiumPolicyFor(
-            {person(QStringLiteral("julia"),
+            {person(QStringLiteral("kid"),
                     webThat(Verdict::Deny, {open(QStringLiteral("wikipedia.org")),
                                             open(QStringLiteral("scratch.mit.edu"))}))});
 
@@ -117,11 +117,11 @@ private slots:
     void blockingEverythingByRuleIsTheSameThing()
     {
         const ChromiumPolicy byRule = chromiumPolicyFor(
-            {person(QStringLiteral("julia"),
+            {person(QStringLiteral("kid"),
                     webThat(Verdict::Allow, {open(QStringLiteral("wikipedia.org")),
                                              block(QStringLiteral("*"))}))});
         const ChromiumPolicy byDefault = chromiumPolicyFor(
-            {person(QStringLiteral("julia"),
+            {person(QStringLiteral("kid"),
                     webThat(Verdict::Deny, {open(QStringLiteral("wikipedia.org"))}))});
 
         QVERIFY(byRule == byDefault);
@@ -129,12 +129,12 @@ private slots:
     }
 
     // The composition rule of WebPolicy.h, and the reason it is written down:
-    // the most restrictive wins, and there is no precedence. julia's block
+    // the most restrictive wins, and there is no precedence. kid's block
     // reaches pedro's machine, because there is only one machine.
     void twoProfilesThatDisagreeAboutOneSite()
     {
         const ChromiumPolicy policy = chromiumPolicyFor({
-            person(QStringLiteral("julia"),
+            person(QStringLiteral("kid"),
                    webThat(Verdict::Allow, {block(QStringLiteral("youtube.com"))})),
             person(QStringLiteral("pedro"),
                    webThat(Verdict::Allow, {open(QStringLiteral("youtube.com"))})),
@@ -155,14 +155,14 @@ private slots:
     void oneProfileClosingTheDoorClosesItForEverybody()
     {
         const ChromiumPolicy policy = chromiumPolicyFor({
-            person(QStringLiteral("julia"),
+            person(QStringLiteral("kid"),
                    webThat(Verdict::Deny, {open(QStringLiteral("wikipedia.org"))})),
             person(QStringLiteral("pedro"),
                    webThat(Verdict::Allow, {open(QStringLiteral("github.com"))})),
         });
 
         QVERIFY(policy.blocklist.contains(QStringLiteral("*")));
-        // github.com is named by pedro and falls to julia's `deny` default, so
+        // github.com is named by pedro and falls to kid's `deny` default, so
         // the two disagree and the restrictive one holds.
         QVERIFY(policy.blocklist.contains(QStringLiteral("github.com")));
         QCOMPARE(policy.allowlist, QStringList {QStringLiteral("wikipedia.org")});
@@ -178,7 +178,7 @@ private slots:
         allows.incognito = Verdict::Allow;
 
         const ChromiumPolicy policy = chromiumPolicyFor({
-            person(QStringLiteral("julia"), denies),
+            person(QStringLiteral("kid"), denies),
             person(QStringLiteral("pedro"), allows),
         });
 
@@ -197,7 +197,7 @@ private slots:
         allows.incognito = Verdict::Allow;
 
         const ChromiumPolicy policy =
-            chromiumPolicyFor({person(QStringLiteral("julia"), allows)});
+            chromiumPolicyFor({person(QStringLiteral("kid"), allows)});
         QVERIFY(!policy.needed());
         QVERIFY(!policy.toJson().contains(QStringLiteral("IncognitoModeAvailability")));
     }
@@ -206,7 +206,7 @@ private slots:
     // "disabled" is a word for something still in force.
     void adisabledProfileIsNotConsulted()
     {
-        Profile off = person(QStringLiteral("julia"),
+        Profile off = person(QStringLiteral("kid"),
                              webThat(Verdict::Allow, {block(QStringLiteral("youtube.com"))}));
         off.enabled = false;
         QVERIFY(!chromiumPolicyFor({off}).needed());
@@ -217,16 +217,16 @@ private slots:
     // out the same bytes. Otherwise every verb rewrites the policy forever.
     void theSameDecisionInAnyOrderIsTheSameFile()
     {
-        const Profile julia =
-            person(QStringLiteral("julia"),
+        const Profile kid =
+            person(QStringLiteral("kid"),
                    webThat(Verdict::Allow, {block(QStringLiteral("youtube.com")),
                                             block(QStringLiteral("tiktok.com"))}));
         const Profile pedro =
             person(QStringLiteral("pedro"),
                    webThat(Verdict::Allow, {block(QStringLiteral("tiktok.com"))}));
 
-        QVERIFY(chromiumPolicyFor({julia, pedro}) == chromiumPolicyFor({pedro, julia}));
-        QCOMPARE(chromiumPolicyFor({julia, pedro}).blocklist,
+        QVERIFY(chromiumPolicyFor({kid, pedro}) == chromiumPolicyFor({pedro, kid}));
+        QCOMPARE(chromiumPolicyFor({kid, pedro}).blocklist,
                  (QStringList {QStringLiteral("tiktok.com"), QStringLiteral("youtube.com")}));
     }
 
@@ -234,12 +234,12 @@ private slots:
     // the last block taken back is a machine with no policy file on it.
     void takingTheLastBlockBackLeavesNothingBehind()
     {
-        Profile julia = person(QStringLiteral("julia"),
+        Profile kid = person(QStringLiteral("kid"),
                                webThat(Verdict::Allow, {block(QStringLiteral("youtube.com"))}));
-        QVERIFY(chromiumPolicyFor({julia}).needed());
+        QVERIFY(chromiumPolicyFor({kid}).needed());
 
-        julia.web.rules[0].verdict = Verdict::Allow;
-        QVERIFY(!chromiumPolicyFor({julia}).needed());
+        kid.web.rules[0].verdict = Verdict::Allow;
+        QVERIFY(!chromiumPolicyFor({kid}).needed());
     }
 
     // The first rule that names a site wins, the same order and for the same
@@ -257,13 +257,13 @@ private slots:
     // what keeps "never had web rules" and "had them taken away" one state.
     void theWebHalfSurvivesTheFile()
     {
-        Profile julia = person(QStringLiteral("julia"),
+        Profile kid = person(QStringLiteral("kid"),
                                webThat(Verdict::Deny, {block(QStringLiteral("youtube.com")),
                                                        open(QStringLiteral("wikipedia.org"))}));
-        julia.web.incognitoStated = true;
-        julia.web.incognito = Verdict::Deny;
+        kid.web.incognitoStated = true;
+        kid.web.incognito = Verdict::Deny;
 
-        const QJsonObject written = julia.toJson();
+        const QJsonObject written = kid.toJson();
         QVERIFY(written.contains(QStringLiteral("web")));
 
         Profile read;
@@ -275,7 +275,7 @@ private slots:
         QCOMPARE(read.web.rules.at(0).verdict, Verdict::Deny);
         QVERIFY(read.web.incognitoStated);
         QCOMPARE(read.web.incognito, Verdict::Deny);
-        QVERIFY(chromiumPolicyFor({read}) == chromiumPolicyFor({julia}));
+        QVERIFY(chromiumPolicyFor({read}) == chromiumPolicyFor({kid}));
 
         QVERIFY(!person(QStringLiteral("pedro")).toJson().contains(QStringLiteral("web")));
     }
@@ -286,7 +286,7 @@ private slots:
     void aProfileWithNoWebKeyIsNotAFailure()
     {
         const QJsonObject old {
-            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("user"), QStringLiteral("kid")},
             {QStringLiteral("default"), QStringLiteral("deny")},
         };
         Profile read;
@@ -303,14 +303,14 @@ private slots:
         Profile read;
 
         QJsonObject notAnObject {
-            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("user"), QStringLiteral("kid")},
             {QStringLiteral("web"), QStringLiteral("no")},
         };
         QVERIFY(!Profile::fromJson(notAnObject, &read, &error));
         QVERIFY(error.contains(QStringLiteral("web")));
 
         QJsonObject unknownVerdict {
-            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("user"), QStringLiteral("kid")},
             {QStringLiteral("web"),
              QJsonObject {{QStringLiteral("incognito"), QStringLiteral("sometimes")}}},
         };
@@ -328,7 +328,7 @@ private slots:
     // how to lift.
     void aSiteOutOfTimeIsAPolicyOnItsOwn()
     {
-        const QVector<Profile> nobodyHasWebRules {person(QStringLiteral("julia"))};
+        const QVector<Profile> nobodyHasWebRules {person(QStringLiteral("kid"))};
         QVERIFY(!chromiumPolicyFor(nobodyHasWebRules).needed());
 
         const ChromiumPolicy out =
@@ -346,16 +346,16 @@ private slots:
     // allowlist the tie and that would turn the block into its opposite.
     void aSiteOutOfTimeIsBlockedEvenWhereAProfileAllowsIt()
     {
-        const Profile julia =
-            person(QStringLiteral("julia"),
+        const Profile kid =
+            person(QStringLiteral("kid"),
                    webThat(Verdict::Deny, {open(QStringLiteral("youtube.com")),
                                            open(QStringLiteral("wikipedia.org"))}));
 
-        const ChromiumPolicy lit = chromiumPolicyFor({julia});
+        const ChromiumPolicy lit = chromiumPolicyFor({kid});
         QVERIFY(lit.allowlist.contains(QStringLiteral("youtube.com")));
 
         const ChromiumPolicy spent =
-            chromiumPolicyFor({julia}, {QStringLiteral("youtube.com")});
+            chromiumPolicyFor({kid}, {QStringLiteral("youtube.com")});
         QVERIFY(spent.blocklist.contains(QStringLiteral("youtube.com")));
         QVERIFY2(!spent.allowlist.contains(QStringLiteral("youtube.com")),
                  "a site that ran out was left in the allowlist, which opens it");
@@ -369,7 +369,7 @@ private slots:
     void abudgetOnBrowsingItselfBlocksEverything()
     {
         const ChromiumPolicy spent =
-            chromiumPolicyFor({person(QStringLiteral("julia"))}, {QStringLiteral("*")});
+            chromiumPolicyFor({person(QStringLiteral("kid"))}, {QStringLiteral("*")});
         QCOMPARE(spent.blocklist, QStringList {QStringLiteral("*")});
     }
 
@@ -378,11 +378,11 @@ private slots:
     // orderings of one decision compare unequal.
     void theSameDayInAnyOrderIsStillTheSameFile()
     {
-        const Profile julia = person(QStringLiteral("julia"),
+        const Profile kid = person(QStringLiteral("kid"),
                                      webThat(Verdict::Allow, {block(QStringLiteral("tiktok.com"))}));
-        QVERIFY(chromiumPolicyFor({julia}, {QStringLiteral("youtube.com"),
+        QVERIFY(chromiumPolicyFor({kid}, {QStringLiteral("youtube.com"),
                                             QStringLiteral("archlinux.org")})
-                == chromiumPolicyFor({julia}, {QStringLiteral("archlinux.org"),
+                == chromiumPolicyFor({kid}, {QStringLiteral("archlinux.org"),
                                                QStringLiteral("youtube.com")}));
     }
 
@@ -393,7 +393,7 @@ private slots:
     // machine to say what it already said.
     void aSiteBudgetSurvivesTheFileAndAnAppBudgetSaysNothingNew()
     {
-        Profile julia = person(QStringLiteral("julia"));
+        Profile kid = person(QStringLiteral("kid"));
         Budget site;
         site.id = QStringLiteral("youtube.com");
         site.match = {QStringLiteral("youtube.com")};
@@ -405,9 +405,9 @@ private slots:
         app.match = {QStringLiteral("chromium")};
         app.dailyMinutes = 45;
         app.onExhausted = OnExhausted::Close;
-        julia.budgets = {site, app};
+        kid.budgets = {site, app};
 
-        const QJsonObject written = julia.toJson();
+        const QJsonObject written = kid.toJson();
         const QJsonArray budgets = written.value(QStringLiteral("budgets")).toArray();
         QCOMPARE(budgets.at(0).toObject().value(QStringLiteral("kind")).toString(),
                  QStringLiteral("site"));
@@ -427,7 +427,7 @@ private slots:
     // that only ever had one.
     void aBudgetAboutTwoIdsIsOneClockInTheFile()
     {
-        Profile julia = person(QStringLiteral("julia"));
+        Profile kid = person(QStringLiteral("kid"));
         Budget browser;
         browser.id = QStringLiteral("chromium");
         browser.match = {QStringLiteral("chromium"), QStringLiteral("org.chromium.Chromium")};
@@ -438,9 +438,9 @@ private slots:
         editor.match = {QStringLiteral("code")};
         editor.dailyMinutes = 45;
         editor.onExhausted = OnExhausted::Close;
-        julia.budgets = {browser, editor};
+        kid.budgets = {browser, editor};
 
-        const QJsonArray budgets = julia.toJson().value(QStringLiteral("budgets")).toArray();
+        const QJsonArray budgets = kid.toJson().value(QStringLiteral("budgets")).toArray();
         const QJsonValue two = budgets.at(0).toObject().value(QStringLiteral("match"));
         const QJsonValue one = budgets.at(1).toObject().value(QStringLiteral("match"));
         QVERIFY2(two.isArray(), "two names did not come out as a list");
@@ -453,7 +453,7 @@ private slots:
 
         Profile read;
         QString error;
-        QVERIFY2(Profile::fromJson(julia.toJson(), &read, &error), qPrintable(error));
+        QVERIFY2(Profile::fromJson(kid.toJson(), &read, &error), qPrintable(error));
         QCOMPARE(read.budgets.at(0).match,
                  QStringList({QStringLiteral("chromium"),
                               QStringLiteral("org.chromium.Chromium")}));
@@ -470,7 +470,7 @@ private slots:
     void aBareNameIsNotASpellingOfAListOfOne()
     {
         const QJsonObject written {
-            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("user"), QStringLiteral("kid")},
             {QStringLiteral("budgets"),
              QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("code")},
                                       {QStringLiteral("match"), QStringLiteral("code")},
@@ -491,7 +491,7 @@ private slots:
                                {QStringLiteral("dailyMinutes"), 45}};
             if (!match.isUndefined())
                 entry.insert(QStringLiteral("match"), match);
-            return QJsonObject {{QStringLiteral("user"), QStringLiteral("julia")},
+            return QJsonObject {{QStringLiteral("user"), QStringLiteral("kid")},
                                 {QStringLiteral("budgets"), QJsonArray {entry}}};
         };
 
@@ -510,7 +510,7 @@ private slots:
 // `resets` survives the file, and is written only when it is `never`.
     void aBudgetThatOutlivesTheDaySurvivesTheFile()
     {
-        Profile julia = person(QStringLiteral("julia"));
+        Profile kid = person(QStringLiteral("kid"));
         Budget pot;
         pot.id = QStringLiteral("pot");
         pot.match = {QStringLiteral("chromium")};
@@ -521,9 +521,9 @@ private slots:
         day.id = QStringLiteral("session");
         day.match = {QStringLiteral("*")};
         day.dailyMinutes = 120;
-        julia.budgets = {pot, day};
+        kid.budgets = {pot, day};
 
-        const QJsonArray budgets = julia.toJson().value(QStringLiteral("budgets")).toArray();
+        const QJsonArray budgets = kid.toJson().value(QStringLiteral("budgets")).toArray();
         QCOMPARE(budgets.at(0).toObject().value(QStringLiteral("resets")).toString(),
                  QStringLiteral("never"));
         QVERIFY2(!budgets.at(1).toObject().contains(QStringLiteral("resets")),
@@ -531,7 +531,7 @@ private slots:
 
         Profile read;
         QString error;
-        QVERIFY2(Profile::fromJson(julia.toJson(), &read, &error), qPrintable(error));
+        QVERIFY2(Profile::fromJson(kid.toJson(), &read, &error), qPrintable(error));
         QVERIFY(read.budgets.at(0).carriesOver());
         QVERIFY(!read.budgets.at(1).carriesOver());
 
@@ -539,7 +539,7 @@ private slots:
         // whose reset was misread is a clock that starts over at the wrong
         // moment and reads back out of `profile show` looking correct.
         const QJsonObject wrong {
-            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("user"), QStringLiteral("kid")},
             {QStringLiteral("budgets"),
              QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("pot")},
                                       {QStringLiteral("match"), QJsonArray{QStringLiteral("chromium")}},
@@ -552,38 +552,38 @@ private slots:
     // until somebody writes it.
     void theStampSurvivesTheFileAndIsAbsentUntilItIsWritten()
     {
-        Profile julia = person(QStringLiteral("julia"));
-        QVERIFY2(!julia.toJson().contains(QStringLiteral("writtenBy")),
+        Profile kid = person(QStringLiteral("kid"));
+        QVERIFY2(!kid.toJson().contains(QStringLiteral("writtenBy")),
                  "a profile nobody has changed wrote a stamp, which rewrites every "
                  "profiles.json on every machine");
-        QVERIFY(!julia.toJson().contains(QStringLiteral("writtenAt")));
+        QVERIFY(!kid.toJson().contains(QStringLiteral("writtenAt")));
 
-        julia.writtenBy = QStringLiteral("howl");
-        julia.writtenAt = QDateTime(QDate(2026, 9, 8), QTime(15, 1, 40),
+        kid.writtenBy = QStringLiteral("howl");
+        kid.writtenAt = QDateTime(QDate(2026, 9, 8), QTime(15, 1, 40),
                                     QTimeZone::fromSecondsAheadOfUtc(-3 * 3600));
 
         Profile read;
         QString error;
-        QVERIFY2(Profile::fromJson(julia.toJson(), &read, &error), qPrintable(error));
+        QVERIFY2(Profile::fromJson(kid.toJson(), &read, &error), qPrintable(error));
         QCOMPARE(read.writtenBy, QStringLiteral("howl"));
-        QCOMPARE(read.writtenAt, julia.writtenAt);
-        QCOMPARE(read.toJson(), julia.toJson());
+        QCOMPARE(read.writtenAt, kid.writtenAt);
+        QCOMPARE(read.toJson(), kid.toJson());
 
         // `withoutTheStamp` is what "did this change" is asked of, so it has to
         // drop both halves and nothing else. Without this, every save would
         // differ from the last by the stamp itself and every profile would be
         // stamped on every run.
-        Profile other = julia;
+        Profile other = kid;
         other.writtenBy = QStringLiteral("ana");
-        other.writtenAt = julia.writtenAt.addDays(9);
-        QCOMPARE(other.withoutTheStamp(), julia.withoutTheStamp());
+        other.writtenAt = kid.writtenAt.addDays(9);
+        QCOMPARE(other.withoutTheStamp(), kid.withoutTheStamp());
         other.enforce = !other.enforce;
-        QVERIFY(other.withoutTheStamp() != julia.withoutTheStamp());
+        QVERIFY(other.withoutTheStamp() != kid.withoutTheStamp());
 
         // A stamp that is there and unreadable is refused rather than dropped.
         // Silently becoming "never" would make the profile that has one lose
         // every tiebreak against one that does not.
-        QJsonObject broken = julia.toJson();
+        QJsonObject broken = kid.toJson();
         broken.insert(QStringLiteral("writtenAt"), QStringLiteral("last Tuesday"));
         QVERIFY(!Profile::fromJson(broken, &read, &error));
         QVERIFY2(error.contains(QStringLiteral("writtenAt")), qPrintable(error));
@@ -625,7 +625,7 @@ private slots:
         // As is a pot on somebody's own profile, which is the whole point of
         // pots and must not have been taken away by this.
         QJsonObject mine = shared(Resets::Never);
-        mine.insert(QStringLiteral("user"), QStringLiteral("julia"));
+        mine.insert(QStringLiteral("user"), QStringLiteral("kid"));
         QVERIFY2(Profile::fromJson(mine, &read, &error), qPrintable(error));
         QVERIFY(read.budgets.at(0).carriesOver());
         QVERIFY(!read.isForAnybody());
@@ -637,7 +637,7 @@ private slots:
     void aSiteBudgetWithNoActionNamedBlocks()
     {
         const QJsonObject written {
-            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("user"), QStringLiteral("kid")},
             {QStringLiteral("budgets"),
              QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("youtube.com")},
                                       {QStringLiteral("match"), QJsonArray{QStringLiteral("youtube.com")}},
@@ -662,7 +662,7 @@ private slots:
                                {QStringLiteral("onExhausted"), action}};
             if (!kind.isEmpty())
                 entry.insert(QStringLiteral("kind"), kind);
-            return QJsonObject {{QStringLiteral("user"), QStringLiteral("julia")},
+            return QJsonObject {{QStringLiteral("user"), QStringLiteral("kid")},
                                 {QStringLiteral("budgets"), QJsonArray {entry}}};
         };
 
