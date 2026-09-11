@@ -59,9 +59,18 @@ class House : public QObject
     /// the subject sees theirs and no one else's, because profiles.json is
     /// readable by everybody and a window is not a reason to publish the rest of
     /// the household.
+    Q_PROPERTY(QVariantMap household READ household NOTIFY changed)
     Q_PROPERTY(QVariantList people READ people NOTIFY changed)
-    /// `programs`, `today` and `catalog`, each an object keyed by user name.
+    /// `programs`, `sites`, `today` and `catalog`, each an object keyed by user
+    /// name.
     Q_PROPERTY(QVariantMap snapshot READ snapshot NOTIFY changed)
+    /// What a browser policy reaches, in one sentence — `webPolicyReach` in
+    /// `src/core/WebPolicy.h`, joined.
+    ///
+    /// A property and not a string in the QML because the CLI says the same
+    /// thing out of the same function: the sites view prints it once, `omahouse
+    /// web` prints it once when it writes, and neither composes its own.
+    Q_PROPERTY(QString reach READ reach CONSTANT)
 
 public:
     explicit House(QObject *parent = nullptr);
@@ -71,7 +80,9 @@ public:
     QString faceReason() const { return m_faceReason; }
     QString error() const { return m_error; }
     QVariantList people() const { return m_snapshot.value(QStringLiteral("people")).toList(); }
+    QVariantMap household() const { return m_snapshot.value(QStringLiteral("household")).toMap(); }
     QVariantMap snapshot() const { return m_snapshot; }
+    QString reach() const;
 
     /// Read the machine again now. The timer does this every two seconds; the
     /// window calls it the moment a write comes back, so the list does not sit

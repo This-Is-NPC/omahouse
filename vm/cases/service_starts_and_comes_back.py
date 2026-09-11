@@ -28,11 +28,12 @@ def run(vm):
             raise Failed(f"the installed unit has no {wanted!r}")
 
     # Something to watch, so the daemon has a reason to still be there.
+    patience = vm.pace["patience_seconds"]
     vm.make_profile(budgets={"session": 600}, default="allow")
     vm.start_daemon()
     vm.wait_for(lambda: vm.ssh("systemctl is-active omahouse.service",
                                check=False)[1].strip() == "active",
-                30, "omahouse.service to be active")
+                patience, "omahouse.service to be active")
 
     first = vm.ssh("systemctl show omahouse.service -p MainPID --value").strip()
     if first in ("", "0"):
@@ -46,7 +47,7 @@ def run(vm):
         return state == "active" and now not in ("", "0", first)
 
     began = time.time()
-    vm.wait_for(raised, 30, "systemd to put the daemon back")
+    vm.wait_for(raised, patience, "systemd to put the daemon back")
     second = vm.ssh("systemctl show omahouse.service -p MainPID --value").strip()
 
     restarts = vm.ssh("systemctl show omahouse.service -p NRestarts --value").strip()
@@ -58,6 +59,6 @@ def run(vm):
     vm.launch(args="900")
     day = vm.today()
     path = f"/var/lib/omahouse/{vm.subject}/{day}.json"
-    vm.wait_for(lambda: vm.ssh(f"test -f {path}", check=False)[0] == 0, 20,
+    vm.wait_for(lambda: vm.ssh(f"test -f {path}", check=False)[0] == 0, patience,
                 "the ledger to be written again after the restart")
     print(f"      and counting again: {path}")

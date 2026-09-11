@@ -22,6 +22,9 @@ Rectangle {
 
     Accessible.ignored: true
 
+    property bool profiles: false
+    property string recipient: ""
+    property string purpose: ""
     property var programs: []
     property var returnFocus: function () {}
     signal picked(string id)
@@ -111,7 +114,7 @@ Rectangle {
             border.color: Theme.accent
 
             Accessible.role: Accessible.Dialog
-            Accessible.name: "Programs"
+            Accessible.name: sheet.profiles ? "Choose a profile" : "Programs for " + sheet.recipient
             MouseArea {
                 anchors.fill: parent
                 onClicked: function (mouse) { mouse.accepted = true }
@@ -121,6 +124,12 @@ Rectangle {
                 anchors.fill: parent
                 anchors.margins: 10
                 spacing: 8
+
+                Label {
+                    width: parent.width
+                    text: sheet.profiles ? "Who is this for? · " + sheet.purpose
+                                         : "Programs for " + sheet.recipient
+                }
 
                 Rectangle {
                     width: parent.width
@@ -147,7 +156,7 @@ Rectangle {
                         anchors.leftMargin: 6
                         anchors.verticalCenter: parent.verticalCenter
                         visible: query.text === ""
-                        text: "which program"
+                        text: sheet.profiles ? "choose a profile" : "which program"
                         color: Theme.dim
                         font.family: Theme.fontFamily
                         font.pixelSize: 13
@@ -156,7 +165,7 @@ Rectangle {
                     }
                     TextInput {
                         id: query
-                        objectName: "pickerQuery"
+                        objectName: sheet.profiles ? "profileQuery" : "pickerQuery"
                         // The scope's own focus item: it has the keyboard for
                         // exactly as long as the sheet is up.
                         focus: true
@@ -171,7 +180,7 @@ Rectangle {
                         font.pixelSize: 13
                         renderType: Text.NativeRendering
                         clip: true
-                        Accessible.name: "program query"
+                        Accessible.name: sheet.profiles ? "profile query" : "program query"
                         Keys.onPressed: function (event) {
                             if (event.key === Qt.Key_Escape) {
                                 sheet.close()
@@ -196,9 +205,9 @@ Rectangle {
 
                 ListView {
                     id: list
-                    objectName: "pickerList"
+                    objectName: sheet.profiles ? "profileList" : "pickerList"
                     width: parent.width
-                    height: parent.height - 36
+                    height: parent.height - 64
                     clip: true
                     model: sheet.shown
                     currentIndex: 0

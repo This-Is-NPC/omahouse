@@ -367,25 +367,28 @@ say "julia's profile"
 # one Chromium window makes TWO scopes with two different ids --
 # `app-Hyprland-chromium-*.scope` for the twelve child processes and
 # `app-org.chromium.Chromium-*.scope` for the one that owns the window -- so
-# both are allowed and both carry the three minute budget. Allowing only
-# `chromium`, under `default: deny`, would have had the daemon close the browser
-# for the wrong reason two seconds after it opened.
+# both are named. Allowing only `chromium`, under `default: deny`, would have
+# had the daemon close the browser for the wrong reason two seconds after it
+# opened.
+#
+# Both in one command, which is what `docs/how-to-release-programs.md` tells a
+# household to type: one rule each and **one** three minute budget between
+# them, called `chromium`. Two commands would be two clocks of three minutes
+# that happen to agree. The cases that hand this profile more time grant
+# `--budget chromium` for that reason -- there is no budget called
+# `org.chromium.Chromium` any more.
 guest 'sudo bash -s' <<'EOSH'
 set -e
 omahouse profile add julia --name "Júlia" 2>/dev/null || true
 omahouse profile default julia --deny
 omahouse allow julia xdg-terminal-exec
 omahouse allow julia omahouse
-omahouse allow julia chromium --limit 3m
-omahouse allow julia org.chromium.Chromium --limit 3m
-# Omarchy's own. `default/hypr/autostart.lua` launches these two through
-# `uwsm-app --`, so they get app scopes of their own under app.slice and are
-# judged exactly like a game would be. Measured: with `default: deny` and no
-# rule for it, omahouse SIGTERMs `omarchy-hyprland-monitor-watch` two seconds
-# after login -- correctly by the model, and wrongly by any reading of what the
-# machine is for. An allowlist on real Omarchy has to name Omarchy.
-omahouse allow julia omarchy-hyprland-monitor-watch
-omahouse allow julia udiskie
+omahouse allow julia chromium org.chromium.Chromium --limit 3m
+# Omarchy's own two -- `udiskie` and `omarchy-hyprland-monitor-watch`, launched
+# by `default/hypr/autostart.lua` through `uwsm-app --` -- used to need a rule
+# each here, because they arrive as app scopes and were judged exactly like a
+# game. They are session furniture now (`src/core/Furniture.h`): not judged, and
+# not on their own evidence that anybody is at the keyboard. Nothing to write.
 omahouse limit julia --session 10m
 omahouse profile enforce julia --on
 omahouse profile show julia

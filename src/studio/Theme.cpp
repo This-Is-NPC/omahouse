@@ -1,5 +1,7 @@
 #include "Theme.h"
 
+#include <cmath>
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -188,9 +190,73 @@ QColor Theme::line() const
     return edge;
 }
 
+namespace {
+
+qreal channel(qreal value)
+{
+    return value <= 0.03928 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4);
+}
+
+qreal relativeLuminance(const QColor &colour)
+{
+    return 0.2126 * channel(colour.redF())
+            + 0.7152 * channel(colour.greenF())
+            + 0.0722 * channel(colour.blueF());
+}
+
+} // namespace
+
+qreal Theme::contrast(const QColor &a, const QColor &b)
+{
+    const qreal one = relativeLuminance(a);
+    const qreal other = relativeLuminance(b);
+    return (std::max(one, other) + 0.05) / (std::min(one, other) + 0.05);
+}
+
+QColor Theme::quietOn(const QColor &muted, const QColor &background,
+                      const QColor &foreground)
+{
+    if (contrast(muted, background) >= kReadable)
+        return muted;
+
+    // Sixty-four steps is finer than eight bits per channel, so the first one
+    // that passes is the quietest colour on this path that does.
+    for (int step = 1; step <= 64; ++step) {
+        const qreal howFar = qreal(step) / 64.0;
+        const QColor walked = QColor::fromRgbF(
+                muted.redF() + (foreground.redF() - muted.redF()) * howFar,
+                muted.greenF() + (foreground.greenF() - muted.greenF()) * howFar,
+                muted.blueF() + (foreground.blueF() - muted.blueF()) * howFar);
+        if (contrast(walked, background) >= kReadable)
+            return walked;
+    }
+    // The foreground itself, for a theme whose own body text is unreadable on
+    // its own background. Nothing here can fix that, and inventing a colour the
+    // theme never named would be worse than agreeing with it.
+    return foreground;
+}
+
 QColor Theme::dim() const
 {
-    return m_muted.isValid() ? m_muted : m_foreground.darker(160);
+    // What the theme asked for, and then whatever it takes to be readable.
+    //
+    // `muted` is not a colour for text. Measured against the twenty-two themes
+    // Omarchy ships on this machine, twenty put it under 4.5:1 on that theme's
+    // own background; `matte-black` is 1.48:1, and `last-horizon` sets it to
+    // the same value as `selection` -- a colour whose job is to sit *behind* a
+    // word rather than to be one. omahouse's own fallback is 2.91:1, so this is
+    // the whole class of them and ours is in it.
+    //
+    // Everything `quiet` in the window is drawn in this: the empty-state
+    // sentences, the subtitles, and the `Last report:` line on the machines
+    // view -- which the walkthrough tells a household is the line to read
+    // first. A line worth that sentence is a line worth being able to read.
+    //
+    // Walked towards the foreground rather than lightened, so a theme keeps its
+    // cast: `dim` stays the quietest thing on the screen and stops being the
+    // least visible one.
+    const QColor said = m_muted.isValid() ? m_muted : m_foreground.darker(160);
+    return quietOn(said, m_background, m_foreground);
 }
 
 QColor Theme::fill(const QColor &role, qreal alpha) const

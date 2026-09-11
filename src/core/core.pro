@@ -17,19 +17,37 @@ TEMPLATE  = lib
 TARGET    = omahousecore
 
 HEADERS += \
+    Allocation.h \
     AppScope.h \
     Duration.h \
+    Fleet.h \
+    Focus.h \
+    Furniture.h \
     Json.h \
+    Kind.h \
     Ledger.h \
+    NodeConfig.h \
+    Pairing.h \
     Policy.h \
     Profile.h \
-    Version.h
+    Publication.h \
+    Version.h \
+    WebPolicy.h
 
 SOURCES += \
+    Allocation.cpp \
     AppScope.cpp \
     Duration.cpp \
+    Fleet.cpp \
+    Focus.cpp \
+    Furniture.cpp \
     Json.cpp \
+    Kind.cpp \
     Ledger.cpp \
+    NodeConfig.cpp \
+    Pairing.cpp \
     Policy.cpp \
     Profile.cpp \
-    Version.cpp
+    Publication.cpp \
+    Version.cpp \
+    WebPolicy.cpp

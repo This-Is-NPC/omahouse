@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "omahouse meter",
+  "version": "1.0.0",
+  "description": "Tells omahouse which site is in the front tab. It reports, and it does nothing else.",
+  "permissions": ["tabs", "nativeMessaging"],
+  "host_permissions": [],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

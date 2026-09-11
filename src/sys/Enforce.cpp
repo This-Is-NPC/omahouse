@@ -91,6 +91,16 @@ QString whyNotBlockable(const QString &configDir)
         .arg(clean(configDir), clean(paths::systemConfigDir()));
 }
 
+QString whyNotWriteTheBrowserPolicy()
+{
+    if (!paths::chromiumPolicyDirIsTheSystems() || paths::configDirIsTheSystems())
+        return {};
+    return QStringLiteral("%1 is this machine's own and this run's configuration is %2, so the "
+                          "browser policy was left alone -- point "
+                          "$OMAHOUSE_CHROMIUM_POLICY_DIR somewhere of its own to write it")
+        .arg(paths::chromiumPolicyDir(), paths::configDir());
+}
+
 QString loginctlProgram()
 {
     const QByteArray fromEnvironment = qgetenv("OMAHOUSE_LOGINCTL");

@@ -18,6 +18,22 @@
 # installed, will find every picture stale at once -- and that is what it looks
 # like when it happens, rather than a puzzle. `mise run shots` is the answer to
 # it, and the diff is a diff of the whole set.
+#
+# **This step knows how to notice a picture that is stale and cannot notice one
+# that is wrong**, and that is worth saying out loud because green here reads
+# like "the pictures are right" and does not mean it. It regenerates and
+# compares bytes: a fixture that broke and drew the wrong thing regenerates into
+# the same wrong thing and matches. One did -- a document written in a shape the
+# reader had stopped accepting made profiles.json fail to parse, the household
+# vanished, and a screen of the words `nobody is under rules yet` was committed
+# with this green.
+#
+# What guards correctness is on the other side, in `shoot()` in
+# tests/tst_studio.cpp, where the window can still be asked what it thinks
+# rather than only what it looks like: it refuses to save a frame taken while
+# `House.error` is set, and one taken with profiles on disk and nobody on
+# screen. That is where a check of this kind belongs, and anything this script
+# reports is still only about the bytes.
 set -euo pipefail
 # So an empty directory yields nothing rather than the literal `*.png`.
 shopt -s nullglob

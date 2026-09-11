@@ -22,7 +22,7 @@ namespace {
 // through a writer and a reader that agree with each other and with nothing else
 // is a round trip that proves nothing about the file on disk.
 const char *kSpecProfiles = R"({
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "profiles": [
     {
       "user": "julia",
@@ -38,9 +38,9 @@ const char *kSpecProfiles = R"({
         { "match": "gcompris",           "verdict": "allow" }
       ],
       "budgets": [
-        { "id": "session",   "match": "*",                   "dailyMinutes": 120, "onExhausted": "logout" },
-        { "id": "minecraft", "match": "minecraft-launcher",  "dailyMinutes": 45,  "onExhausted": "close" },
-        { "id": "firefox",   "match": "firefox",             "dailyMinutes": 60,  "onExhausted": "close" }
+        { "id": "session",   "match": ["*"],                  "dailyMinutes": 120, "onExhausted": "logout" },
+        { "id": "minecraft", "match": ["minecraft-launcher"], "dailyMinutes": 45,  "onExhausted": "close" },
+        { "id": "firefox",   "match": ["firefox"],            "dailyMinutes": 60,  "onExhausted": "close" }
       ]
     }
   ]
@@ -109,10 +109,10 @@ private slots:
 
         Budget session;
         session.id = QStringLiteral("session");
-        session.match = QStringLiteral("*");
+        session.match = {QStringLiteral("*")};
         Budget chromium;
         chromium.id = QStringLiteral("chromium");
-        chromium.match = QStringLiteral("chromium");
+        chromium.match = {QStringLiteral("chromium")};
         profile.budgets = {session, chromium};
 
         // One Chromium window with its twenty one processes, a second Chromium
@@ -153,7 +153,7 @@ private slots:
         profile.enforce = true;
         Budget session;
         session.id = QStringLiteral("session");
-        session.match = QStringLiteral("*");
+        session.match = {QStringLiteral("*")};
         session.dailyMinutes = 120;
         session.onExhausted = OnExhausted::Logout;
         profile.budgets = {session};
@@ -206,7 +206,7 @@ private slots:
         QCOMPARE(julia.rules.at(0).verdict, Verdict::Allow);
         QCOMPARE(julia.budgets.size(), 3);
         QCOMPARE(julia.budgets.at(0).id, QStringLiteral("session"));
-        QCOMPARE(julia.budgets.at(0).match, QStringLiteral("*"));
+        QCOMPARE(julia.budgets.at(0).match, QStringList{QStringLiteral("*")});
         QCOMPARE(julia.budgets.at(0).dailyMinutes, 120);
         QCOMPARE(julia.budgets.at(0).onExhausted, OnExhausted::Logout);
         QCOMPARE(julia.budgets.at(1).onExhausted, OnExhausted::Close);
@@ -224,7 +224,7 @@ private slots:
         counted.user = QStringLiteral("howl");
         Budget watched;
         watched.id = QStringLiteral("chromium");
-        watched.match = QStringLiteral("chromium");
+        watched.match = {QStringLiteral("chromium")};
         counted.budgets = {watched};
         Profile reread;
         QVERIFY2(Profile::fromJson(counted.toJson(), &reread, &error), qPrintable(error));
@@ -283,6 +283,93 @@ private slots:
         QVERIFY(back.hasWarned(QStringLiteral("minecraft"), 5));
         QVERIFY(!back.hasWarned(QStringLiteral("minecraft"), 1));
         QVERIFY(back.hasDenied(QStringLiteral("app-Hyprland-steam-031bdc27.scope")));
+    }
+
+    // Presence rides in the day's file beside the budgets, and it is absent from
+    // every ledger written before it was ever measured -- which is every ledger
+    // already on a machine this ships to. Absent is empty and never an error,
+    // and a day with nothing to say about presence writes no key at all rather
+    // than an empty object that would rewrite every file on disk to say nothing.
+    void presenceRidesBesideTheBudgetsAndIsOptional()
+    {
+        Ledger old;
+        QString error;
+        QVERIFY2(Ledger::fromJson(parse(kSpecLedger), &old, &error), qPrintable(error));
+        QVERIFY(old.presence.isEmpty());
+        QVERIFY(!old.toJson().contains(QStringLiteral("presence")));
+
+        Ledger day;
+        day.user = QStringLiteral("julia");
+        day.date = QDate(2026, 9, 3);
+        day.addSeconds(QStringLiteral("session"), 600);
+        day.addPresenceSeconds(QStringLiteral("using"), 400);
+        day.addPresenceSeconds(QStringLiteral("screen-off"), 200);
+        day.addPresenceSeconds(QStringLiteral("screen-off"), 2);
+        QCOMPARE(day.presenceSecondsFor(QStringLiteral("screen-off")), 202);
+        QCOMPARE(day.presenceSecondsFor(QStringLiteral("locked")), 0);
+
+        // Ten minutes of the session budget, and only four hundred seconds of
+        // anybody in front of the machine. The two numbers disagreeing is the
+        // whole point of measuring the second one, and neither has touched the
+        // other.
+        QCOMPARE(day.secondsFor(QStringLiteral("session")), 600);
+
+        Ledger back;
+        QVERIFY2(Ledger::fromJson(day.toJson(), &back, &error), qPrintable(error));
+        QCOMPARE(back.toJson(), day.toJson());
+        QCOMPARE(back.presenceSecondsFor(QStringLiteral("using")), 400);
+        QCOMPARE(back.presenceSecondsFor(QStringLiteral("screen-off")), 202);
+        QCOMPARE(back.secondsFor(QStringLiteral("session")), 600);
+
+        // A presence that is not an object is a file somebody edited into
+        // something this cannot read, and it is refused rather than ignored:
+        // guessing here would be inventing a day.
+        QJsonObject broken = day.toJson();
+        broken.insert(QStringLiteral("presence"), QStringLiteral("all afternoon"));
+        Ledger nothing;
+        QVERIFY(!Ledger::fromJson(broken, &nothing, &error));
+        QVERIFY(error.contains(QStringLiteral("presence")));
+    }
+
+// The kept seconds ride beside the budgets exactly as presence does, and
+    // are optional in exactly the same way.
+    void theKeptSecondsRideBesideTheBudgetsAndAreOptional()
+    {
+        Ledger old;
+        QString error;
+        QVERIFY2(Ledger::fromJson(parse(kSpecLedger), &old, &error), qPrintable(error));
+        QVERIFY(old.keptSeconds.isEmpty());
+        QVERIFY2(!old.toJson().contains(QStringLiteral("kept")),
+                 "a ledger with no pot wrote one, which rewrites every file on disk");
+
+        Ledger day;
+        day.user = QStringLiteral("julia");
+        day.date = QDate(2026, 9, 3);
+        day.addSeconds(QStringLiteral("session"), 600);
+        day.addKeptSeconds(QStringLiteral("pot"), 400);
+        day.addKeptSeconds(QStringLiteral("pot"), 200);
+        QCOMPARE(day.keptSecondsFor(QStringLiteral("pot")), 600);
+
+        // The two counters are two counters. This is the property every reader
+        // that adds days or machines together depends on without knowing it: a
+        // pot's running total is in the file of every day it crosses, and in
+        // `seconds` it would be summed once per day.
+        QCOMPARE(day.secondsFor(QStringLiteral("pot")), 0);
+        QCOMPARE(day.keptSecondsFor(QStringLiteral("session")), 0);
+
+        Ledger back;
+        QVERIFY2(Ledger::fromJson(day.toJson(), &back, &error), qPrintable(error));
+        QCOMPARE(back.toJson(), day.toJson());
+        QCOMPARE(back.keptSecondsFor(QStringLiteral("pot")), 600);
+        QCOMPARE(back.secondsFor(QStringLiteral("session")), 600);
+
+        // A `kept` that is not an object is a file somebody edited into
+        // something this cannot read, and it is refused rather than ignored.
+        QJsonObject broken = day.toJson();
+        broken.insert(QStringLiteral("kept"), QStringLiteral("all fortnight"));
+        Ledger nothing;
+        QVERIFY(!Ledger::fromJson(broken, &nothing, &error));
+        QVERIFY2(error.contains(QStringLiteral("kept")), qPrintable(error));
     }
 
     // tmp + rename, docs/design.md §4. A reader of the ledger sees the whole of one
@@ -361,11 +448,24 @@ private slots:
     void refusesASchemaVersionItDoesNotKnow()
     {
         QJsonObject profiles = parse(kSpecProfiles);
-        profiles.insert(QStringLiteral("schemaVersion"), 2);
+        profiles.insert(QStringLiteral("schemaVersion"), 3);
         QVector<Profile> parsed;
         QString error;
         QVERIFY2(!profilesFromJson(profiles, &parsed, &error), "it read a profiles.json from the future");
-        QVERIFY(error.contains(QStringLiteral("schema version 2")));
+        QVERIFY(error.contains(QStringLiteral("schema version 3")));
+
+        // And the number is per file. The day's ledger is on 1 while
+        // profiles.json is on 2, so a ledger carrying the profile's number is
+        // as much from the future as one carrying 99 -- which is the property
+        // the split exists for: a profile gaining a meaning must not throw away
+        // the day a machine is in the middle of.
+        QJsonObject sameNumber = parse(kSpecLedger);
+        sameNumber.insert(QStringLiteral("schemaVersion"), 2);
+        Ledger mixed;
+        error.clear();
+        QVERIFY2(!Ledger::fromJson(sameNumber, &mixed, &error),
+                 "the ledger took the profile's schema number");
+        QVERIFY2(Ledger::fromJson(parse(kSpecLedger), &mixed, &error), qPrintable(error));
 
         QJsonObject ledger = parse(kSpecLedger);
         ledger.insert(QStringLiteral("schemaVersion"), 99);

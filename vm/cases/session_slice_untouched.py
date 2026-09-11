@@ -19,7 +19,7 @@ what closing reaches.
 
 import time
 
-WHY = "enforce + empty allowlist for a minute, and the compositor never notices"
+WHY = "enforce + empty allowlist, held, and the compositor never notices"
 
 
 def run(vm):
@@ -48,11 +48,19 @@ def run(vm):
     vm.start_daemon()
 
     say = vm.ssh
-    deadline = time.time() + 60
+    # The one window in this suite that cannot shrink to nothing and still mean
+    # anything. What is being asked is whether an empty allowlist eventually
+    # reaches something it must not, and "eventually" is the whole question, so
+    # the quick regime buys its speed by giving up reach here rather than by
+    # pretending. Twenty seconds is ten ticks of the daemon with every app scope
+    # being refused; three minutes is the long regime's answer, and it is the one
+    # to run before publishing.
+    held = vm.pace["hold_seconds"]
+    deadline = time.time() + held
     while time.time() < deadline:
-        # Asserted the whole minute through and not only at the end. A compositor
+        # Asserted the whole window through and not only at the end. A compositor
         # that died at second nine and was restarted by uwsm would look fine to a
-        # check that only ran at second sixty.
+        # check that only ran at the end of it.
         if vm.pid_of("Hyprland") != hyprland:
             raise Failed(f"Hyprland was {hyprland} and is now {vm.pid_of('Hyprland')}")
         time.sleep(3)
@@ -78,12 +86,21 @@ def run(vm):
     if left:
         raise Failed(f"the allowlist refused nothing: {left} is still open")
 
+    # The SIGTERM and not the `cgroup.kill`: both apps here are the polite
+    # fixture, which leaves on its signal, so a `cgroup.kill` is exactly what
+    # should *not* appear. This asked for one and passed anyway, on the kill an
+    # earlier case in the same boot had written -- which is what a journal read
+    # over the whole boot buys you, and why `journal()` now starts where the
+    # daemon did.
     journal = vm.journal()
-    if "cgroup.kill" not in journal:
+    if "SIGTERM into" not in journal:
         raise Failed("nothing was closed, so nothing was proved:\n" + journal)
+    if "cgroup.kill" in journal:
+        raise Failed("an app that leaves on its SIGTERM was killed as well:\n"
+                     + journal)
 
-    print("      Hyprland %s throughout, user@%s.service %s, sessions %s active"
-          % (hyprland, vm.uid, manager, sessions_before))
+    print("      Hyprland %s throughout %ss, user@%s.service %s, sessions %s active"
+          % (hyprland, held, vm.uid, manager, sessions_before))
     for unit, pids in sorted(before.items()):
         print(f"      {unit}: {len(pids)} process(es), the same ones")
     print(f"      and both app scopes were closed: {apps}")

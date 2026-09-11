@@ -11,6 +11,24 @@
 # Used by vm/provision.sh, which copies the tree to /home/howl/omahouse-src on
 # the guest and runs `makepkg -si` there.
 pkgname=omahouse
+# Fixed, and it is a trap for anybody who installs this with `pacman -S`.
+#
+# Every build of this working tree is 0.1.0-1, however many commits apart they
+# are. `pacman -S --needed omahouse` compares the installed version with the
+# repository's, finds them equal, does nothing, and **exits zero**: a provisioner
+# that reads the exit code is told the install worked and the guest goes on
+# running whatever binary it already had. That is how a showcase machine ran a
+# binary twenty-three commits old while its provisioning reported success.
+#
+# `vm/e2e.py` is not affected and not by luck: it installs with
+# `pacman -U --noconfirm --overwrite '*'` on a package file it just built, which
+# names the file rather than the version and always lands.
+#
+# So: install this package by path with `pacman -U`, never by name with
+# `pacman -S --needed`. The real PKGBUILD in `omarchy-pkgs` builds from the
+# tarball of a tag and has a version that moves; this one is the local twin of
+# it and deliberately does not, which is what makes the shortcut wrong here and
+# right there.
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='House rules: which programs each account may open, and for how long'
@@ -24,7 +42,19 @@ license=('MIT')
 # "never notify-send". Without this line every warning omahouse tries to say on
 # an Omarchy machine is a silent failure, and the first time anybody notices is
 # when a session ends with no warning before it.
-depends=('qt6-base' 'qt6-declarative' 'polkit' 'libnotify')
+#
+# `openssl` and `zip` are the whole toolchain of `packaging/omahouse-meter-pack`,
+# which signs the meter into a `.crx` during `post_install`. Both are on every
+# Arch machine and neither is implied by anything above, and the failure without
+# them is the same silent shape as the one libnotify has: the scriptlet cannot
+# make the archive, no policy is written, and the first anybody knows is a
+# household with no time per site in the report and nothing saying why.
+# omakure is a dependency and not a bundle. It is its own product and stands on
+# its own; what this line buys is that installing omahouse installs everything
+# omahouse needs, in one command, with nothing for a household to go and find.
+# The same will be true of omastore when there is one to depend on.
+depends=('qt6-base' 'qt6-declarative' 'polkit' 'libnotify' 'openssl' 'zip'
+         'omakure' 'git' 'python' 'curl' 'jq')
 makedepends=('qt6-base' 'qt6-declarative' 'qt6-tools' 'gcc' 'make')
 # `vm/omahouse.install` is a symlink to `packaging/omahouse.install`, so the
 # scriptlet pacman runs here is the very file the repo ships and not a copy that
@@ -61,10 +91,39 @@ package() {
     "$pkgdir/usr/lib/systemd/system/omahouse.service"
   install -Dm644 packaging/org.omarchy.omahouse.policy \
     "$pkgdir/usr/share/polkit-1/actions/org.omarchy.omahouse.policy"
+  # The action says an administrator; the rule says *which* one. Named after the
+  # action rather than numbered, so that any `NN-` file a machine's own
+  # administrator drops in sorts ahead of it and wins -- a household that wants
+  # something else out of this action should not have to edit a packaged file.
+  install -Dm644 packaging/org.omarchy.omahouse.rules \
+    "$pkgdir/usr/share/polkit-1/rules.d/org.omarchy.omahouse.rules"
   install -Dm644 packaging/omahouse.desktop \
     "$pkgdir/usr/share/applications/omahouse.desktop"
   install -Dm644 packaging/omahouse.svg \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/omahouse.svg"
+
+  # The browser's half of docs/design.md §5.2.
+  #
+  # Three static files: the shim Chromium runs for `com.omahouse.meter`, the
+  # extension's own source, and the script that turns that source into a signed
+  # `.crx` on the machine it is being installed on.
+  #
+  # What is **not** in this list is anything that names an extension id -- no
+  # `.crx`, no `updates.xml`, no force-install policy, no native messaging
+  # manifest. There is no id to name at build time, because the key that decides
+  # it does not exist until `post_install` makes one. `meter-pack` writes all
+  # four, and `post_remove` takes them off whether or not this package ever put
+  # them there.
+  #
+  # That also means a file list is no longer the whole of what this package puts
+  # on a machine, which is a real cost of the choice and is why the scriptlet's
+  # removal half is as long as it is.
+  install -Dm755 packaging/omahouse-meter-host "$pkgdir/usr/lib/omahouse/meter-host"
+  install -Dm755 packaging/omahouse-meter-pack "$pkgdir/usr/lib/omahouse/meter-pack"
+  install -Dm644 extension/manifest.json \
+    "$pkgdir/usr/share/omahouse/chromium/omahouse-meter/manifest.json"
+  install -Dm644 extension/background.js \
+    "$pkgdir/usr/share/omahouse/chromium/omahouse-meter/background.js"
 
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"

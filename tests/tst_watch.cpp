@@ -2,6 +2,8 @@
 
 #include "Blocked.h"
 #include "Enforce.h"
+#include "Focus.h"
+#include "FocusFile.h"
 #include "Ledger.h"
 #include "Notify.h"
 #include "Paths.h"
@@ -12,6 +14,9 @@
 
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 
 #include <unistd.h>
@@ -109,6 +114,65 @@ public:
     bool refuse = false;
 };
 
+/// A seat and a screen the suite decides, rather than the ones the machine
+/// running it happens to have.
+///
+/// The same seam `Recorder` and `Bite` are, and here it is what keeps the suite
+/// honest: the machine this runs on has a screen, and a loop whose presence came
+/// from that screen would pass or fail depending on whether somebody had walked
+/// away from the build.
+///
+/// Unread by default, which is a seat nobody looked at and a presence of
+/// `unknown`. That is deliberately the state that writes nothing: every case
+/// here that is about counting time asserts a ledger, and a fake that quietly
+/// added presence seconds to all of them would be a fixture editing the thing
+/// under test.
+class Eyes : public PresenceSource {
+public:
+    SeatReading reading;
+    int looks = 0;
+
+    SeatReading readSeat() override
+    {
+        ++looks;
+        return reading;
+    }
+
+    /// The seat showing `uid` with the screen lit -- somebody at the machine.
+    void showing(uid_t uid)
+    {
+        reading.read = true;
+        reading.occupied = true;
+        reading.uid = uid;
+        reading.screen = ScreenState::On;
+    }
+};
+
+/// The browser's half of the eye, without a browser -- docs/design.md §5.2.
+///
+/// It hands back the bytes of a focus file, which is exactly what the real one
+/// does: the whole of the reasoning about what those bytes mean is pure and
+/// lives in `src/core/Focus.cpp`, so the only thing left to drive here is the
+/// crossing with presence.
+class Tabs : public FocusSource {
+public:
+    QByteArray blob;
+    int reads = 0;
+
+    QByteArray tail(uid_t) override
+    {
+        ++reads;
+        return blob;
+    }
+
+    /// One line, as the native messaging host would have appended it a moment
+    /// ago.
+    void saying(const QString &site, const QDateTime &now, int secondsAgo = 1)
+    {
+        blob = focusLineFor(now.addSecs(-secondsAgo), site);
+    }
+};
+
 QStringList unitsOf(const QVector<Done> &done, Done::What what)
 {
     QStringList units;
@@ -192,10 +256,12 @@ private:
         profile.warnAt = {10, 5, 1};
         profile.graceSeconds = 20;
         profile.budgets = {
-            Budget {QStringLiteral("session"), QStringLiteral("*"), 120, OnExhausted::Logout},
-            Budget {QStringLiteral("chromium"), QStringLiteral("chromium"), 45,
-                    OnExhausted::Close},
-            Budget {QStringLiteral("code"), QStringLiteral("code"), 0, OnExhausted::Warn},
+            Budget {QStringLiteral("session"), {QStringLiteral("*")}, Selects::App, 120,
+                    Resets::Daily, OnExhausted::Logout},
+            Budget {QStringLiteral("chromium"), {QStringLiteral("chromium")}, Selects::App, 45,
+                    Resets::Daily, OnExhausted::Close},
+            Budget {QStringLiteral("code"), {QStringLiteral("code")}, Selects::App, 0,
+                    Resets::Daily, OnExhausted::Warn},
         };
         return profile;
     }
@@ -249,12 +315,21 @@ private slots:
         // and a suite that left this pointed at /etc would be a suite trying to
         // refuse whoever runs it a login.
         qputenv("OMAHOUSE_CONFIG_DIR", QFile::encodeName(m_box + QStringLiteral("/etc")));
+        // And the browser's policy directory, which since the site budget the
+        // loop writes to as well. docs/design.md §11 calls this the refusal with
+        // the shortest fuse: this suite runs on the developer's laptop with the
+        // developer's Chromium open, and a run pointed at /etc/chromium is
+        // somebody's browser taken away in the middle of an afternoon.
+        qputenv("OMAHOUSE_CHROMIUM_POLICY_DIR",
+                QFile::encodeName(m_box + QStringLiteral("/chromium")));
+        QVERIFY(QDir().mkpath(m_box + QStringLiteral("/chromium")));
     }
 
     void cleanupTestCase()
     {
         qunsetenv("OMAHOUSE_STATE_DIR");
         qunsetenv("OMAHOUSE_CONFIG_DIR");
+        qunsetenv("OMAHOUSE_CHROMIUM_POLICY_DIR");
     }
 
     // -- the cycle -----------------------------------------------------------
@@ -262,13 +337,185 @@ private slots:
     // docs/design.md §5 steps 2 to 6, in one turn: the scopes are listed, the budgets
     // with a live app matching them are debited once each, and the day is
     // written.
+// -- the profile for anybody ---------------------------------------------
+    //
+    // Twenty machines and forty rotating customers is forty profiles typed by
+    // hand, and the fortieth is written wrong. A profile whose user is `*`
+    // applies to whoever sits at the machine without one of their own.
+    //
+    // It runs the other way round from every other profile: a named one is a
+    // user and then a uid, and this one has no user to start from, so the cycle
+    // asks the machine who is here. That inversion is the whole cost of it.
+
+    /// A session for some other account, beside the one the fixture makes.
+    void makeSessionFor(uid_t uid)
+    {
+        makeCgroup(QStringLiteral("%1/cgroup/user.slice/user-%2.slice/user@%2.service"
+                                  "/app.slice/app-Hyprland-chromium-1a2b.scope")
+                       .arg(m_box)
+                       .arg(static_cast<qulonglong>(uid)),
+                   3, 5000 + int(uid));
+    }
+
+    void aProfileForAnybodyCoversWhoeverHasNoneOfTheirOwn()
+    {
+        makeSession();
+        // `nobody` and `daemon` exist on every machine and are nobody, so the
+        // case does not depend on who is running it. Root is the administrator,
+        // and it is root rather than a wheel member for the same reason: uid 0
+        // is an administrator on every machine there is, and a case that needed
+        // a wheel group would be a case that skips where there is none.
+        //
+        // **What that costs, said here so nobody reads this case as wider than
+        // it is.** `isAdministrator` answers `true` for uid 0 and returns
+        // before it looks at any group, so what is proved below is that *root*
+        // is left out of the fallback, and not that a member of `wheel` is. The
+        // group half is a `getgrnam_r` and a membership walk, and it is reached
+        // here by nothing.
+        //
+        // It is left that way on purpose. Reaching it needs a real `wheel` with
+        // a real member in it, which is a fact about the machine the suite
+        // happens to run on -- and a case that skipped where there is no wheel
+        // group would trade one vacuity for another, in a suite whose whole
+        // discipline is not accepting green it has not seen red for.
+        uid_t nobodyUid = 0;
+        uid_t daemonUid = 0;
+        QVERIFY(uidForUser(QStringLiteral("nobody"), &nobodyUid));
+        QVERIFY(uidForUser(QStringLiteral("daemon"), &daemonUid));
+        QVERIFY2(nobodyUid != m_uid && daemonUid != m_uid && m_uid != 0,
+                 "this case needs three different accounts and is being run as one of them");
+        // The half that says a fallback is *inherited* rests on `daemon` not
+        // being an administrator. If it were, this case would go red on the
+        // assertion that daemon is watched -- loudly, but pointing at the
+        // fallback when what is wrong is the fixture. Said here so the failure
+        // lands where the cause is.
+        QVERIFY2(!isAdministrator(QStringLiteral("daemon")),
+                 "this machine has `daemon` in wheel, so it cannot stand for somebody a "
+                 "fallback covers");
+        QVERIFY2(!isAdministrator(QStringLiteral("nobody")),
+                 "this machine has `nobody` in wheel, so it cannot stand for somebody with a "
+                 "profile of their own beside a fallback");
+        makeSessionFor(nobodyUid);
+        makeSessionFor(daemonUid);
+        makeSessionFor(0);
+        // A slice with nobody in it: logind leaves `user-<uid>.slice` standing
+        // for a moment after a logout and for good where lingering is on, and
+        // the directory existing is not somebody sitting there.
+        QVERIFY(QDir().mkpath(QStringLiteral("%1/cgroup/user.slice/user-4242.slice")
+                                  .arg(m_box)));
+
+        const Proc reader = proc();
+        // The machine is asked who is here, and it can answer. Everything below
+        // is about which of these the cycle takes up, so a reader that found
+        // none of them would make all of it agree about nothing.
+        const QVector<uid_t> here = reader.accountsWithSessions();
+        QVERIFY2(here.contains(m_uid) && here.contains(nobodyUid)
+                     && here.contains(daemonUid) && here.contains(0),
+                 "the four sessions this case made are not all readable");
+        QVERIFY2(!here.contains(4242),
+                 "a slice with no session in it was counted as somebody sitting there");
+
+        Profile shared;
+        shared.user = anybody();
+        shared.enabled = true;
+        shared.defaultVerdict = Verdict::Allow;
+        Budget session;
+        session.id = QStringLiteral("session");
+        session.match = {QStringLiteral("*")};
+        session.dailyMinutes = 120;
+        shared.budgets = {session};
+
+        // `nobody` gets a profile of their own, and it has to be told apart
+        // from the shared one: without somebody in this position the case
+        // cannot notice a cycle that puts them under both. The account that
+        // already had one is the test runner, who is usually an administrator
+        // and so is filtered out of the fallback anyway -- which is exactly how
+        // the gap hid.
+        Profile theirs;
+        theirs.user = QStringLiteral("nobody");
+        theirs.displayName = QStringLiteral("has one of their own");
+        theirs.enabled = true;
+        theirs.defaultVerdict = Verdict::Allow;
+
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
+        const Cycle cycle = watch.tick({profile(), theirs, shared}, now);
+
+        QSet<QString> watched;
+        for (const Watched &one : cycle.users)
+            watched.insert(one.user);
+
+        // The one with a profile of their own keeps it, and is not in twice.
+        QCOMPARE(cycle.users.size(), 3);
+        QVERIFY2(watched.contains(m_user), qPrintable(m_user));
+        // The one sitting at the machine with no profile of their own.
+        QVERIFY(watched.contains(QStringLiteral("daemon")));
+        // And the one who has their own is under it, once, and not under both.
+        QVERIFY(watched.contains(QStringLiteral("nobody")));
+        int timesNobody = 0;
+        for (const Watched &one : cycle.users) {
+            if (one.user == QLatin1String("nobody")) {
+                ++timesNobody;
+                QCOMPARE(one.displayName, QStringLiteral("has one of their own"));
+            }
+        }
+        QCOMPARE(timesNobody, 1);
+        // And the administrator, who is not. `profile add` refuses to write a
+        // profile for one, so a fallback that caught one would do through the
+        // back door what the verb turns away at the front.
+        QVERIFY2(!watched.contains(QStringLiteral("root")),
+                 "an administrator was put under the rules they write for others");
+        // The profile for anybody is not itself a person and is never watched.
+        QVERIFY(!watched.contains(anybody()));
+
+        // And `daemon` really is under the shared profile: a day is written
+        // for them, under their own name, from budgets they never had.
+        bool checked = false;
+        for (const Watched &one : cycle.users) {
+            if (one.user != QLatin1String("daemon"))
+                continue;
+            checked = true;
+            QVERIFY2(one.account, qPrintable(one.user));
+            QVERIFY2(one.session, qPrintable(one.user));
+            QVERIFY2(one.wrote, qPrintable(one.user + QStringLiteral(": ") + one.error));
+        }
+        QVERIFY2(checked, "the account the shared profile is about was never looked at");
+    }
+
+    // Nobody is caught by a fallback that is not there. Without this the case
+    // above passes on a cycle that watches every session it can see.
+    void withNoProfileForAnybodyOnlyTheNamedAreWatched()
+    {
+        makeSession();
+        uid_t nobodyUid = 0;
+        QVERIFY(uidForUser(QStringLiteral("nobody"), &nobodyUid));
+        makeSessionFor(nobodyUid);
+
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const Cycle cycle = watch.tick({profile()}, QDateTime(QDate(2026, 9, 3), QTime(19, 0)));
+
+        QCOMPARE(cycle.users.size(), 1);
+        QCOMPARE(cycle.users.first().user, m_user);
+    }
+
     void countsOneTickAndWritesTheDay()
     {
         makeSession();
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
 
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         const Cycle cycle = watch.tick({profile()}, now);
@@ -311,7 +558,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {5, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {5, false});
 
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         watch.tick({profile()}, now);
@@ -332,7 +581,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
 
         const Cycle first = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(first.users.first().said.size(), 1);
@@ -370,8 +621,10 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
         recorder.refuse = true;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
 
         const Cycle first = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(first.users.first().said.size(), 1);
@@ -403,7 +656,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const Cycle cycle = watch.tick({observing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
@@ -452,7 +707,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
@@ -496,7 +753,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
@@ -543,7 +802,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
 
         watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(blockedNames(), QStringList({m_user}));
@@ -585,7 +846,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
 
         watch.tick({enforcing}, QDateTime(day, QTime(23, 59, 58)));
         QCOMPARE(blockedNames(), QStringList({m_user}));
@@ -613,7 +876,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
 
         QVERIFY(!cycle.users.first().session);
@@ -638,7 +903,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
         QCOMPARE(blockedNames(), QStringList({m_user}));
 
@@ -671,7 +938,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, true});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, true});
         const Cycle cycle = watch.tick({enforcing}, QDateTime(day, QTime(19, 0, 0)));
 
         const Watched &watched = cycle.users.first();
@@ -694,7 +963,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
 
         const QDate before(2026, 9, 3);
         const QDate after(2026, 9, 4);
@@ -706,6 +977,185 @@ private slots:
         QCOMPARE(readBack(before).secondsFor(QStringLiteral("session")), 2);
         QCOMPARE(readBack(after).secondsFor(QStringLiteral("session")), 2);
         QCOMPARE(readBack(after).date, after);
+    }
+
+    // A budget that never resets has to survive the night, and until this test
+    // was written it did not. `evaluate` carries the pot forward when it is
+    // handed a ledger from another day -- and the loop never hands it one. It
+    // builds the path from `now.date()`, so the first tick after midnight reads
+    // a file that is not there, calls it an empty today, and the turn of the
+    // date is over before `evaluate` is asked about it. The pot went back to
+    // full every night, which is the one thing `resets: never` promises will
+    // not happen. tst_policy's midnight test passes on `evaluate` alone and
+    // could not see this: the defect is in who calls it.
+    void aPotWalksIntoTheNewDayThroughTheLoop()
+    {
+        makeSession();
+        Profile keeping = profile();
+        keeping.budgets = {
+            Budget {QStringLiteral("pot"), {QStringLiteral("chromium")}, Selects::App, 120,
+                    Resets::Never, OnExhausted::Close},
+        };
+
+        const QDate before(2026, 9, 3);
+        const QDate after(2026, 9, 4);
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        watch.tick({keeping}, QDateTime(before, QTime(23, 59, 59)));
+        QCOMPARE(readBack(before).keptSecondsFor(QStringLiteral("pot")), 2);
+
+        watch.tick({keeping}, QDateTime(after, QTime(0, 0, 1)));
+        QCOMPARE(readBack(after).keptSecondsFor(QStringLiteral("pot")), 4);
+
+        // And the daily counter beside it did what it always did: the pot
+        // walking forward is not the whole ledger walking forward.
+        QCOMPARE(readBack(after).secondsFor(QStringLiteral("pot")), 0);
+    }
+
+    // Handing over more time is the only thing that refills a pot, and it died
+    // at midnight while the spending it paid for did not. The turn of the date
+    // carried `keptSeconds` and dropped the grants, so a pot came into the
+    // morning with yesterday's spending against today's smaller allowance --
+    // strictly worse than losing both, because the operator's decision is the
+    // half that vanished.
+    void aGrantOnAPotOutlivesTheNightItWasMadeIn()
+    {
+        makeSession();
+        Profile keeping = profile();
+        keeping.enforce = true;
+        keeping.graceSeconds = 0;
+        keeping.warnAt = {};
+        keeping.budgets = {
+            Budget {QStringLiteral("pot"), {QStringLiteral("chromium")}, Selects::App, 1,
+                    Resets::Never, OnExhausted::Close},
+        };
+
+        const QDate before(2026, 9, 3);
+        const QDate after(2026, 9, 4);
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        // Seventy seconds in one tick spends the whole minute the pot holds.
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {70, false});
+        watch.tick({keeping}, QDateTime(before, QTime(23, 58, 0)));
+        QCOMPARE(readBack(before).keptSecondsFor(QStringLiteral("pot")), 70);
+
+        // Five minutes handed over, which covers the seventy seconds already
+        // spent and leaves the pot with time in it.
+        Ledger refilled = readBack(before);
+        refilled.grants.append(Grant {QDateTime(before, QTime(23, 59, 0)),
+                                      QStringLiteral("howl"), QStringLiteral("pot"), 5, false});
+        QString error;
+        QVERIFY2(writeLedger(ledgerPath(before), refilled, &error), qPrintable(error));
+
+        const Cycle cycle = watch.tick({keeping}, QDateTime(after, QTime(0, 0, 1)));
+        QCOMPARE(readBack(after).keptSecondsFor(QStringLiteral("pot")), 140);
+        QVERIFY2(unitsOf(cycle.users.first().done, Done::What::Terminate).isEmpty(),
+                 "the browser was closed on a pot the operator had refilled the night before");
+    }
+
+    // Which file is the last day is decided by reading the directory, and a
+    // directory is a place other things end up. Two of them would be taken for
+    // a day by a sort alone, and both were until this test was written.
+    //
+    // A name that is not a date sorts wherever its letters put it, and a copy
+    // somebody took of a day sorts directly above the day it was copied from.
+    // Picked up, it does not parse, and `readDay` refuses -- so one stray file
+    // stops the loop counting that person at all, which is a defect that
+    // arrives looking like a broken ledger.
+    //
+    // A day in the future is worse, because it parses. A clock that ran ahead
+    // once leaves a file dated tomorrow, and a pot carried backwards out of it
+    // is a total nobody spent.
+    void theLastDayIsADayAndNotWhateverSortsHighest()
+    {
+        makeSession();
+        Profile keeping = profile();
+        keeping.budgets = {
+            Budget {QStringLiteral("pot"), {QStringLiteral("chromium")}, Selects::App, 120,
+                    Resets::Never, OnExhausted::Close},
+        };
+
+        const QDate before(2026, 9, 3);
+        const QDate today(2026, 9, 4);
+        const QDate ahead(2026, 9, 5);
+
+        Ledger yesterday;
+        yesterday.user = m_user;
+        yesterday.date = before;
+        yesterday.addKeptSeconds(QStringLiteral("pot"), 3600);
+        QString error;
+        QVERIFY2(writeLedger(ledgerPath(before), yesterday, &error), qPrintable(error));
+
+        Ledger tomorrow;
+        tomorrow.user = m_user;
+        tomorrow.date = ahead;
+        tomorrow.addKeptSeconds(QStringLiteral("pot"), 9999);
+        QVERIFY2(writeLedger(ledgerPath(ahead), tomorrow, &error), qPrintable(error));
+
+        const QString stray = QFileInfo(ledgerPath(before)).absolutePath()
+            + QStringLiteral("/2026-09-03-backup.json");
+        QFile note(stray);
+        QVERIFY(note.open(QIODevice::WriteOnly));
+        note.write("nothing a ledger reader could make sense of");
+        note.close();
+
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const Cycle cycle = watch.tick({keeping}, QDateTime(today, QTime(9, 0)));
+
+        QVERIFY2(cycle.users.first().error.isEmpty(), qPrintable(cycle.users.first().error));
+        QCOMPARE(readBack(today).keptSecondsFor(QStringLiteral("pot")), 3602);
+    }
+
+    // The last day being unreadable is the one case this whole lookback exists
+    // to get right, and the tempting answer is the wrong one. A pot whose
+    // previous total cannot be read is not a pot with nothing in it: starting
+    // it from zero hands over everything it had ever counted, silently, to
+    // whoever happens to sit down next -- and it writes that zero into today's
+    // file, so the day that could have been repaired is gone as well.
+    //
+    // So it is said and the person is skipped, which is what the loop already
+    // does for a today it cannot read. Nothing is written and nothing is spent.
+    void aLastDayNobodyCanReadIsNotAnEmptyPot()
+    {
+        makeSession();
+        Profile keeping = profile();
+        keeping.budgets = {
+            Budget {QStringLiteral("pot"), {QStringLiteral("chromium")}, Selects::App, 120,
+                    Resets::Never, OnExhausted::Close},
+        };
+
+        const QDate before(2026, 9, 3);
+        const QDate today(2026, 9, 4);
+        QVERIFY(QDir().mkpath(QFileInfo(ledgerPath(before)).absolutePath()));
+        QFile broken(ledgerPath(before));
+        QVERIFY(broken.open(QIODevice::WriteOnly));
+        broken.write("{\"user\": \"howl\", \"date\":");
+        broken.close();
+
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const Cycle cycle = watch.tick({keeping}, QDateTime(today, QTime(9, 0)));
+
+        QVERIFY2(!cycle.users.first().error.isEmpty(),
+                 "a pot whose last day would not parse was started from zero in silence");
+        QVERIFY2(!QFile::exists(ledgerPath(today)),
+                 "today was written over a pot nobody could read");
     }
 
     // -- the doors that make it safe to run here -----------------------------
@@ -720,7 +1170,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, true});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, true});
         const Cycle cycle = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
 
         // It decided, and it wrote the decision down nowhere.
@@ -742,7 +1194,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         const Cycle cycle = watch.tick({profile()}, now);
 
@@ -760,7 +1214,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const QDateTime now(QDate(2026, 9, 3), QTime(19, 0, 0));
         const Cycle cycle = watch.tick({off}, now);
 
@@ -780,12 +1236,423 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const Cycle cycle = watch.tick({orphan}, QDateTime(QDate(2026, 9, 3), QTime(19, 0, 0)));
 
         QVERIFY(!cycle.users.first().account);
         QVERIFY(!cycle.users.first().session);
         QVERIFY(recorder.notes.isEmpty());
+    }
+
+    // -- presence ------------------------------------------------------------
+
+    // The seat is one thing about one machine, so it is read once and handed to
+    // every profile in the cycle. Three profiles asking `loginctl` three times a
+    // tick would be paying per person for an answer that is not about a person.
+    void theSeatIsReadOncePerCycleAndNotOncePerUser()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+
+        Profile second = profile();
+        second.user = QStringLiteral("omahouse-nobody-4f8ae1c3");
+        const Cycle cycle =
+            watch.tick({profile(), second}, QDateTime(QDate(2026, 9, 3), QTime(19, 0, 0)));
+
+        QCOMPARE(eyes.looks, 1);
+        QCOMPARE(cycle.users.size(), 2);
+        QVERIFY(cycle.seat.read);
+        QCOMPARE(cycle.users.first().presence.reason, Presence::Reason::Using);
+        QVERIFY(cycle.users.first().presence.present);
+    }
+
+    // The day's file gains the presence beside the budgets, and the budgets are
+    // the same either way. This is the whole of what this step promised: the
+    // screen going dark is written down and changes nothing about what an app is
+    // billed -- docs/design.md §5 bills running time, and that is not this
+    // step's to take back.
+    void presenceIsWrittenBesideTheBudgetsAndNeverIntoThem()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const QDate day(2026, 9, 3);
+
+        watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
+        Ledger written = readBack(day);
+        QCOMPARE(written.presenceSecondsFor(QStringLiteral("using")), 2);
+        QCOMPARE(written.secondsFor(QStringLiteral("session")), 2);
+
+        // The screen goes dark with every one of those apps still running. The
+        // presence says so; the session budget goes on being spent exactly as it
+        // was.
+        eyes.reading.screen = ScreenState::Off;
+        const Cycle dark = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 2)));
+        QCOMPARE(dark.users.first().presence.reason, Presence::Reason::ScreenOff);
+        QVERIFY(!dark.users.first().presence.present);
+
+        written = readBack(day);
+        QCOMPARE(written.presenceSecondsFor(QStringLiteral("using")), 2);
+        QCOMPARE(written.presenceSecondsFor(QStringLiteral("screen-off")), 2);
+        QCOMPARE(written.secondsFor(QStringLiteral("session")), 4);
+        QCOMPARE(written.secondsFor(QStringLiteral("chromium")), 4);
+    }
+
+    // The crossing of docs/design.md §5.2, and the case the whole browser half
+    // exists to be able to pass.
+    //
+    // the browser spike measured a browser answering `active`
+    // ninety-four times through thirty minutes of an empty room, with the
+    // monitor physically off for twenty-five of them. A meter that trusted the
+    // browser would bill YouTube all night beside a sleeping child. So the name
+    // comes from the browser and the presence comes from the kernel, and a
+    // second is only billed where the two agree.
+    void aSiteInFrontOfADarkScreenDebitsNothing()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const QDate day(2026, 9, 3);
+
+        const QDateTime lit(day, QTime(19, 0, 0));
+        tabs.saying(QStringLiteral("youtube.com"), lit);
+        const Cycle watching = watch.tick({profile()}, lit);
+        QCOMPARE(watching.users.first().site, QStringLiteral("youtube.com"));
+        QVERIFY(watching.users.first().siteCounted);
+        QCOMPARE(readBack(day).siteSecondsFor(QStringLiteral("youtube.com")), 2);
+
+        // The screen goes dark with the same tab in front, and the browser goes
+        // on saying so -- because it does not know either.
+        eyes.reading.screen = ScreenState::Off;
+        const QDateTime dark(day, QTime(19, 0, 2));
+        tabs.saying(QStringLiteral("youtube.com"), dark);
+        const Cycle nobody = watch.tick({profile()}, dark);
+
+        // Still reported, so the journal can say `youtube.com not counted` and
+        // an operator can see that omahouse knows the difference. Not billed.
+        QCOMPARE(nobody.users.first().site, QStringLiteral("youtube.com"));
+        QVERIFY(!nobody.users.first().siteCounted);
+        QCOMPARE(readBack(day).siteSecondsFor(QStringLiteral("youtube.com")), 2);
+
+        // And the app half is untouched by any of it: the browser scope was
+        // running, so it was billed, screen or no screen. docs/design.md §5 bills
+        // running time and this step does not get to change that.
+        QCOMPARE(readBack(day).secondsFor(QStringLiteral("chromium")), 4);
+    }
+
+    // Every way the file can be wrong is one way: nothing is billed. The
+    // arithmetic of each is the pure suite's; what is asserted here is that the
+    // loop treats them all alike and goes on counting everything else.
+    void aFocusFileThatIsWrongInAnyWayBillsNothing()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const QDate day(2026, 9, 3);
+        QDateTime now(day, QTime(19, 0, 0));
+
+        const QVector<QByteArray> wrong {
+            QByteArray(),                                   // she deleted it
+            QByteArray("nonsense\n"),                        // she filled it with rubbish
+            focusLineFor(now.addSecs(-600), QStringLiteral("youtube.com")),  // it went stale
+            focusLineFor(now.addSecs(600), QStringLiteral("youtube.com")),   // she dated it ahead
+            focusLineFor(now, QString()),                   // nothing is in front
+        };
+        for (const QByteArray &blob : wrong) {
+            tabs.blob = blob;
+            const Cycle cycle = watch.tick({profile()}, now);
+            QVERIFY2(cycle.users.first().site.isEmpty(), blob.constData());
+            QVERIFY(!cycle.users.first().siteCounted);
+            now = now.addSecs(2);
+        }
+        QVERIFY(readBack(day).sites.isEmpty());
+        // And the day went on being counted throughout, which is the half that
+        // makes evading this pointless: she wins anonymity, not minutes.
+        QCOMPARE(readBack(day).secondsFor(QStringLiteral("session")), 10);
+    }
+
+    // A machine with no extension on it -- which is every machine today -- writes
+    // exactly the ledger it has always written.
+    void aCycleWithNoFocusSourceWritesNoSites()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, nullptr, Watch::Options {2, false});
+        const QDate day(2026, 9, 3);
+
+        const Cycle cycle = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
+        QVERIFY(cycle.users.first().site.isEmpty());
+        QVERIFY(readBack(day).sites.isEmpty());
+        QVERIFY(!readBack(day).toJson().contains(QStringLiteral("sites")));
+    }
+
+    // -- a site that runs out ------------------------------------------------
+
+    // The whole cycle of a site budget through the machine: it is spent by the
+    // site in front, it runs out, the domain lands in the browser's own policy
+    // file, and it comes back out at the turn of the day with nothing having
+    // remembered to take it out. That last half is the one worth having: it is
+    // the same discipline `/etc/omahouse/blocked` keeps in docs/design.md §2,
+    // and it is what makes a site limit safe to ship.
+    void aSiteThatRanOutIsBlockedInTheBrowserAndComesBackWithTheDay()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+
+        Profile withASite = profile();
+        withASite.enforce = true;
+        withASite.graceSeconds = 0;
+        Budget site;
+        site.id = QStringLiteral("youtube.com");
+        site.match = {QStringLiteral("youtube.com")};
+        site.selects = Selects::Site;
+        site.dailyMinutes = 1;
+        site.onExhausted = OnExhausted::Block;
+        withASite.budgets.append(site);
+
+        const QString policyFile = paths::chromiumPolicyFile();
+        const QDate day(2026, 9, 3);
+        seedLedger(day, {{QStringLiteral("youtube.com"), 56}});
+
+        // Nearly a minute already spent, and one more tick of it: two seconds
+        // left, which is time left and not time out.
+        const QDateTime lit(day, QTime(19, 0, 0));
+        tabs.saying(QStringLiteral("youtube.com"), lit);
+        Cycle cycle = watch.tick({withASite}, lit);
+        QCOMPARE(readBack(day).secondsFor(QStringLiteral("youtube.com")), 58);
+        QVERIFY2(!QFile::exists(policyFile), "a site with time left was already blocked");
+
+        // The tick that takes it past the minute. The last word goes out, and
+        // with a window of nothing the block lands in the same tick.
+        const QDateTime out(day, QTime(19, 0, 2));
+        tabs.saying(QStringLiteral("youtube.com"), out);
+        cycle = watch.tick({withASite}, out);
+        QCOMPARE(cycle.blockedSites, QStringList {QStringLiteral("youtube.com")});
+        QVERIFY2(QFile::exists(policyFile), "the site ran out and no policy was written");
+
+        QFile written(policyFile);
+        QVERIFY(written.open(QIODevice::ReadOnly));
+        const QJsonObject document =
+            QJsonDocument::fromJson(written.readAll()).object();
+        written.close();
+        QCOMPARE(document.value(QStringLiteral("URLBlocklist")).toArray().size(), 1);
+        QCOMPARE(document.value(QStringLiteral("URLBlocklist")).toArray().at(0).toString(),
+                 QStringLiteral("youtube.com"));
+
+        // Said once, to the person it is about, and in a sentence about a site
+        // rather than about a cgroup.
+        const Done *blocked = firstOf(cycle.users.first().done, Done::What::BlockSite);
+        QVERIFY(blocked);
+        QCOMPARE(blocked->site, QStringLiteral("youtube.com"));
+        QVERIFY(blocked->carriedOut);
+        bool saidIt = false;
+        for (const Recorder::Note &note : recorder.notes)
+            saidIt = saidIt || note.body.contains(QStringLiteral("youtube.com"));
+        QVERIFY2(saidIt, "nothing was said before the site stopped opening");
+
+        // The same cycle again says nothing new: the file is not rewritten and
+        // the journal is not filled with one sentence twelve hundred times an
+        // hour.
+        const QDateTime again(day, QTime(19, 0, 4));
+        tabs.saying(QStringLiteral("youtube.com"), again);
+        cycle = watch.tick({withASite}, again);
+        QVERIFY(!firstOf(cycle.users.first().done, Done::What::BlockSite));
+        QCOMPARE(cycle.blockedSites, QStringList {QStringLiteral("youtube.com")});
+
+        // And the turn of the day. Nothing was asked to undo anything: the
+        // balance resets, so no budget is out, so the file says nothing and is
+        // taken away rather than emptied.
+        const QDateTime tomorrow(QDate(2026, 9, 4), QTime(8, 0, 0));
+        tabs.saying(QStringLiteral("youtube.com"), tomorrow);
+        cycle = watch.tick({withASite}, tomorrow);
+        QVERIFY(cycle.blockedSites.isEmpty());
+        QVERIFY2(!QFile::exists(policyFile),
+                 "the day turned and the site was still blocked, with nothing on the "
+                 "machine that knew how to lift it");
+        const Done *back = firstOf(cycle.users.first().done, Done::What::UnblockSite);
+        QVERIFY(back);
+        QCOMPARE(back->site, QStringLiteral("youtube.com"));
+    }
+
+    // A grant is the other way back, and it is the operator's: ten minutes
+    // handed over with the tab still open, and the site opens again on the next
+    // cycle without anybody touching the browser.
+    void aGrantOpensASiteAgainWithoutTouchingTheBrowser()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+
+        Profile withASite = profile();
+        withASite.enforce = true;
+        withASite.graceSeconds = 0;
+        Budget site;
+        site.id = QStringLiteral("youtube.com");
+        site.match = {QStringLiteral("youtube.com")};
+        site.selects = Selects::Site;
+        site.dailyMinutes = 1;
+        site.onExhausted = OnExhausted::Block;
+        withASite.budgets.append(site);
+
+        const QDate day(2026, 9, 3);
+        seedLedger(day, {{QStringLiteral("youtube.com"), 60}});
+        const QDateTime out(day, QTime(19, 0, 0));
+        tabs.saying(QStringLiteral("youtube.com"), out);
+        watch.tick({withASite}, out);
+        QVERIFY(QFile::exists(paths::chromiumPolicyFile()));
+
+        // The operator hands over ten minutes, into the day's own file.
+        Ledger day3 = readBack(day);
+        Grant more;
+        more.at = out;
+        more.by = QStringLiteral("howl");
+        more.budget = QStringLiteral("youtube.com");
+        more.minutes = 10;
+        day3.grants.append(more);
+        QString error;
+        QVERIFY2(writeLedger(ledgerPath(day), day3, &error), qPrintable(error));
+
+        const QDateTime after(day, QTime(19, 0, 2));
+        tabs.saying(QStringLiteral("youtube.com"), after);
+        const Cycle cycle = watch.tick({withASite}, after);
+        QVERIFY(cycle.blockedSites.isEmpty());
+        QVERIFY2(!QFile::exists(paths::chromiumPolicyFile()),
+                 "ten minutes were handed over and the site was still shut");
+    }
+
+    // The refusal of docs/design.md §11, from the loop's side. A run whose
+    // configuration is a tree of its own does not rewrite the machine's own
+    // browser policy -- and it says so rather than failing quietly, because the
+    // suite that would find this is running on the developer's laptop with the
+    // developer's Chromium open.
+    void aBrowserPolicyThatIsNotThisRunsIsNeverWritten()
+    {
+        makeSession();
+        // The machine's own directory, with a configuration that is not the
+        // machine's own: the exact combination the refusal is for.
+        qunsetenv("OMAHOUSE_CHROMIUM_POLICY_DIR");
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+
+        Profile withASite = profile();
+        withASite.enforce = true;
+        withASite.graceSeconds = 0;
+        Budget site;
+        site.id = QStringLiteral("youtube.com");
+        site.match = {QStringLiteral("youtube.com")};
+        site.selects = Selects::Site;
+        site.dailyMinutes = 1;
+        site.onExhausted = OnExhausted::Block;
+        withASite.budgets.append(site);
+
+        const QDate day(2026, 9, 3);
+        seedLedger(day, {{QStringLiteral("youtube.com"), 60}});
+        const QDateTime out(day, QTime(19, 0, 0));
+        tabs.saying(QStringLiteral("youtube.com"), out);
+        const Cycle cycle = watch.tick({withASite}, out);
+
+        QVERIFY(cycle.blockedSites.isEmpty());
+        QVERIFY2(!cycle.blockedSitesError.isEmpty(),
+                 "the browser policy was left alone and nothing said so");
+        QVERIFY(cycle.blockedSitesError.contains(paths::chromiumPolicyDir()));
+        const Done *refused = firstOf(cycle.users.first().done, Done::What::BlockSite);
+        QVERIFY(refused);
+        QVERIFY(!refused->carriedOut);
+        qputenv("OMAHOUSE_CHROMIUM_POLICY_DIR",
+                QFile::encodeName(m_box + QStringLiteral("/chromium")));
+    }
+
+    // A loop that was never given eyes must say it cannot see. Nothing is
+    // written about presence at all, because an hour of `unknown` in the day's
+    // file is an hour of somebody's afternoon described as a failure to look.
+    void aCycleWithNoPresenceSourceWritesNoPresence()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, nullptr, &tabs, Watch::Options {2, false});
+        const QDate day(2026, 9, 3);
+
+        const Cycle cycle = watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)));
+        QCOMPARE(cycle.users.first().presence.reason, Presence::Reason::Unknown);
+        QVERIFY(!cycle.seat.read);
+
+        const Ledger written = readBack(day);
+        QVERIFY(written.presence.isEmpty());
+        QCOMPARE(written.secondsFor(QStringLiteral("session")), 2);
+    }
+
+    // A screen going dark is a change of shape and gets its line. Without it,
+    // the journal of an evening where somebody walked away at eight reads
+    // exactly like the journal of an evening where they did not.
+    void aChangeOfPresenceIsWorthALine()
+    {
+        makeSession();
+        const Proc reader = proc();
+        Recorder recorder;
+        Bite teeth;
+        Eyes eyes;
+        Tabs tabs;
+        eyes.showing(m_uid);
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
+        const QDate day(2026, 9, 3);
+
+        QVERIFY(watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)))
+                    .users.first()
+                    .worthSaying);
+        QVERIFY(!watch.tick({profile()}, QDateTime(day, QTime(19, 0, 2)))
+                     .users.first()
+                     .worthSaying);
+
+        eyes.reading.screen = ScreenState::Off;
+        QVERIFY(watch.tick({profile()}, QDateTime(day, QTime(19, 0, 4)))
+                    .users.first()
+                    .worthSaying);
     }
 
     // -- the journal ---------------------------------------------------------
@@ -801,7 +1668,9 @@ private slots:
         const Proc reader = proc();
         Recorder recorder;
         Bite teeth;
-        Watch watch(&reader, &recorder, &teeth, Watch::Options {2, false});
+        Eyes eyes;
+        Tabs tabs;
+        Watch watch(&reader, &recorder, &teeth, &eyes, &tabs, Watch::Options {2, false});
         const QDate day(2026, 9, 3);
 
         QVERIFY(watch.tick({profile()}, QDateTime(day, QTime(19, 0, 0)))

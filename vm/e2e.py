@@ -22,7 +22,13 @@ The binary under test is built from the working tree every run and installed on
 the guest. It is the artefact being tested; a copy frozen into the image would
 be testing last week.
 
-    python3 vm/e2e.py                 every case, then shut the machine down
+Every duration this suite waits on comes out of `vm/manifest.toml`, under one of
+two regimes. `quick` is the default and is what somebody types forty times in an
+afternoon; `long` is explicit and holds the windows that catch what only shows
+with time. There is one knob and it is `--pace`.
+
+    python3 vm/e2e.py                 every case, quick, then shut the machine down
+    python3 vm/e2e.py --pace long     the same cases with the long windows
     python3 vm/e2e.py --keep          leave it running, for looking at
     python3 vm/e2e.py --case grace    one case, by a piece of its name
 """
@@ -33,8 +39,10 @@ import os
 import re
 import shlex
 import socket
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 from pathlib import Path
@@ -75,17 +83,218 @@ class VM:
     Failed = Failed
     Blocked = Blocked
 
-    def __init__(self, manifest):
+    def __init__(self, manifest, machine, pace):
         self.manifest = manifest
-        self.domain = manifest["domain"]["name"]
-        self.uri = manifest["domain"]["uri"]
-        self.hostname = manifest["domain"]["hostname"]
-        self.key = str(Path(manifest["access"]["key"]).expanduser())
-        self.operator = manifest["access"]["operator"]
-        self.subject = manifest["subject"]["user"]
-        self.uid = manifest["subject"]["uid"]
+        self._peers = []
+        # Which of the two machines this run is about. `poc` is disposable and is
+        # where the teeth are exercised; `omarchy` is the owner's demonstration
+        # machine and is put back exactly as it was found.
+        self.machine = machine
+        self.about = manifest["machines"][machine]
+        # Every second this run is willing to wait, and every second of budget it
+        # will seed. One dictionary, chosen once by `--pace`, and no case holds a
+        # duration of its own.
+        self.pace = pace
+        self.domain = self.about["name"]
+        self.uri = self.about["uri"]
+        self.hostname = self.about["hostname"]
+        self.key = str(Path(self.about["key"]).expanduser())
+        self.operator = self.about["operator"]
+        self.subject = self.about["subject"]
+        self.uid = self.about["uid"]
+        self.disposable = self.about["disposable"]
         self.address = None
         self.log = []
+        # What was on the machine before this run touched it, for a machine that
+        # is not disposable. Filled by `remember_the_state` and undone by
+        # `put_the_state_back`.
+        self.remembered = None
+
+    def peer(self, machine):
+        """A second machine, brought up beside this one and shut down with it.
+
+        For the cases that are about two computers rather than about one. It is
+        proved and started exactly the way the first is: a case that reached a
+        machine without the manifest's four checks would be a case that could one
+        day reach the developer's own.
+
+        Only a disposable peer, deliberately. A case that wanted the owner's
+        demonstration VM as a bit part would be a case that could leave it
+        changed, and `put_the_state_back` belongs to the machine a run is *about*
+        rather than to whatever it borrowed along the way.
+        """
+        if machine not in self.manifest["machines"]:
+            raise Blocked(f"no machine called {machine!r} in the manifest")
+        other = VM(self.manifest, machine, self.pace)
+        if not other.disposable:
+            raise Blocked(f"{machine} is not disposable and cannot be a peer")
+        other.prove_it_is_the_right_machine()
+        other.start()
+        self._peers.append(other)
+        other.refuse_if_a_case_was_here_before()
+        return other
+
+    def shutdown_peers(self):
+        """Every machine a case borrowed, reset and shut down."""
+        for other in self._peers:
+            try:
+                other.reset()
+            except Exception as problem:  # noqa: BLE001 -- cleanup is best effort
+                say(f"  could not reset {other.domain}: {problem}")
+            other.shutdown()
+        self._peers = []
+
+    @property
+    def battery_checkout(self):
+        """The omahouse Battery from the checkout beside this one.
+
+        A path, never a clone from GitHub, for the same reason the omakure
+        binary is a path: a case that pulled the published Battery would be
+        testing whatever was pushed last rather than the scripts on this disk,
+        and the two are different exactly when it matters.
+        """
+        here = ROOT.parent / "omahouse-battery"
+        if not (here / "omakure-battery.toml").exists():
+            raise Blocked(f"{here} is not a Battery checkout")
+        return here
+
+    def fresh_omakure(self):
+        """An Omakure on this machine with no identity and no state.
+
+        The parts the shipped installer would do -- the service account, the
+        directories, their modes -- done here because that installer will only
+        provision the service alongside a tokens file that already holds hashed
+        entries, and the entries are made by the node it is about to start.
+
+        From nothing, every time. `node init` refuses to replace an identity, so
+        a half-made one from an earlier attempt is a machine that can never be
+        initialised again. That state belongs to the suite rather than to the
+        machine, which is what makes wiping it honest here and wrong anywhere
+        else.
+        """
+        self.put(str(self.omakure_binary), "/tmp/omakure")
+        self.ssh("chmod +x /tmp/omakure")
+        self.root("install -m 0755 /tmp/omakure /usr/local/bin/omakure")
+        self.root("sh -c 'getent group omakure >/dev/null || groupadd --system omakure'")
+        self.root("sh -c 'id omakure >/dev/null 2>&1 || useradd --system --gid omakure "
+                  "--home-dir /var/lib/omakure-workspace --shell /usr/sbin/nologin "
+                  "omakure'")
+        self.root("systemctl disable --now omakure-node.service", check=False)
+        # Bracketed, or `pkill -f` matches the very shell running it.
+        self.root("pkill -f 'omakure node[ ]serve' || true", check=False)
+        self.root("rm -rf /etc/systemd/system/omakure-node.service "
+                  "/etc/systemd/system/omakure-node.service.d /etc/omakure "
+                  "/var/lib/omakure /var/lib/omakure-workspace")
+        self.root("systemctl daemon-reload", check=False)
+        self.root("mkdir -p /etc/omakure /var/lib/omakure /var/lib/omakure-workspace")
+        self.root("chown -R omakure:omakure /var/lib/omakure /var/lib/omakure-workspace")
+        self.root("chmod 0700 /var/lib/omakure")
+        self.root("chmod 0750 /var/lib/omakure-workspace")
+
+    def serve_a_repository(self, packages, name="omahouse-suite"):
+        """A pacman repository on this machine, holding the packages given.
+
+        So that `pacman -S omahouse` is a real install with real dependency
+        resolution, on a machine that has no `omarchy` repository configured and
+        no network to reach one. It stands in for the shelf a household would
+        have, and it is the only honest way to prove the install that
+        `omahouse machine link` performs: a case that reached around pacman
+        would be proving nothing about the package manager.
+
+        `SigLevel = Never`, because these packages are built by this suite
+        seconds earlier and signing them would be signing our own homework with
+        a key the guest would then have to trust.
+        """
+        root = f"/var/cache/{name}"
+        # `sh -c` around anything with a `&&` in it: `sudo a && b` puts only `a`
+        # under sudo, and the second half then fails on a directory root has
+        # just made.
+        self.root(f"sh -c 'rm -rf {root} && mkdir -p {root}'")
+        for package in packages:
+            self.put(str(package), f"/tmp/{package.name}")
+            self.root(f"mv /tmp/{package.name} {root}/")
+            # And any copy pacman already has under that name. These are built
+            # fresh every run with the same version, so a cached one from a
+            # previous run has the right name and the wrong bytes -- which
+            # pacman reports as `invalid or corrupted package (checksum)`,
+            # reading like a broken build and meaning a stale cache.
+            self.root(f"rm -f /var/cache/pacman/pkg/{package.name}", check=False)
+        self.root(f"sh -c 'cd {root} && repo-add {name}.db.tar.gz *.pkg.tar.*'")
+        # Written once and never twice: a second `[name]` section makes pacman
+        # refuse the whole file.
+        self.root(f"sh -c \"grep -q '^\\[{name}\\]' /etc/pacman.conf || "
+                  f"printf '\\n[{name}]\\nSigLevel = Never\\nServer = file://{root}\\n' "
+                  ">> /etc/pacman.conf\"")
+        self.root("pacman -Sy --noconfirm", timeout=300)
+        return root
+
+    def put_the_battery(self):
+        """The Battery from this disk, in a place the node's account can add."""
+        self.root("rm -rf /tmp/battery && mkdir -p /tmp/battery")
+        for path in sorted(self.battery_checkout.iterdir()):
+            if path.is_file():
+                self.put(str(path), f"/tmp/battery/{path.name}")
+        # A Battery is a git repository to Omakure, so it has to be one here.
+        self.ssh("command -v git >/dev/null || sudo pacman -S --noconfirm --needed git",
+                 timeout=300, check=False)
+        self.ssh("cd /tmp/battery && git init -q -b master && git add -A && "
+                 "git -c user.email=vm@omahouse -c user.name=vm commit -qm battery")
+        # Owned by the account that will clone it. Git refuses to read a
+        # repository owned by somebody else -- "detected dubious ownership" --
+        # and it is right to: the node's account is about to run what is in it.
+        self.root("chown -R omakure:omakure /tmp/battery")
+        self.root("chmod -R a+rX /tmp/battery")
+        return "/tmp/battery"
+
+    @property
+    def built_package(self):
+        """The omahouse package, built once per run and remembered.
+
+        A property rather than a step in the run, because only the cases that
+        install through pacman need it and `makepkg` is twenty seconds nobody
+        else should pay.
+        """
+        global _built_package
+        if _built_package is None:
+            _built_package = build_the_package()
+        return _built_package
+
+    @property
+    def built_omakure_package(self):
+        global _built_omakure_package
+        if _built_omakure_package is None:
+            _built_omakure_package = build_the_omakure_package(self.omakure_binary)
+        return _built_omakure_package
+
+    @property
+    def build_binary(self):
+        """The omahouse this run is about, from `build/bin`.
+
+        The suite installs it on the machine under test before any case runs. A
+        case that needs it on a *second* machine -- the operator's, in the
+        pairing cases -- asks for the path here rather than knowing it, so that
+        both copies are always the same build.
+        """
+        built = ROOT / "build" / "bin" / "omahouse"
+        if not built.exists():
+            raise Blocked(f"{built} is not built. Run mise run build")
+        return built
+
+    @property
+    def omakure_binary(self):
+        """The statically linked omakure built from the checkout beside this one.
+
+        A path, never a download. The spike is about the code on this machine,
+        and a release fetched from anywhere would be testing somebody else's
+        build. musl because the guest's glibc is not this one's.
+        """
+        built = (ROOT.parent / "omakure" / "target" / "x86_64-unknown-linux-musl"
+                 / "release" / "omakure")
+        if not built.exists():
+            raise Blocked(
+                f"{built} is not built. In the omakure checkout run\n"
+                "    cargo build --release --target x86_64-unknown-linux-musl")
+        return built
 
     # -- libvirt ------------------------------------------------------------
 
@@ -106,7 +315,7 @@ class VM:
                 "        script that built it.")
 
         disks = self.virsh("domblklist", self.domain)
-        expected = self.manifest["domain"]["disk"]
+        expected = self.about["disk"]
         if expected not in disks:
             raise Blocked(
                 f"{self.domain} is not running from {expected}.\n"
@@ -117,7 +326,8 @@ class VM:
         if not Path(self.key).exists():
             raise Blocked(f"there is no ssh key at {self.key}")
 
-    def start(self, timeout=180):
+    def start(self, timeout=None):
+        timeout = timeout or self.pace["boot_seconds"]
         if "running" not in self.virsh("domstate", self.domain):
             say(f"  starting {self.domain}")
             self.virsh("start", self.domain)
@@ -163,7 +373,10 @@ class VM:
     def shutdown(self):
         say(f"  shutting {self.domain} down")
         self.virsh("shutdown", self.domain, check=False)
-        deadline = time.time() + 90
+        # Not a window this suite is about -- nothing is being proved while a
+        # machine powers off -- so it takes the regime's ordinary patience and
+        # pulls the plug after it.
+        deadline = time.time() + self.pace["patience_seconds"]
         while time.time() < deadline:
             if "shut off" in self.virsh("domstate", self.domain, check=False):
                 return True
@@ -185,10 +398,10 @@ class VM:
             command,
         ]
 
-    def ssh(self, command, check=True, timeout=120):
+    def ssh(self, command, check=True, timeout=120, stdin=None):
         if self.address is None:
             raise Blocked("no address yet")
-        done = run(self._ssh_argv(command), timeout=timeout)
+        done = run(self._ssh_argv(command), timeout=timeout, input=stdin)
         self.log.append((command, done.returncode, done.stdout, done.stderr))
         if check and done.returncode != 0:
             raise Failed(
@@ -259,8 +472,19 @@ class VM:
                          check=False)[1]
         return [line for line in found.split() if line.strip()]
 
-    def pid_of(self, name):
-        rc, out = self.ssh(f"pgrep -u {self.subject} -x {shlex.quote(name)}", check=False)
+    def pid_of(self, name, user=None):
+        """A process of `user`'s, the subject's by default.
+
+        The default is the subject because almost everything here is about the
+        account under rules. `user` is for the one thing that is not: on this
+        machine the greeter's own compositor is Hyprland running as `sddm`, and
+        a session belongs to whoever SDDM let through -- so "is there a session"
+        has to name whose, or it asks about julia while howl is the one logging
+        in and answers no forever.
+        """
+        who = user or self.subject
+        rc, out = self.ssh(f"pgrep -u {shlex.quote(who)} -x {shlex.quote(name)}",
+                           check=False)
         return out.split()[0] if rc == 0 and out.split() else None
 
     def session_slice_pids(self):
@@ -298,8 +522,20 @@ class VM:
         return self.ssh("date +%F").strip()
 
     def journal(self, since=None, unit="omahouse"):
-        when = f"--since '{since}'" if since else "--no-pager -n 200"
-        return self.root(f"journalctl -u {unit} {when} --no-pager", check=False)[1]
+        """What the unit said, since this case started the daemon.
+
+        Since, and not the whole boot. A case that asserts a line is *absent* --
+        "the polite app was never cgroup.killed" -- was asserting it about
+        everything that had ever happened on the machine, so one earlier run of
+        the same case in the same boot made the next one fail on a line it did
+        not write. The `--keep` runs that made it look like load are what
+        surfaced it: a machine left up carries its journal with it.
+        """
+        when = since or getattr(self, "_daemon_started", None)
+        if when:
+            return self.root(f"journalctl -u {unit} --since '{when}' --no-pager",
+                             check=False)[1]
+        return self.root(f"journalctl -u {unit} -n 200 --no-pager", check=False)[1]
 
     # -- driving it ---------------------------------------------------------
 
@@ -316,7 +552,7 @@ class VM:
         self.julia(
             f"setsid --fork sh -c 'cd /tmp && exec uwsm app -- /usr/local/bin/{app} {args}' "
             "</dev/null >/dev/null 2>&1", check=False)
-        for _ in range(20):
+        for _ in range(self.pace["patience_seconds"] * 2):
             time.sleep(0.5)
             new = set(self.scopes()) - before
             if new:
@@ -324,25 +560,108 @@ class VM:
         raise Failed(f"{app} never took a scope of its own under app.slice")
 
     def start_daemon(self):
+        # The guest's own clock, taken before the restart, so `journal()` can
+        # answer about this run rather than about the boot.
+        self._daemon_started = self.ssh("date '+%Y-%m-%d %H:%M:%S'").strip()
         self.root("systemctl restart omahouse.service")
 
     def stop_daemon(self):
         self.root("systemctl stop omahouse.service", check=False)
 
+    def refuse_if_a_case_was_here_before(self):
+        """A borrowed machine that a previous run left rules on, said out loud.
+
+        `shutdown_peers` resets a peer on the way out, so a run that finishes
+        leaves it clean. A run that *dies* -- a case that raised, a suite that
+        was interrupted -- does not get there, and the peer stays dirty and
+        running. The next run then fails somewhere far from the cause: the real
+        one said
+
+            FAIL  sudo omahouse profile add julia --name Julia
+            profile add: julia already has a profile
+
+        which sends whoever reads it to look at `profile add`, and `profile add`
+        is right. **A failure that points at the wrong place is worse than a
+        failure**, and this is a whole afternoon of somebody's life.
+
+        Refused rather than cleaned. Resetting here would be this function
+        deciding that whatever is on the machine does not matter, which is a
+        thing `--keep` exists to let somebody disagree with: a peer is left
+        standing on purpose when a person wants to look at it. Failing in the
+        right place solves the whole problem; tidying up is comfort on top, and
+        comfort that deletes is not comfort.
+        """
+        if not self.disposable:
+            return
+        # `|| true` and not `check=False`: an unchecked ssh gives back a tuple
+        # rather than the output, and a missing directory is an ordinary answer
+        # here and not a failure.
+        left = self.root("ls -A /etc/omahouse 2>/dev/null || true").strip()
+        if not left:
+            return
+        raise Blocked(
+            f"{self.domain} still has {' '.join(left.split())} under /etc/omahouse from "
+            "an earlier run that did not finish. Peers are reset on the way out, so a "
+            "dirty one means a suite that died. Run `vm/run.sh` to completion or reset "
+            "it by hand before borrowing it again.")
+
     def reset(self):
-        """A machine with no rules on it and nobody shut out.
+        """A machine with no rules on it, nobody shut out, and no fleet identity.
 
         Between cases and never inside one. The `blocked` goes first, because a
         case that left a name in it would be a case that stopped the next one
         from ever logging in.
         """
+        if not self.disposable:
+            # The owner's machine. Its profile is the one it demonstrates from
+            # and its ledger is a record; neither is this suite's to empty. What
+            # a case leaves behind here is undone by `put_the_state_back`, from a
+            # copy taken before anything ran.
+            raise Blocked(f"{self.domain} is not disposable, and reset() empties "
+                          "/etc/omahouse and /var/lib/omahouse")
         self.stop_daemon()
-        self.root("rm -f /etc/omahouse/blocked /etc/omahouse/profiles.json")
+        # Everything under /etc/omahouse, and not a list of names.
+        #
+        # It was a list, and the list drifted twice. `machine.json` and
+        # `machine-tokens.json` went missing from it and the peer guard found
+        # them the first time it ran; then `staged/` did the same, and that one
+        # is worse -- it is a directory, so no `rm -f` of file names was ever
+        # going to reach it, and a run that *finished cleanly* left the peer
+        # dirty for the next one. The suite then blocked on its own leftovers
+        # and pointed at the machine rather than at this line.
+        #
+        # The guard next door refuses a peer whose /etc/omahouse is not empty,
+        # so that is the condition, and this is now exactly it rather than an
+        # approximation of it that somebody has to keep current. A new file
+        # omahouse learns to write is covered the day it is written.
+        self.root("rm -rf /etc/omahouse/* /etc/omahouse/.[!.]*", check=False)
         self.root("rm -rf /var/lib/omahouse/*")
+        # And no fleet identity either. Pairing is an omahouse verb now, and it
+        # leaves a service running, a unit, a trust registry and a 0700 secrets
+        # directory. A case that wipes that state while the service still holds
+        # it open gets `registry_invalid` from then on -- so the service goes
+        # first, and the state after.
+        self.root("systemctl disable --now omakure-node.service", check=False)
+        # Every omakure, by name and not by command line. Two cases bind an
+        # API on the same port, and one that outlived its case is the next
+        # case's `--bind` failing with the port already taken -- which surfaces
+        # as an empty answer from a machine that looks perfectly healthy.
+        #
+        # By name, because `pkill -f` matches every command line including the
+        # shell sudo started to run this one: the pattern form kills its own ssh
+        # session, the rest of the reset never runs, and the case after meets a
+        # machine nobody cleaned and a connection that timed out.
+        self.root("pkill -x omakure || true", check=False)
+        self.root("rm -rf /etc/systemd/system/omakure-node.service "
+                  "/etc/systemd/system/omakure-node.service.d /etc/omakure "
+                  "/var/lib/omakure /var/lib/omakure-workspace "
+                  "/etc/sudoers.d/omahouse-node", check=False)
+        self.root("systemctl daemon-reload", check=False)
         self.root(f"pkill -9 -u {self.subject} -f 'uwsm app|/usr/local/bin/omahouse-' "
                   "|| true", check=False)
         self.root(f"pkill -9 -u {self.subject} -x sleep || true", check=False)
-        self.wait_for(lambda: not self.scopes(), 20, "the app scopes to go")
+        self.wait_for(lambda: not self.scopes(), self.pace["patience_seconds"],
+                      "the app scopes to go")
         # And a session again. `logout_blocks_the_way_back` ends the one that
         # was there and the tty1 autologin brings up a new one, which takes the
         # notification daemon with it -- so every case starts from a session that
@@ -384,13 +703,29 @@ class VM:
                     "open(p,'w').write(json.dumps(d, indent=2))\n"))
         self.root(f"omahouse profile enforce {self.subject} --on")
 
+    def whole_minutes(self, seconds):
+        """The smallest whole-minute limit that can leave `seconds` on the clock.
+
+        /etc/omahouse/profiles.json holds whole minutes -- docs/design.md §4 --
+        and the regimes of `vm/manifest.toml` are counted in seconds. These two
+        methods are where they meet, and they are here rather than in each case
+        so that a regime asking for more than a minute cannot quietly produce a
+        negative amount already spent.
+        """
+        return max(1, -(-seconds // 60))
+
+    def already_spent(self, seconds):
+        """What today has to have on it for `seconds` to be left of that limit."""
+        return self.whole_minutes(seconds) * 60 - seconds
+
     def seed_ledger(self, spent):
         """A day that has already been going on for a while.
 
         The limits in profiles.json are whole minutes, and the cases want
-        budgets of forty and fifteen seconds. This is how the two meet: a one
-        minute budget with twenty seconds already on it has forty seconds left,
-        and it is the same shape as a machine that has been on since lunch.
+        budgets of seconds. `whole_minutes` and `already_spent` above are how the
+        two meet: a one minute budget with fifty-two seconds already on it has
+        eight seconds left, and it is the same shape as a machine that has been
+        on since lunch.
         """
         day = self.today()
         document = json.dumps({
@@ -404,6 +739,142 @@ class VM:
         self.root(f"install -d -m 0755 /var/lib/omahouse/{self.subject}")
         self.root("tee /var/lib/omahouse/%s/%s.json > /dev/null <<'OMAHOUSE_LEDGER'\n%s\n"
                   "OMAHOUSE_LEDGER" % (self.subject, day, document))
+
+    # -- putting a machine that is not disposable back ----------------------
+
+    def remember_the_state(self):
+        """Everything this run is about to change, as bytes, before it changes.
+
+        Only for a machine that is not disposable. The VM runbook
+        restores the demonstration VM by retyping the verbs that made it, which
+        is a restoration of what somebody remembered to write down; this is the
+        file. A profile put back byte for byte is a profile that cannot come back
+        subtly different from the one the owner demonstrates with.
+        """
+        self.remembered = {
+            "profiles": self.root("cat /etc/omahouse/profiles.json 2>/dev/null || true",
+                                  check=False)[1],
+            "ledger": self.root(
+                f"cat /var/lib/omahouse/{self.subject}/{self.today()}.json 2>/dev/null "
+                "|| true", check=False)[1],
+            "sddm": self.root("cat /var/lib/sddm/state.conf 2>/dev/null || true",
+                              check=False)[1],
+        }
+        # The binary is the one thing here that is **not** put back, and that is
+        # the point of writing it down. `/usr/bin/omahouse` is the artefact under
+        # test: every run installs the build from the working tree over whatever
+        # was there, exactly as the disposable machine's `deploy` does, because a
+        # run against last week's binary proves nothing about this week's. What a
+        # run must not do is replace it in silence -- which is how this machine
+        # came to be carrying an unpackaged build that nothing on it could name.
+        # So the version and the hash of what was found are said out loud, and
+        # `put_the_state_back` says what is being left in its place.
+        self.remembered["binary"] = self.binary_on_the_machine()
+        say(f"  the binary that was here: {self.remembered['binary']}")
+
+    def binary_on_the_machine(self):
+        """What `/usr/bin/omahouse` is right now, in one line somebody can quote."""
+        said = self.ssh(
+            "omahouse --version 2>/dev/null | head -1; "
+            "sha256sum /usr/bin/omahouse 2>/dev/null | cut -c1-12; "
+            "pacman -Qo /usr/bin/omahouse 2>&1 | tail -1", check=False)[1]
+        return " · ".join(line.strip() for line in said.splitlines() if line.strip())
+
+    def put_the_state_back(self):
+        """The copy above, and everything this run installed, taken off again.
+
+        Best effort and loud about what it could not do: a machine left half
+        restored is worse than one nobody touched, so what failed has to be
+        readable rather than swallowed.
+        """
+        if self.remembered is None:
+            return
+        say("  putting the machine back")
+        self.stop_daemon()
+
+        # The site block of docs/design.md §11, which is the one browser file
+        # here that no package ever writes: the daemon writes it at run time when
+        # a site budget runs out, and only a running daemon knows how to take a
+        # domain back out of it. A machine put back with a site still blocked and
+        # nothing counting on it is exactly the failure §11 refuses.
+        #
+        # The **meter's** four files are deliberately not on this list any more.
+        # They are the package's, made by its scriptlet, and they are removed the
+        # way a household removes them -- by `pacman -R`, which is what
+        # `the_package_installs_the_meter` proves and what the message at the end
+        # of this method points at. Stripping them by hand while leaving the
+        # package installed would leave the machine in a state no install and no
+        # removal ever produces, which is a worse thing to hand back than either.
+        self.root("rm -f /etc/chromium/policies/managed/omahouse.json", check=False)
+        self.root(f"pkill -u {self.subject} -x chromium || true", check=False)
+        self.root(f"rm -rf /run/user/{self.uid}/omahouse", check=False)
+
+        # The virtual keyboard, which is a test tool and does not stay.
+        self.root("systemctl stop ydotoold; systemctl reset-failed ydotoold; "
+                  "rm -f /run/ydotoold.socket", check=False)
+        self.root("pacman -Rns --noconfirm ydotool", check=False)
+
+        # And the state, from the copy. `blocked` goes first, because a name left
+        # in it is somebody locked out of the machine.
+        self.root("rm -f /etc/omahouse/blocked", check=False)
+        for what, path in (
+                ("profiles", "/etc/omahouse/profiles.json"),
+                ("ledger", f"/var/lib/omahouse/{self.subject}/{self.today()}.json"),
+                ("sddm", "/var/lib/sddm/state.conf"),
+        ):
+            was = self.remembered.get(what, "")
+            if was.strip():
+                self.root("tee %s > /dev/null <<'OMAHOUSE_WAS'\n%s\nOMAHOUSE_WAS"
+                          % (path, was.rstrip("\n")), check=False)
+            else:
+                self.root(f"rm -f {path}", check=False)
+
+        # The session this run logged in, ended, so the greeter is what the next
+        # person sees -- which is where the machine was found.
+        self.root(f"loginctl terminate-user {self.subject} || true", check=False)
+        self.root("systemctl restart sddm", check=False)
+
+        # A case may have removed the package on purpose -- `pacman -R` is half of
+        # what the browser half has to prove -- and one that failed part way
+        # through the removal leaves this machine with no omahouse on it at all.
+        # It is the owner's demonstration VM and it is not handed back stripped,
+        # so it is put back with the very bytes this run installed.
+        if getattr(self, "the_package", None) and \
+                self.ssh("test -x /usr/bin/omahouse", check=False)[0] != 0:
+            say("  a case left this machine with no omahouse on it; installing it again")
+            self.install_the_package()
+
+        # And the one thing left changed on purpose, named rather than left for
+        # somebody to find. See `remember_the_state`.
+        #
+        # It is now a **package** and not a loose binary, which is the difference
+        # that makes leaving it defensible: `pacman -Qo` answers, `pacman -R`
+        # undoes it, and the meter it forced into Chromium comes off with it.
+        # Before, this machine was left carrying a file nothing on it could name.
+        say(f"  the package left on the machine: {self.binary_on_the_machine()}")
+        say("  everything it put in Chromium comes off with `pacman -R omahouse`")
+
+    # -- typing at it -------------------------------------------------------
+    #
+    # Only the machine with a greeter has these, and only because there is no
+    # keyboard on the far side of an ssh. The VM runbook is where
+    # the key codes come from: `<keycode>:<1 down|0 up>`, modifier down first and
+    # up last, nesting closing from the inside out.
+
+    def keyboard(self):
+        """A virtual keyboard on this machine's own seat. See `keyboard()` below."""
+        keyboard(self)
+
+    def press(self, keys):
+        self.root("env YDOTOOL_SOCKET=/run/ydotoold.socket ydotool key " + keys,
+                  check=False)
+
+    def type_text(self, text):
+        # `--key-delay 25` because the default sends events faster than some text
+        # boxes read them, and 25 ms was measured getting through SDDM's whole
+        # password field without losing a key.
+        self.root("env YDOTOOL_SOCKET=/run/ydotoold.socket ydotool type --key-delay 25 "
+                  + shlex.quote(text), check=False)
 
     def wait_for(self, predicate, seconds, what):
         deadline = time.time() + seconds
@@ -421,6 +892,8 @@ class VM:
 
 
 def deploy(vm):
+    if vm.machine == "omarchy":
+        return deploy_on_omarchy(vm)
     binary = ROOT / "build/bin/omahouse"
     if not binary.exists():
         raise Blocked(f"{binary} is not built. Run `mise run build` first.")
@@ -468,7 +941,10 @@ def deploy(vm):
     vm.root("bash -c '. /tmp/omahouse.install; post_install'")
 
 
-def wait_for_the_session(vm, timeout=180):
+def wait_for_the_session(vm, timeout=None):
+    if vm.machine == "omarchy":
+        return log_in_on_omarchy(vm)
+
     """Hyprland up, and the notification daemon with it.
 
     `sudo modprobe vkms` after every boot: it is the virtual GPU Hyprland draws
@@ -476,7 +952,7 @@ def wait_for_the_session(vm, timeout=180):
     every run and not only the first, because it is a module and a boot forgets.
     """
     vm.root("modprobe vkms", check=False)
-    deadline = time.time() + timeout
+    deadline = time.time() + (timeout or vm.pace["boot_seconds"])
     while time.time() < deadline:
         if vm.pid_of("Hyprland"):
             break
@@ -487,12 +963,44 @@ def wait_for_the_session(vm, timeout=180):
 
     # mako, because `grace_warns_before_closing` asserts a notification arrived
     # and there has to be something on the far side of the bus to receive it.
-    if not vm.pid_of("mako"):
+    #
+    # Waited for rather than slept at. A fixed two seconds is a race against a
+    # session that is still coming up, and it lost twice: once as a run blocked
+    # on "mako would not start" with mako running a moment later, and once as a
+    # warning that was really sent to a bus nobody was on yet.
+    # Tried again on every turn, not started once and then waited for. A single
+    # attempt is a bet that the compositor already has its socket up: Hyprland's
+    # pid exists before `wayland-1` does, so the one attempt loses that race,
+    # mako exits with nothing to connect to, and polling afterwards waits out
+    # the whole boot budget for a process that will never appear.
+    deadline = time.time() + (timeout or vm.pace["boot_seconds"])
+    while time.time() < deadline and not vm.pid_of("mako"):
         vm.julia("setsid --fork sh -c 'cd /tmp && exec mako' </dev/null >/dev/null 2>&1",
                  check=False)
         time.sleep(2)
     if not vm.pid_of("mako"):
-        raise Blocked("mako would not start in the subject's session")
+        # What is actually there, because "would not start" on its own sends
+        # somebody looking at mako when the answer is usually that the session
+        # it belongs to is not up yet.
+        # One attempt in the foreground, only to be able to quote why. Without
+        # it the refusal names mako when the answer is almost always something
+        # about the session it belongs to.
+        why = vm.julia("timeout 3 mako", check=False)[1].strip()[:200]
+        raise Blocked(
+            "mako would not start in the subject's session.\n"
+            f"    it said:   {why or '(nothing)'}\n"
+            f"    any mako:  {vm.ssh('pgrep -a mako || echo none', check=False)[1].strip()}\n"
+            f"    sessions:  {vm.ssh('loginctl list-sessions --no-legend', check=False)[1].strip()[:200]}\n"
+            f"    hyprland:  {vm.ssh('pgrep -a Hyprland || echo none', check=False)[1].strip()}")
+    # And running is not the same as listening. What a warning needs is
+    # something answering on the session bus, and `makoctl` asking mako a
+    # question is the only honest way to know that from here.
+    while time.time() < deadline:
+        if vm.julia("makoctl list", check=False)[0] == 0:
+            break
+        time.sleep(1)
+    else:
+        raise Blocked("mako is running but does not answer on the session bus")
 
     # And the session plumbing, started by hand. The VM is not a full
     # Omarchy -- there is no quickshell on it -- but pipewire is the other unit
@@ -507,7 +1015,197 @@ def wait_for_the_session(vm, timeout=180):
 # -- the cases ----------------------------------------------------------------
 
 
-def load_cases(wanted):
+
+
+# -- the machine with a browser on it -----------------------------------------
+#
+# Real Omarchy, SDDM instead of an autologin, and a `bochs` framebuffer the VNC
+# and `virsh screenshot` can both see. The browser case of docs/design.md §5.2
+# needs all three and the disposable machine has none of them.
+#
+# Everything below installs something or logs somebody in, and every one of them
+# is undone by `VM.put_the_state_back`.
+
+
+def keyboard(vm):
+    """A virtual keyboard on the guest's own seat, through `uinput`.
+
+    There is no keyboard on the far side of an ssh, and SDDM wants a password.
+    `ydotool` makes an input device the guest's `seat0` accepts like any other,
+    which both the greeter and Hyprland then receive. It is a test tool and it
+    does not stay: `put_the_state_back` removes the package and the unit.
+
+    `--socket-path` is not a flourish. Without it the daemon puts its socket in
+    /tmp with mode 0600 and the client under `sudo` looks somewhere else, and the
+    failure mode is `ydotool` exiting 0 with nothing happening on the screen --
+    which reads as the keystroke being wrong rather than the socket being missing.
+    """
+    vm.root("pacman -S --noconfirm --needed ydotool", check=False)
+    if vm.ssh("pgrep -x ydotoold", check=False)[0] != 0:
+        vm.root("systemd-run --unit=ydotoold --description='ydotool (omahouse suite)' "
+                "/usr/bin/ydotoold --socket-path=/run/ydotoold.socket", check=False)
+        vm.wait_for(lambda: vm.ssh("pgrep -x ydotoold", check=False)[0] == 0,
+                    vm.pace["patience_seconds"], "ydotoold to come up")
+    # The device really on the seat, and not merely a daemon that started. This
+    # is the check that turns the expensive silent failure into a `blocked`.
+    vm.wait_for(
+        lambda: "ydotoold virtual device" in vm.root("loginctl seat-status seat0",
+                                                     check=False)[1],
+        vm.pace["patience_seconds"], "the virtual keyboard to appear on seat0")
+
+
+def log_in_on_omarchy(vm):
+    """The subject's real session, entered through the greeter with a password.
+
+    Not an autologin. This is the machine the owner demonstrates from and it asks
+    for a password like anybody's would, so the suite types one -- which is also
+    what makes the session under test the same session a person would get.
+    """
+    keyboard(vm)
+    if vm.pid_of("Hyprland"):
+        return
+
+    # SDDM's `state.conf` decides whose name the greeter is asking about, and the
+    # greeter does not show it. It is checked rather than assumed: typing julia's
+    # password at a greeter asking about howl is a failed login and a confusing
+    # screenshot.
+    state = vm.root("cat /var/lib/sddm/state.conf", check=False)[1]
+    if f"User={vm.subject}" not in state:
+        raise Blocked(f"SDDM is asking about somebody other than {vm.subject}:\n{state}")
+
+    vm.type_text(vm.about["password"])
+    vm.press("28:1 28:0")
+    deadline = time.time() + vm.pace["boot_seconds"]
+    while time.time() < deadline:
+        if vm.pid_of("Hyprland"):
+            break
+        time.sleep(2)
+    else:
+        raise Blocked("the greeter never let the session through. Look at "
+                      "`journalctl -u sddm` on the guest, and at a screenshot.")
+    if not vm.sessions():
+        raise Blocked(f"{vm.subject} has no logind session")
+    # The bar, the notification daemon and the rest of a real session, which take
+    # a few seconds after the compositor.
+    vm.wait_for(lambda: vm.ssh(f"pgrep -u {vm.subject} -x quickshell", check=False)[0] == 0,
+                vm.pace["patience_seconds"], "the Omarchy shell to come up")
+
+
+_built_package = None
+_built_omakure_package = None
+
+
+def build_the_package():
+    """`makepkg` over `vm/PKGBUILD`, into a temporary directory.
+
+    Twenty seconds, and every byte of it lands under `$TMPDIR`: `BUILDDIR`,
+    `PKGDEST`, `SRCDEST` and `LOGDEST` are all pointed away, so a run leaves
+    nothing in the working tree and nothing installed here. `-d` because the
+    dependencies that matter are the guest's -- `deploy_on_omarchy` checks the
+    one that can actually break a copied binary, which is Qt -- and a build
+    machine is not the machine under test.
+
+    The `-debug` package makepkg also produces when the local `makepkg.conf` asks
+    for it is not what is installed: the file is picked by exact name.
+    """
+    out = Path(tempfile.mkdtemp(prefix="omahouse-pkg."))
+    done = run(["makepkg", "-f", "-d", "--noconfirm"], cwd=str(HERE),
+               env={**os.environ,
+                    "BUILDDIR": str(out / "build"),
+                    "PKGDEST": str(out / "pkg"),
+                    "SRCDEST": str(out / "src"),
+                    "LOGDEST": str(out / "log")})
+    if done.returncode != 0:
+        tail = "\n".join((done.stdout + done.stderr).splitlines()[-20:])
+        raise Blocked("makepkg over vm/PKGBUILD failed:\n" + tail)
+    built = sorted(p for p in (out / "pkg").glob("omahouse-[0-9]*.pkg.tar.*")
+                   if "-debug-" not in p.name)
+    if not built:
+        raise Blocked(f"makepkg produced nothing under {out / 'pkg'}")
+    return built[0]
+
+
+def build_the_omakure_package(binary):
+    """The omakure binary under test, wrapped as the package pacman would get.
+
+    Needed for exactly one thing: `omahouse machine link` installs omahouse with
+    `pacman -S`, and omahouse depends on omakure. Without a package to resolve
+    that against, the case that proves the install would have to reach around
+    the package manager to prove something about the package manager.
+
+    It is not omakure's own packaging. When the `omarchy` repository carries
+    omakure this goes away.
+    """
+    here = HERE / "omakure-pkg"
+    shutil.copy(binary, here / "omakure")
+    out = Path(tempfile.mkdtemp(prefix="omakure-pkg."))
+    done = run(["makepkg", "-f", "-d", "--noconfirm"], cwd=str(here),
+               env={**os.environ,
+                    "BUILDDIR": str(out / "build"),
+                    "PKGDEST": str(out / "pkg"),
+                    "SRCDEST": str(out / "src"),
+                    "LOGDEST": str(out / "log")})
+    if done.returncode != 0:
+        tail = "\n".join((done.stdout + done.stderr).splitlines()[-20:])
+        raise Blocked("makepkg over vm/omakure-pkg/PKGBUILD failed:\n" + tail)
+    built = sorted((out / "pkg").glob("omakure-[0-9]*.pkg.tar.*"))
+    if not built:
+        raise Blocked(f"makepkg produced nothing under {out / 'pkg'}")
+    return built[0]
+
+
+def deploy_on_omarchy(vm):
+    """The package, the way somebody's laptop would get it.
+
+    Not a binary copied into place and not a `.crx` signed here and carried over:
+    `pacman -U` of a package built from this working tree, so the scriptlet of
+    `packaging/omahouse.install` runs the way it runs on a household's machine.
+    It is the scriptlet that makes this machine's signing key, signs the meter
+    with it and writes the force-install policy naming the id that key produced --
+    docs/design.md §5.2, "The signing key, and why there is not one". Nothing
+    about the browser half is mounted by hand any more, here or anywhere.
+    """
+    guest_qt = vm.ssh("pacman -Q qt6-base 2>/dev/null || true", check=False)[1].split()
+    host_qt = run(["pacman", "-Q", "qt6-base"]).stdout.split()
+    if guest_qt and host_qt and guest_qt[1].split("-")[0] != host_qt[1].split("-")[0]:
+        raise Blocked(f"qt6-base is {host_qt[1]} here and {guest_qt[1]} there")
+
+    say("  building the package from the tree")
+    package = build_the_package()
+    say(f"    {package.name}")
+    install_the_package(vm, package)
+    # Handed to the cases on the object they are given rather than imported, for
+    # the reason the `Failed` class is: a case that imported this file would get
+    # a second copy of it. `the_package` is the very artefact this run installed,
+    # so a case that removes it can put the machine back with the same bytes.
+    vm.the_package = package
+    vm.install_the_package = lambda: install_the_package(vm, package)
+    return package
+
+
+def install_the_package(vm, package):
+    """`pacman -U` on the guest, and the scriptlet's own words repeated here.
+
+    `--overwrite '*'` is bounded by the package's own file list and is there for
+    one case: a machine carrying an **unpackaged** `/usr/bin/omahouse` from an
+    earlier era of this harness, which pacman would otherwise refuse to install
+    over. It cannot reach a file omahouse does not ship.
+    """
+    vm.put(package, f"/tmp/{package.name}")
+    code, said = vm.root(f"pacman -U --noconfirm --overwrite '*' /tmp/{package.name}",
+                         check=False)
+    if code != 0:
+        raise Blocked(f"pacman -U said:\n{said}")
+    for line in said.splitlines():
+        # The scriptlet speaks on stderr with a `>>>` of its own, and what it
+        # says about the meter is the whole of what this deployment did that a
+        # file list did not.
+        if line.startswith(">>>") and ("meter" in line or "extension id" in line):
+            say("    " + line.strip())
+    vm.root("systemctl daemon-reload")
+
+
+def load_cases(wanted, machine, demo=False):
     import importlib.util
 
     cases = []
@@ -519,9 +1217,21 @@ def load_cases(wanted):
         spec = importlib.util.spec_from_file_location(path.stem, path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        # A case says which machine it needs, and one that does not say is a
+        # `poc` case. This is what makes it impossible to run the cases that
+        # empty /var/lib/omahouse and end a login against the owner's own VM: the
+        # filter is here, before a single one of them is even imported into a run
+        # that is pointed at it.
+        if getattr(module, "MACHINE", "poc") != machine:
+            continue
+        # A demo is not a case. It walks slowly on purpose so a person can read
+        # the screen, and a suite that ran it would be paying for pauses nobody
+        # is watching. `--demo` asks for those and only those.
+        if bool(getattr(module, "DEMO", False)) != demo:
+            continue
         cases.append((path.stem, module))
     if not cases:
-        raise Blocked(f"no case matches {wanted!r}")
+        raise Blocked(f"no {'demo' if demo else 'case'} matches {wanted!r} on {machine}")
     return cases
 
 
@@ -530,31 +1240,56 @@ def main():
     parser.add_argument("--keep", action="store_true",
                         help="leave the machine running afterwards")
     parser.add_argument("--case", default=None, help="run the cases whose name holds this")
+    parser.add_argument("--demo", action="store_true",
+                        help="run the walkthroughs meant to be filmed, and only those")
+    # The one knob. Every second this run waits on and every second of budget it
+    # seeds comes out of the regime this picks, and out of nowhere else -- a case
+    # with a number of its own would be a case nobody could cost from the
+    # manifest.
+    parser.add_argument("--pace", default="quick", choices=("quick", "long"),
+                        help="quick (the default, for iterating) or long (for publishing)")
+    # Which machine, and so which cases. The two are one choice: a case declares
+    # the machine it needs and is not loaded for the other, so there is no way to
+    # run the disposable machine's cases -- which empty /var/lib/omahouse and end
+    # a login -- against the owner's demonstration VM.
+    parser.add_argument("--machine", default="poc", choices=("poc", "omarchy"),
+                        help="poc (the default, disposable) or omarchy (real Omarchy, "
+                             "with a browser, put back as it was found)")
     options = parser.parse_args()
 
     with open(HERE / "manifest.toml", "rb") as file:
         manifest = tomllib.load(file)
 
-    os.environ.setdefault("LIBVIRT_DEFAULT_URI", manifest["domain"]["uri"])
-    vm = VM(manifest)
+    pace = manifest["pace"][options.pace]
 
-    say(f"omahouse — the VM suite, {manifest['domain']['name']}")
+    os.environ.setdefault("LIBVIRT_DEFAULT_URI",
+                          manifest["machines"][options.machine]["uri"])
+    vm = VM(manifest, options.machine, pace)
+
+    say(f"omahouse — the VM suite, {vm.domain}, {pace['label']} pace")
     say()
 
     results = []
     started = False
+    began = time.time()
     try:
         vm.prove_it_is_the_right_machine()
         vm.start()
         started = True
+        # The copy first, before a single thing is installed or logged in. A
+        # machine that is not disposable is put back from this and never from
+        # what somebody remembered to write down.
+        if not vm.disposable:
+            vm.remember_the_state()
         wait_for_the_session(vm)
         deploy(vm)
         say()
 
-        for name, case in load_cases(options.case):
+        for name, case in load_cases(options.case, options.machine, options.demo):
             say(f"  {name}")
             say(f"    {case.WHY}")
-            vm.reset()
+            if vm.disposable:
+                vm.reset()
             begin = time.time()
             try:
                 case.run(vm)
@@ -575,9 +1310,13 @@ def main():
         # The report comes after the cleanup, never before.
         if started:
             try:
-                vm.reset()
+                if vm.disposable:
+                    vm.reset()
+                else:
+                    vm.put_the_state_back()
             except Exception as problem:  # noqa: BLE001 -- cleanup is best effort
-                say(f"  could not reset the machine: {problem}")
+                say(f"  could not put the machine back: {problem}")
+            vm.shutdown_peers()
             if options.keep:
                 say(f"  leaving {vm.domain} running at {vm.address}")
             else:
@@ -588,7 +1327,11 @@ def main():
     for name, verdict, detail in results:
         say(f"  {verdict:8} {name}   {detail if verdict != 'PASS' else detail}")
     failures = [one for one in results if one[1] != "PASS"]
-    say(f"  {len(results) - len(failures)}/{len(results)} passed")
+    # The wall clock of the whole run, said out loud. It is the number the two
+    # regimes exist to trade against each other, and a regime whose cost nobody
+    # prints is a regime nobody chooses on purpose.
+    say(f"  {len(results) - len(failures)}/{len(results)} passed, "
+        f"{pace['label']} pace, {time.time() - began:.0f}s in all")
     return 1 if failures else 0
 
 

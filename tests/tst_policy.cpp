@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include "Policy.h"
+#include "Allocation.h"
 
 using namespace omahouse;
 
@@ -30,6 +31,23 @@ AppScope unnamedScope(const QString &uuid, int pidCount = 1)
     return entry;
 }
 
+// A scope whose name is a launcher's and whose processes are something else.
+//
+// poc/findings.md round 4 measured seven of these on one machine: the Omarchy
+// menu launches everything through `gtk-launch`, so systemd names the scope
+// after the shim and every program opened that way collapses into one id.
+AppScope shim(const QString &id, const QString &exe, int pidCount = 3)
+{
+    AppScope entry;
+    entry.id = id;
+    entry.unit = QStringLiteral("app-Hyprland-%1-91ab7c02.scope").arg(id);
+    entry.cgroupPath = QStringLiteral("/app.slice/app-graphical.slice/") + entry.unit;
+    entry.pidCount = pidCount;
+    entry.dominantExe = exe;
+    entry.dominantExeCount = pidCount;
+    return entry;
+}
+
 // The clock the whole suite runs on. Nobody reads the real one: `now` is an
 // argument, so a budget that takes two hours to run out takes two lines.
 QDateTime at(int hour, int minute, int second = 0)
@@ -45,13 +63,33 @@ Ledger startOfDay(const QString &user = QStringLiteral("julia"))
     return ledger;
 }
 
-Budget budget(const QString &id, const QString &match, int dailyMinutes, OnExhausted onExhausted)
+Budget budget(const QString &id, const QStringList &match, int dailyMinutes,
+              OnExhausted onExhausted)
 {
     Budget entry;
     entry.id = id;
     entry.match = match;
     entry.dailyMinutes = dailyMinutes;
     entry.onExhausted = onExhausted;
+    return entry;
+}
+
+/// The ordinary case: a budget about one name. Two or more is the browser, and
+/// the overload above is what says so.
+Budget budget(const QString &id, const QString &match, int dailyMinutes,
+              OnExhausted onExhausted)
+{
+    return budget(id, QStringList{match}, dailyMinutes, onExhausted);
+}
+
+// The same noun with the other kind of selector -- docs/design.md §2. Written as
+// its own helper only so the tests below read as being about a site; the
+// structure it makes is a `Budget` with one field set differently.
+Budget siteBudget(const QString &domain, int dailyMinutes,
+                  OnExhausted onExhausted = OnExhausted::Block)
+{
+    Budget entry = budget(domain, domain, dailyMinutes, onExhausted);
+    entry.selects = Selects::Site;
     return entry;
 }
 
@@ -318,6 +356,154 @@ private slots:
         QCOMPARE(third.decisions.at(0).secondsLeft, 60);
     }
 
+    // A budget smaller than a mark is born with that mark already crossed, and it
+    // used to fire the instant the app opened: three minutes of browser
+    // announcing five minutes left, a ten minute session spending its ten minute
+    // mark at login. A mark the budget was never above is not a mark.
+    void neverAnnouncesAMarkTheBudgetWasNeverAbove()
+    {
+        Profile profile = profileOf();
+        profile.warnAt = {10, 5, 1};
+        profile.budgets = {budget(QStringLiteral("chromium"), QStringLiteral("chromium"), 3,
+                                  OnExhausted::Close)};
+        const AppScope chromium = scope(QStringLiteral("chromium"));
+
+        // The app has just opened on a three minute budget. Ten and five are
+        // behind it already; neither is said, and neither is written down as
+        // said -- an event for a mark that never meant anything is a line in the
+        // report somebody has to explain.
+        const Outcome opened = evaluate(profile, {chromium}, startOfDay(), at(19, 0), 2);
+        QVERIFY2(opened.decisions.isEmpty(), "a mark the budget was never above was announced");
+        QVERIFY2(opened.ledger.events.isEmpty(), "a mark that was never said was written down");
+
+        // The one mark under the budget still lands where it means something.
+        Ledger nearlyOut = opened.ledger;
+        nearlyOut.seconds.insert(QStringLiteral("chromium"), 3 * 60 - 55);
+        const Outcome warned = evaluate(profile, {chromium}, nearlyOut, at(19, 2), 2);
+        QCOMPARE(warned.decisions.size(), 1);
+        QCOMPARE(warned.decisions.at(0).reason, Decision::Reason::Warning);
+        // 53 and not 55: this tick's two seconds are spent before the decision.
+        QCOMPARE(warned.decisions.at(0).secondsLeft, 53);
+    }
+
+    // Strictly above, and the ten minute session is why: a mark equal to the
+    // whole budget is the same event as opening the app.
+    void aMarkEqualToTheWholeBudgetIsNotAMark()
+    {
+        Profile profile = profileOf();
+        profile.warnAt = {10, 5, 1};
+        profile.budgets = {budget(QStringLiteral("session"), QStringLiteral("*"), 10,
+                                  OnExhausted::Logout)};
+        const AppScope anything = scope(QStringLiteral("chromium"));
+
+        const Outcome login = evaluate(profile, {anything}, startOfDay(), at(19, 0), 2);
+        QVERIFY2(login.decisions.isEmpty(), "the ten minute mark fired at login");
+
+        // Five is under ten, so it is still a mark.
+        Ledger half = login.ledger;
+        half.seconds.insert(QStringLiteral("session"), 10 * 60 - 280);
+        const Outcome later = evaluate(profile, {anything}, half, at(19, 5), 2);
+        QCOMPARE(later.decisions.size(), 1);
+        QCOMPARE(later.decisions.at(0).secondsLeft, 278);
+    }
+
+    // A grant is part of the limit, so time handed over gives the marks back: a
+    // three minute budget with an hour added is an hour's budget and warns like
+    // one.
+    void aGrantGivesBackTheMarksItRaisesTheBudgetAbove()
+    {
+        Profile profile = profileOf();
+        profile.warnAt = {10, 5, 1};
+        profile.budgets = {budget(QStringLiteral("chromium"), QStringLiteral("chromium"), 3,
+                                  OnExhausted::Close)};
+        const AppScope chromium = scope(QStringLiteral("chromium"));
+
+        Ledger ledger = startOfDay();
+        ledger.grants.append(Grant{at(19, 0), QStringLiteral("root"),
+                                   QStringLiteral("chromium"), 60});
+        // 63 minutes in all, 4:40 spent, so 58:20 left and the ten minute mark is
+        // ahead rather than behind.
+        ledger.seconds.insert(QStringLiteral("chromium"), 280);
+        const Outcome open = evaluate(profile, {chromium}, ledger, at(19, 5), 2);
+        QVERIFY2(open.decisions.isEmpty(), "a mark still ahead of the budget was announced");
+
+        Ledger nearly = open.ledger;
+        nearly.seconds.insert(QStringLiteral("chromium"), 63 * 60 - 570);
+        const Outcome warned = evaluate(profile, {chromium}, nearly, at(20, 0), 2);
+        QCOMPARE(warned.decisions.size(), 1);
+        QCOMPARE(warned.decisions.at(0).secondsLeft, 568);
+    }
+
+    // Omarchy's own furniture, which nobody chose to open.
+    //
+    // `autostart.lua` brings `udiskie` up through `uwsm-app --`, so it arrives as
+    // an app scope like any other. Under `default: deny` that got it closed two
+    // seconds after login, and on its own it kept a session budget -- which
+    // matches everything -- running from login onwards on an idle machine.
+    void neverJudgesOrBillsTheSessionsOwnFurniture()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.enforce = true;
+        profile.budgets = {budget(QStringLiteral("session"), QStringLiteral("*"), 120,
+                                  OnExhausted::Logout)};
+        const AppScope udiskie = scope(QStringLiteral("udiskie"));
+
+        // Nothing but furniture is nobody at the keyboard: not denied, not
+        // closed, and the session does not start.
+        const Outcome idle = evaluate(profile, {udiskie}, startOfDay(), at(19, 0), 2);
+        QVERIFY2(idle.decisions.isEmpty(), "the session's own furniture was judged");
+        QCOMPARE(idle.ledger.secondsFor(QStringLiteral("session")), 0);
+
+        // One real app beside it, and the session runs -- once, not twice.
+        const AppScope chromium = scope(QStringLiteral("chromium"));
+        const Outcome used = evaluate(profile, {udiskie, chromium}, idle.ledger, at(19, 0, 2), 2);
+        QCOMPARE(used.ledger.secondsFor(QStringLiteral("session")), 2);
+        // And the real app is still judged by the default, which is the whole
+        // point of holding furniture out rather than letting everything through.
+        QVERIFY(!used.decisions.isEmpty());
+        QCOMPARE(used.decisions.at(0).reason, Decision::Reason::Denied);
+    }
+
+    // A budget that names a piece of furniture by its id still counts it. That is
+    // somebody asking for exactly that number, and refusing would be the core
+    // deciding what an operator may be curious about.
+    void aBudgetThatNamesFurnitureStillCountsIt()
+    {
+        Profile profile = profileOf();
+        profile.budgets = {budget(QStringLiteral("udiskie"), QStringLiteral("udiskie"), 0,
+                                  OnExhausted::Warn),
+                           budget(QStringLiteral("session"), QStringLiteral("*"), 120,
+                                  OnExhausted::Logout)};
+        const AppScope udiskie = scope(QStringLiteral("udiskie"));
+
+        const Outcome out = evaluate(profile, {udiskie}, startOfDay(), at(19, 0), 2);
+        QCOMPARE(out.ledger.secondsFor(QStringLiteral("udiskie")), 2);
+        QCOMPARE(out.ledger.secondsFor(QStringLiteral("session")), 0);
+    }
+
+    // A machine that starts something else says so, and unknown is never
+    // furniture -- the direction that fails safe.
+    void takesTheMachinesOwnFurnitureAndTrustsNothingElse()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.budgets = {budget(QStringLiteral("session"), QStringLiteral("*"), 120,
+                                  OnExhausted::Logout)};
+        const AppScope waybar = scope(QStringLiteral("waybar"));
+
+        // Nobody listed it, so it is the child's: judged, and it starts the day.
+        const Outcome unlisted = evaluate(profile, {waybar}, startOfDay(), at(19, 0), 2);
+        QCOMPARE(unlisted.ledger.secondsFor(QStringLiteral("session")), 2);
+        QVERIFY(!unlisted.decisions.isEmpty());
+
+        // Listed by the machine, and it stops being either.
+        const Outcome listed = evaluate(profile, {waybar}, startOfDay(), at(19, 0), 2,
+                                        QString(), {QStringLiteral("waybar")});
+        QCOMPARE(listed.ledger.secondsFor(QStringLiteral("session")), 0);
+        QVERIFY2(listed.decisions.isEmpty(), "furniture the machine named was judged");
+    }
+
     // The window between running out and the action. The caller has to be able
     // to tell "say it closes in twenty seconds" from "close it now", and the
     // stamp it measures from lives in the ledger, so a daemon restarted in the
@@ -463,6 +649,685 @@ private slots:
         QVERIFY(outcome.decisions.isEmpty());
         QVERIFY(outcome.ledger.seconds.isEmpty());
         QCOMPARE(outcome.ledger.date, QDate(2026, 9, 3));
+    }
+
+    // -- a budget on a site ---------------------------------------------------
+    //
+    // docs/design.md §5.2 counted the number and acted on nothing; these are the
+    // stage after. What they are really asserting is that the model held: the
+    // marks, the grace and the memory of what was already said are the app
+    // half's machinery, reached with a domain instead of a scope id.
+
+    // The site in front spends its budget, and nothing else does. The app
+    // running the browser is billed for running -- §5 -- and the two numbers do
+    // not touch.
+    void billsTheSiteInFrontAndOnlyTheSiteInFront()
+    {
+        Profile profile = profileOf();
+        profile.budgets = {
+            budget(QStringLiteral("chromium"), QStringLiteral("chromium"), 0, OnExhausted::Warn),
+            siteBudget(QStringLiteral("youtube.com"), 30),
+            siteBudget(QStringLiteral("wikipedia.org"), 30),
+        };
+
+        const Outcome outcome = evaluate(profile, {scope(QStringLiteral("chromium"))},
+                                         startOfDay(), at(19, 0), 2,
+                                         QStringLiteral("youtube.com"));
+
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("youtube.com")), 2);
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("wikipedia.org")), 0);
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("chromium")), 2);
+        // And the observing number of §5.2, which goes on being written whether
+        // or not anything has a budget about it.
+        QCOMPARE(outcome.ledger.siteSecondsFor(QStringLiteral("youtube.com")), 2);
+    }
+
+    // The crossing of §5.2, from this side of the line: the caller hands over a
+    // domain or nothing, and nothing is what a dark screen, a stale file, a
+    // browser that is gone and a machine with no extension all look like here.
+    void billsNoSiteWhenTheCallerNamesNone()
+    {
+        Profile profile = profileOf();
+        profile.budgets = {siteBudget(QStringLiteral("youtube.com"), 30)};
+
+        const Outcome outcome =
+            evaluate(profile, {scope(QStringLiteral("chromium"))}, startOfDay(), at(19, 0), 2);
+
+        QVERIFY(outcome.ledger.seconds.isEmpty());
+        QVERIFY(outcome.ledger.sites.isEmpty());
+        QVERIFY(outcome.decisions.isEmpty());
+    }
+
+    // The guard that would be expensive to get wrong. A site budget matching `*`
+    // is a limit on browsing at all, and `*` is also the selector the session
+    // budget uses -- so a shared loop would have this one billed by every scope
+    // on the machine and, when it ran out, closing every one of them.
+    void aSiteBudgetMatchingEverythingNeverTouchesAnApp()
+    {
+        Profile profile = profileOf();
+        profile.budgets = {siteBudget(QStringLiteral("*"), 1)};
+
+        // Ten scopes open and nothing in the browser: not a second spent.
+        Outcome outcome = evaluate(profile, {scope(QStringLiteral("chromium"), 21),
+                                             scope(QStringLiteral("code")),
+                                             unnamedScope(QStringLiteral("a"), 71)},
+                                   startOfDay(), at(19, 0), 2);
+        QVERIFY2(outcome.ledger.seconds.isEmpty(),
+                 "a budget about sites was spent by an app scope");
+
+        // And out of time, with the same scopes open: it blocks, and it closes
+        // nothing and ends nobody's session.
+        Ledger spent = startOfDay();
+        spent.seconds.insert(QStringLiteral("*"), 60);
+        outcome = evaluate(profile, {scope(QStringLiteral("chromium"), 21)}, spent, at(19, 0), 2,
+                           QStringLiteral("youtube.com"));
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 0);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Logout), 0);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Block), 1);
+    }
+
+    // Runs out, warns at each mark once, waits out the grace, and then blocks --
+    // and every one of those is the app half's machinery, unbranched.
+    void runsASiteOutAndBlocksItAfterTheGrace()
+    {
+        Profile profile = profileOf();
+        profile.warnAt = {5, 1};
+        profile.graceSeconds = 20;
+        profile.budgets = {siteBudget(QStringLiteral("youtube.com"), 30)};
+
+        Ledger ledger = startOfDay();
+        // Twenty-five minutes in: the five minute mark, said once.
+        ledger.seconds.insert(QStringLiteral("youtube.com"), 25 * 60);
+        const Outcome first =
+            evaluate(profile, {}, ledger, at(19, 0), 2, QStringLiteral("youtube.com"));
+        QCOMPARE(count(first.decisions, Decision::Kind::Warn), 1);
+        QCOMPARE(first.decisions.first().reason, Decision::Reason::Warning);
+        const Outcome again =
+            evaluate(profile, {}, first.ledger, at(19, 0, 2), 2, QStringLiteral("youtube.com"));
+        QVERIFY2(again.decisions.isEmpty(), "the five minute mark was said twice");
+
+        // Out of time: the last word first, and nothing done yet.
+        Ledger out = startOfDay();
+        out.seconds.insert(QStringLiteral("youtube.com"), 30 * 60);
+        const Outcome opens =
+            evaluate(profile, {}, out, at(19, 30), 2, QStringLiteral("youtube.com"));
+        QCOMPARE(count(opens.decisions, Decision::Kind::Warn), 1);
+        QCOMPARE(opens.decisions.first().reason, Decision::Reason::GraceStarted);
+        QCOMPARE(count(opens.decisions, Decision::Kind::Block), 0);
+
+        // Inside the window, still nothing.
+        const Outcome waiting =
+            evaluate(profile, {}, opens.ledger, at(19, 30, 10), 2, QStringLiteral("youtube.com"));
+        QCOMPARE(count(waiting.decisions, Decision::Kind::Block), 0);
+
+        // And past it, the block -- named by the selector, which is what the
+        // browser has to be told.
+        const Outcome acts =
+            evaluate(profile, {}, waiting.ledger, at(19, 30, 20), 2, QStringLiteral("youtube.com"));
+        QCOMPARE(count(acts.decisions, Decision::Kind::Block), 1);
+        QCOMPARE(acts.decisions.first().site, QStringLiteral("youtube.com"));
+        QCOMPARE(acts.decisions.first().budgetId, QStringLiteral("youtube.com"));
+    }
+
+    // A site that is out of time goes on being out of time with nobody at the
+    // keyboard and nothing in the front tab, because the block belongs to the
+    // day. This is the zero-tick question `watch` and `saveProfiles` both ask,
+    // and it is what makes the turn of the date let the site back through
+    // without anybody having to remember to.
+    void aSiteStaysBlockedWithNothingInFrontAndComesBackWithTheDay()
+    {
+        Profile profile = profileOf();
+        profile.budgets = {siteBudget(QStringLiteral("youtube.com"), 30)};
+
+        Ledger out = startOfDay();
+        out.seconds.insert(QStringLiteral("youtube.com"), 30 * 60);
+
+        const Outcome standing = evaluate(profile, {}, out, at(21, 0), 0);
+        QCOMPARE(count(standing.decisions, Decision::Kind::Block), 1);
+        QVERIFY2(standing.ledger.sites.isEmpty(), "a zero tick with no site billed one");
+
+        // The next day. Same ledger handed in, and the balance is a new file.
+        const Outcome tomorrow =
+            evaluate(profile, {}, out,
+                     QDateTime(QDate(2026, 9, 4), QTime(8, 0)), 0);
+        QCOMPARE(count(tomorrow.decisions, Decision::Kind::Block), 0);
+
+        // And a grant does the same thing before the day turns.
+        Ledger granted = out;
+        Grant more;
+        more.at = at(21, 0);
+        more.by = QStringLiteral("howl");
+        more.budget = QStringLiteral("youtube.com");
+        more.minutes = 10;
+        granted.grants.append(more);
+        QCOMPARE(count(evaluate(profile, {}, granted, at(21, 0), 0).decisions,
+                       Decision::Kind::Block),
+                 0);
+    }
+
+    // Observing, for sites too. `enforce: false` counts the site and blocks
+    // nothing, which is what §5.2 shipped and what an operator gets before they
+    // decide the number is worth teeth.
+    void neverBlocksWithoutEnforce()
+    {
+        Profile profile = profileOf();
+        profile.enforce = false;
+        profile.budgets = {siteBudget(QStringLiteral("youtube.com"), 30)};
+
+        Ledger out = startOfDay();
+        out.seconds.insert(QStringLiteral("youtube.com"), 30 * 60);
+
+        const Outcome outcome =
+            evaluate(profile, {}, out, at(19, 30), 2, QStringLiteral("youtube.com"));
+
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Block), 0);
+        // Said, once, and with no window in front of it: there is nothing to
+        // wait for when nothing is going to happen.
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Warn), 1);
+        QCOMPARE(outcome.decisions.first().reason, Decision::Reason::Exhausted);
+        // And still counting, because observing is counting.
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("youtube.com")), 30 * 60 + 2);
+    }
+
+    // A site budget whose action is `warn` is its own last word, exactly as an
+    // app budget's is: the number runs out, the person is told, and the site
+    // goes on opening.
+    void aSiteBudgetThatOnlyWarnsBlocksNothing()
+    {
+        Profile profile = profileOf();
+        profile.budgets = {siteBudget(QStringLiteral("youtube.com"), 30, OnExhausted::Warn)};
+
+        Ledger out = startOfDay();
+        out.seconds.insert(QStringLiteral("youtube.com"), 30 * 60);
+
+        const Outcome outcome =
+            evaluate(profile, {}, out, at(19, 30), 2, QStringLiteral("youtube.com"));
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Block), 0);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Warn), 1);
+    }
+
+    // -- what is really inside a launcher's scope ---------------------------
+    //
+    // The Omarchy menu opens everything through `gtk-launch`, so under
+    // `default: deny` the program is closed before its window appears and the
+    // notification accuses the launcher. A rule can name the program only if
+    // the executable is allowed to answer for the scope -- and only where the
+    // id is not the name of what is running, which is the whole of the care
+    // this needs.
+
+    void releasesTheProgramInsideALauncherScope()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("code"), Verdict::Allow});
+        const AppScope menu = shim(QStringLiteral("gtk-launch"),
+                                   QStringLiteral("/usr/share/code/code"));
+
+        const Outcome outcome = evaluate(profile, {menu}, startOfDay(), at(19, 0), 2);
+
+        QVERIFY2(outcome.decisions.isEmpty(),
+                 "the program the menu opened was refused under the launcher's name");
+    }
+
+    // The same scope with nothing read out of it. An empty executable is nobody
+    // having looked, and having no opinion must not be an allowance: this is
+    // the case that would make the release above true of every scope on the
+    // machine whose id happens to be unnamed by any rule.
+    void aScopeNothingCouldBeReadOutOfIsStillJudgedByItsName()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("code"), Verdict::Allow});
+        AppScope menu = shim(QStringLiteral("gtk-launch"), QString());
+        menu.dominantExeCount = 0;
+
+        const Outcome outcome = evaluate(profile, {menu}, startOfDay(), at(19, 0), 2);
+
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
+    }
+
+    // The other half of the disagreement, and the reason the executable is
+    // never allowed to answer *instead of* the id. Every flatpak on a machine
+    // runs `/usr/bin/bwrap`, and there the id is the one that is right.
+    void aFlatpakIsStillItsOwnIdAndNotItsRunner()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("org.freedesktop.Platform"), Verdict::Allow});
+        const AppScope flatpak = shim(QStringLiteral("org.freedesktop.Platform"),
+                                      QStringLiteral("/usr/bin/bwrap"));
+
+        const Outcome outcome = evaluate(profile, {flatpak}, startOfDay(), at(19, 0), 2);
+
+        QVERIFY2(outcome.decisions.isEmpty(),
+                 "a rule naming the flatpak stopped matching once bwrap could answer");
+    }
+
+    void aRunnerSharedByEveryFlatpakReleasesNobodyElse()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("code"), Verdict::Allow});
+        const AppScope flatpak = shim(QStringLiteral("org.freedesktop.Platform"),
+                                      QStringLiteral("/usr/bin/bwrap"));
+
+        const Outcome outcome = evaluate(profile, {flatpak}, startOfDay(), at(19, 0), 2);
+
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
+    }
+
+    // A scope whose id already names what is running answers to that name and
+    // to no other, even when the executable would happily corroborate a second
+    // name: `/usr/lib/chromium/chromium` backs up `org.chromium.Chromium` as
+    // readily as it backs up `chromium`.
+    //
+    // Which is defect 4's territory, and the reason it is a `match` list rather
+    // than this: one Chromium window really does produce both ids, and an
+    // operator who wants both covered says so. Inferring it here would make the
+    // path a selector of its own, and then `code-oss` would be released by a
+    // rule about `code` -- an allowlist quietly wider than what is written in it
+    // is the one direction this project never takes.
+    void anIdThatAgreesWithItsExecutableIsNotAskedTwice()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("org.chromium.Chromium"), Verdict::Allow});
+        const AppScope browser = shim(QStringLiteral("chromium"),
+                                      QStringLiteral("/usr/lib/chromium/chromium"));
+
+        const Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(19, 0), 2);
+
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
+    }
+
+    // And the scope nothing can name at all. Profile.h is explicit that a named
+    // selector never matches one, so its verdict is the profile's default --
+    // an executable read out of it does not change that, or a `tmux-spawn`
+    // scope with a released program inside it would become a hole through the
+    // allowlist that nothing in the profile names.
+    void aScopeNothingCanNameIsStillTheDefaultVerdict()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("code"), Verdict::Allow});
+        AppScope tmux = unnamedScope(QStringLiteral("8d371e9b-645e"), 4);
+        tmux.dominantExe = QStringLiteral("/usr/share/code/code");
+        tmux.dominantExeCount = 4;
+
+        const Outcome outcome = evaluate(profile, {tmux}, startOfDay(), at(19, 0), 2);
+
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
+    }
+
+    // The budget half. A rule that releases the program and a clock that never
+    // ticks is worse than the refusal it replaced: the limit is on the screen,
+    // it is being enforced by nothing, and nobody finds out until the evening.
+    void aBudgetCountsTheProgramInsideALauncherScope()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("code"), Verdict::Allow});
+        profile.budgets.append(budget(QStringLiteral("code"), QStringLiteral("code"), 45,
+                                      OnExhausted::Close));
+        const AppScope menu = shim(QStringLiteral("gtk-launch"),
+                                   QStringLiteral("/usr/share/code/code"));
+
+        const Outcome outcome = evaluate(profile, {menu}, startOfDay(), at(19, 0), 120);
+
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("code")), 120);
+    }
+
+    // And it closes the scope it counted. The Close names a unit, and the unit
+    // it has to name is the launcher's -- that is the cgroup the program is
+    // really in, and killing a scope called `code` that nobody opened would be
+    // a budget that runs out and does nothing.
+    void aBudgetThatRunsOutClosesTheLauncherScopeItCounted()
+    {
+        Profile profile = profileOf();
+        profile.defaultVerdict = Verdict::Deny;
+        profile.rules.append({QStringLiteral("code"), Verdict::Allow});
+        profile.budgets.append(budget(QStringLiteral("code"), QStringLiteral("code"), 2,
+                                      OnExhausted::Close));
+        const AppScope menu = shim(QStringLiteral("gtk-launch"),
+                                   QStringLiteral("/usr/share/code/code"));
+
+        // A minute of a two minute budget, so the first tick proves the close
+        // below is the budget running out and not the verdict refusing it.
+        Outcome outcome = evaluate(profile, {menu}, startOfDay(), at(19, 0), 60);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 0);
+        outcome = evaluate(profile, {menu}, outcome.ledger, at(19, 1), 60);
+
+        const int closes = count(outcome.decisions, Decision::Kind::Close);
+        QCOMPARE(closes, 1);
+        for (const Decision &decision : outcome.decisions) {
+            if (decision.kind == Decision::Kind::Close)
+                QCOMPARE(decision.scopeUnit, menu.unit);
+        }
+    }
+
+
+    // -- one program under two ids ------------------------------------------
+    //
+    // A single Chromium window on real Omarchy produces two scopes: `chromium`,
+    // holding the child processes, and `org.chromium.Chromium`, holding the one
+    // that owns the window. Two budgets of the same number is not a browser
+    // limited to that number -- it is two clocks that happen to agree, and
+    // whoever writes one of them leaves half the browser with no limit at all.
+
+    void oneBudgetHoldsBothOfChromiumsIds()
+    {
+        Profile profile = profileOf();
+        profile.budgets.append(budget(QStringLiteral("chromium"),
+                                      {QStringLiteral("chromium"),
+                                       QStringLiteral("org.chromium.Chromium")},
+                                      2, OnExhausted::Close));
+        const AppScope children = scope(QStringLiteral("chromium"), 21);
+        const AppScope window = scope(QStringLiteral("org.chromium.Chromium"), 3);
+
+        // A minute per minute with both of them open, and not two. The rule
+        // that keeps 21 processes from spending 21 seconds is the same rule,
+        // asked of names instead of processes.
+        Outcome outcome = evaluate(profile, {children, window}, startOfDay(), at(19, 0), 60);
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("chromium")), 60);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 0);
+
+        // And when it runs out, both scopes are named: closing is a write to
+        // one scope's `cgroup.kill`, and this budget is holding two of them.
+        outcome = evaluate(profile, {children, window}, outcome.ledger, at(19, 1), 60);
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("chromium")), 120);
+
+        QStringList closed;
+        for (const Decision &decision : outcome.decisions) {
+            if (decision.kind == Decision::Kind::Close)
+                closed.append(decision.scopeUnit);
+        }
+        closed.sort();
+        QCOMPARE(closed, QStringList({children.unit, window.unit}));
+    }
+
+    // The defect this replaces, kept as a case: with the browser's other id
+    // left out, half of it goes on running past the limit. Without this the
+    // test above would pass on a budget that simply closed everything alive.
+    void aBudgetThatNamesOneOfTheTwoLeavesTheOtherRunning()
+    {
+        Profile profile = profileOf();
+        profile.budgets.append(budget(QStringLiteral("chromium"), QStringLiteral("chromium"),
+                                      1, OnExhausted::Close));
+        const AppScope children = scope(QStringLiteral("chromium"), 21);
+        const AppScope window = scope(QStringLiteral("org.chromium.Chromium"), 3);
+
+        const Outcome outcome =
+            evaluate(profile, {children, window}, startOfDay(), at(19, 0), 60);
+
+        QStringList closed;
+        for (const Decision &decision : outcome.decisions) {
+            if (decision.kind == Decision::Kind::Close)
+                closed.append(decision.scopeUnit);
+        }
+        QCOMPARE(closed, QStringList{children.unit});
+    }
+
+    // The same for the other namespace, because it falls out of the same field
+    // and refusing it would have taken more code than allowing it. A household
+    // that says `youtube.com` and `youtu.be` are one budget gets one budget,
+    // and the browser is told about both domains.
+    void aSiteBudgetCanHoldMoreThanOneDomain()
+    {
+        Profile profile = profileOf();
+        Budget shorts = siteBudget(QStringLiteral("youtube.com"), 1);
+        shorts.match = {QStringLiteral("youtube.com"), QStringLiteral("youtu.be")};
+        profile.budgets.append(shorts);
+
+        Outcome outcome = evaluate(profile, {}, startOfDay(), at(19, 0), 30,
+                                   QStringLiteral("youtu.be"));
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("youtube.com")), 30);
+        outcome = evaluate(profile, {}, outcome.ledger, at(19, 1), 30,
+                           QStringLiteral("youtube.com"));
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("youtube.com")), 60);
+
+        QStringList blocked;
+        for (const Decision &decision : outcome.decisions) {
+            if (decision.kind == Decision::Kind::Block)
+                blocked.append(decision.site);
+        }
+        blocked.sort();
+        QCOMPARE(blocked, QStringList({QStringLiteral("youtu.be"),
+                                       QStringLiteral("youtube.com")}));
+    }
+
+
+    // -- a pot, rather than an allowance ------------------------------------
+    //
+    // `resets: never` is two hours until somebody hands over more. Logging out
+    // does not give them back and the turn of the date does not either, which
+    // is the only shape that is a limit on a person: a clock that starts over
+    // at the login hands two free hours to anybody who logs out and back in.
+
+    void midnightTurnsTheDailyClockAndLeavesThePot()
+    {
+        Profile profile = profileOf();
+        profile.budgets.append(budget(QStringLiteral("session"), QStringLiteral("*"), 0,
+                                      OnExhausted::Warn));
+        Budget pot = budget(QStringLiteral("pot"), QStringLiteral("chromium"), 0,
+                            OnExhausted::Warn);
+        pot.resets = Resets::Never;
+        profile.budgets.append(pot);
+        const AppScope browser = scope(QStringLiteral("chromium"));
+
+        // Twenty minutes before midnight, and one tick spends both counters.
+        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(23, 40), 1200);
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("session")), 1200);
+        QCOMPARE(outcome.ledger.keptSecondsFor(QStringLiteral("pot")), 1200);
+        // And they are in different places, which is what keeps every reader
+        // that sums days right about the first and silent about the second.
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("pot")), 0);
+        QCOMPARE(outcome.ledger.keptSecondsFor(QStringLiteral("session")), 0);
+
+        // Twenty past midnight. A new day's file, and the pot walks into it.
+        const QDateTime after = QDateTime(QDate(2026, 9, 4), QTime(0, 20));
+        outcome = evaluate(profile, {browser}, outcome.ledger, after, 1200);
+
+        QCOMPARE(outcome.ledger.date, QDate(2026, 9, 4));
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("session")), 1200);
+        QCOMPARE(outcome.ledger.keptSecondsFor(QStringLiteral("pot")), 2400);
+    }
+
+    // Handing over more is the only thing that refills a pot, so it has to
+    // survive as many nights as the spending does. A grant lives in the file of
+    // the day it was made -- `report` and the household both add days together
+    // out of `grants` -- so the turn folds the outgoing day's grants into a
+    // running total instead of copying them, and the fold has to be exactly
+    // once per night and then carried onward.
+    //
+    // Two nights and not one, deliberately. With one, a turn that folded the
+    // outgoing day's grants and dropped everything folded before it looks
+    // exactly like a turn that works.
+    void whatWasHandedOverToAPotSurvivesEveryNightAfterIt()
+    {
+        Profile profile = profileOf();
+        Budget pot = budget(QStringLiteral("pot"), QStringLiteral("chromium"), 60,
+                            OnExhausted::Warn);
+        pot.resets = Resets::Never;
+        profile.budgets.append(pot);
+        const AppScope browser = scope(QStringLiteral("chromium"));
+
+        Ledger monday = startOfDay();
+        monday.addKeptSeconds(QStringLiteral("pot"), 100);
+        monday.grants.append(Grant {QDateTime(monday.date, QTime(21, 0)),
+                                    QStringLiteral("howl"), QStringLiteral("pot"), 10, false});
+
+        const Ledger tuesday = carryInto(monday.date.addDays(1), monday, profile);
+        QCOMPARE(tuesday.keptSecondsFor(QStringLiteral("pot")), 100);
+        QCOMPARE(tuesday.keptGrantedFor(QStringLiteral("pot")), 600);
+        // The grants themselves stay in the day they were made, which is what
+        // keeps `report` and `collect` from counting one hand-over once per day
+        // it outlived.
+        QVERIFY(tuesday.grants.isEmpty());
+
+        // An hour is what the budget says and it is not what the pot holds: one
+        // hour plus the ten minutes handed over on Monday.
+        QCOMPARE(allowanceSeconds(profile, pot, tuesday, tuesday.date), 3600 + 600);
+
+        Ledger spent = tuesday;
+        spent.addKeptSeconds(QStringLiteral("pot"), 50);
+        spent.grants.append(Grant {QDateTime(spent.date, QTime(20, 0)),
+                                   QStringLiteral("howl"), QStringLiteral("pot"), 5, false});
+
+        const Ledger wednesday = carryInto(spent.date.addDays(1), spent, profile);
+        QCOMPARE(wednesday.keptSecondsFor(QStringLiteral("pot")), 150);
+        QCOMPARE(wednesday.keptGrantedFor(QStringLiteral("pot")), 900);
+        QCOMPARE(allowanceSeconds(profile, pot, wednesday, wednesday.date), 3600 + 900);
+
+        // And the loop agrees with the function: a tick on Wednesday spends the
+        // pot that walked in and no other.
+        const Outcome outcome = evaluate(profile, {browser}, wednesday,
+                                         QDateTime(wednesday.date, QTime(9, 0)), 30);
+        QCOMPARE(outcome.ledger.keptSecondsFor(QStringLiteral("pot")), 180);
+        QCOMPARE(outcome.ledger.keptGrantedFor(QStringLiteral("pot")), 900);
+    }
+
+    // The fold takes operator credit and not every grant, and the difference is
+    // a `leave` adjustment. Its own page forbids repeating it after
+    // consumption, so carrying it into tomorrow is exactly repeating it -- and
+    // it is also what the household is told a pot has been given, where an
+    // adjustment must never reach. `leave` is refused on a pot where it is
+    // typed; this is the same decision at the place it is read, because a
+    // profile that was edited by hand is not a place to find out.
+    void anAdjustmentIsNotSomethingTheNightCarries()
+    {
+        Profile profile = profileOf();
+        Budget pot = budget(QStringLiteral("pot"), QStringLiteral("chromium"), 60,
+                            OnExhausted::Warn);
+        pot.resets = Resets::Never;
+        profile.budgets.append(pot);
+
+        Ledger monday = startOfDay();
+        monday.grants.append(Grant {QDateTime(monday.date, QTime(20, 0)),
+                                    QStringLiteral("howl"), QStringLiteral("pot"), 10, false});
+        monday.grants.append(Grant {QDateTime(monday.date, QTime(21, 0)),
+                                    QStringLiteral("howl"), QStringLiteral("pot"), 45, true});
+
+        const Ledger tuesday = carryInto(monday.date.addDays(1), monday, profile);
+        QCOMPARE(tuesday.keptGrantedFor(QStringLiteral("pot")), 600);
+        QCOMPARE(allowanceSeconds(profile, pot, tuesday, tuesday.date), 3600 + 600);
+    }
+
+    // A daily budget is not refilled by anything a pot was refilled with. The
+    // fold is asked about every budget in the profile and answers for one kind
+    // of them, and a fold that ran for all of them would put a grant into a
+    // running total that is read back tomorrow -- ten minutes handed over on
+    // Monday quietly becoming ten minutes a day forever.
+    void aDailyBudgetTakesNothingAcrossTheNight()
+    {
+        Profile profile = profileOf();
+        profile.budgets.append(budget(QStringLiteral("session"), QStringLiteral("*"), 60,
+                                      OnExhausted::Warn));
+
+        Ledger monday = startOfDay();
+        monday.addSeconds(QStringLiteral("session"), 100);
+        monday.grants.append(Grant {QDateTime(monday.date, QTime(21, 0)),
+                                    QStringLiteral("howl"), QStringLiteral("session"), 10,
+                                    false});
+
+        const Ledger tuesday = carryInto(monday.date.addDays(1), monday, profile);
+        QCOMPARE(tuesday.secondsFor(QStringLiteral("session")), 0);
+        QVERIFY(tuesday.keptGranted.isEmpty());
+        QCOMPARE(allowanceSeconds(profile, profile.budgets.last(), tuesday, tuesday.date), 3600);
+    }
+
+    // The turn of the date is not somebody handing over more. A pot that ran
+    // out yesterday is still out this morning, and the day it crossed bought
+    // nobody anything.
+    void aPotThatRanOutIsStillOutTomorrow()
+    {
+        Profile profile = profileOf();
+        Budget pot = budget(QStringLiteral("pot"), QStringLiteral("chromium"), 30,
+                            OnExhausted::Close);
+        pot.resets = Resets::Never;
+        profile.budgets.append(pot);
+        const AppScope browser = scope(QStringLiteral("chromium"));
+
+        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(23, 40), 30 * 60);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
+
+        const QDateTime after = QDateTime(QDate(2026, 9, 4), QTime(9, 0));
+        outcome = evaluate(profile, {browser}, outcome.ledger, after, 2);
+
+        QCOMPARE(outcome.ledger.keptSecondsFor(QStringLiteral("pot")), 30 * 60 + 2);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
+    }
+
+    // And it says so again before it acts. The events are the day's and do not
+    // walk into the new one, which is deliberate: docs/design.md §6 asks that
+    // nobody be cut off cold, and somebody meeting a spent pot at nine in the
+    // morning has been told why before their window closes.
+    void aPotThatIsAlreadySpentStillSaysSoInTheMorning()
+    {
+        Profile profile = profileOf();
+        profile.graceSeconds = 20;
+        Budget pot = budget(QStringLiteral("pot"), QStringLiteral("chromium"), 30,
+                            OnExhausted::Close);
+        pot.resets = Resets::Never;
+        profile.budgets.append(pot);
+        const AppScope browser = scope(QStringLiteral("chromium"));
+
+        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(23, 40), 30 * 60);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Warn), 1);
+        QVERIFY(outcome.ledger.hasWarned(QStringLiteral("pot"), 0));
+
+        const QDateTime morning = QDateTime(QDate(2026, 9, 4), QTime(9, 0));
+        outcome = evaluate(profile, {browser}, outcome.ledger, morning, 2);
+
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Warn), 1);
+        QCOMPARE(outcome.decisions.constFirst().reason, Decision::Reason::GraceStarted);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 0);
+    }
+
+    // What does refill a pot, and the only thing that does.
+    void onlyAGrantPutsAnythingBackInThePot()
+    {
+        Profile profile = profileOf();
+        Budget pot = budget(QStringLiteral("pot"), QStringLiteral("chromium"), 30,
+                            OnExhausted::Close);
+        pot.resets = Resets::Never;
+        profile.budgets.append(pot);
+        const AppScope browser = scope(QStringLiteral("chromium"));
+
+        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(9, 0), 30 * 60);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 1);
+
+        Ledger topped = outcome.ledger;
+        Grant handed;
+        handed.at = at(9, 30);
+        handed.by = QStringLiteral("howl");
+        handed.budget = QStringLiteral("pot");
+        handed.minutes = 10;
+        topped.grants.append(handed);
+
+        outcome = evaluate(profile, {browser}, topped, at(9, 31), 2);
+        QCOMPARE(count(outcome.decisions, Decision::Kind::Close), 0);
+    }
+
+    // The guard the four above need: a budget that says nothing about resetting
+    // is every budget on every machine today, and it must go on turning at
+    // midnight. Without this they would all pass on an engine that had simply
+    // stopped resetting anything.
+    void aBudgetThatSaysNothingStillTurnsAtMidnight()
+    {
+        Profile profile = profileOf();
+        profile.budgets.append(budget(QStringLiteral("day"), QStringLiteral("chromium"), 0,
+                                      OnExhausted::Warn));
+        const AppScope browser = scope(QStringLiteral("chromium"));
+
+        Outcome outcome = evaluate(profile, {browser}, startOfDay(), at(23, 40), 1200);
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("day")), 1200);
+
+        const QDateTime after = QDateTime(QDate(2026, 9, 4), QTime(0, 20));
+        outcome = evaluate(profile, {browser}, outcome.ledger, after, 1200);
+
+        QCOMPARE(outcome.ledger.secondsFor(QStringLiteral("day")), 1200);
+        QVERIFY2(outcome.ledger.keptSeconds.isEmpty(),
+                 "a budget that never asked to outlive the day was given a counter that does");
     }
 };
 

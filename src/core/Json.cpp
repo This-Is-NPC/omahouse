@@ -129,7 +129,8 @@ bool writeJsonAtomically(const QString &path, const QJsonObject &object, QString
     return true;
 }
 
-bool checkSchemaVersion(const QJsonObject &root, const QString &what, QString *error)
+bool checkSchemaVersion(const QJsonObject &root, int expected, const QString &what,
+                        QString *error)
 {
     const QJsonValue value = root.value(QStringLiteral("schemaVersion"));
     if (!value.isDouble()) {
@@ -137,12 +138,12 @@ bool checkSchemaVersion(const QJsonObject &root, const QString &what, QString *e
             *error = QStringLiteral("%1 has no numeric schemaVersion").arg(what);
         return false;
     }
-    if (value.toInt() != kSchemaVersion) {
+    if (value.toInt() != expected) {
         if (error) {
             *error = QStringLiteral("%1 is schema version %2, and this omahouse reads %3")
                          .arg(what)
                          .arg(value.toInt())
-                         .arg(kSchemaVersion);
+                         .arg(expected);
         }
         return false;
     }

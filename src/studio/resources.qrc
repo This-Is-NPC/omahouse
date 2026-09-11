@@ -12,6 +12,7 @@
         <file>qml/Label.qml</file>
         <file>qml/Meter.qml</file>
         <file>qml/Picker.qml</file>
+        <file>qml/Publish.qml</file>
         <file>qml/Prompt.qml</file>
         <file>qml/Rule.qml</file>
         <file>qml/StatusBar.qml</file>

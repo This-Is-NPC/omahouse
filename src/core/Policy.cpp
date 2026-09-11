@@ -1,4 +1,7 @@
 #include "Policy.h"
+#include "Allocation.h"
+
+#include "Furniture.h"
 
 namespace omahouse {
 
@@ -29,10 +32,35 @@ Event stamp(EventKind kind, const QDateTime &now)
     return event;
 }
 
-bool anyLiveScopeMatches(const QVector<AppScope> &live, const QString &selector)
+/// Whether any of a budget's names is open right now.
+///
+/// Once for the whole budget, however many of its names are running: two
+/// Chromium scopes under one budget spend one second per second, exactly as 21
+/// processes in one scope always did.
+bool anyLiveScopeMatches(const QVector<AppScope> &live, const QStringList &selectors)
 {
-    for (const AppScope &scope : live) {
-        if (selectorMatches(selector, scope.id))
+    for (const QString &selector : selectors) {
+        for (const AppScope &scope : live) {
+            if (selectorMatches(selector, scope.id, scope.dominantExe))
+                return true;
+        }
+    }
+    return false;
+}
+
+bool anySelectorMatches(const QStringList &selectors, const QString &name)
+{
+    for (const QString &selector : selectors) {
+        if (selectorMatches(selector, name))
+            return true;
+    }
+    return false;
+}
+
+bool anySelectorMatches(const QStringList &selectors, const AppScope &scope)
+{
+    for (const QString &selector : selectors) {
+        if (selectorMatches(selector, scope.id, scope.dominantExe))
             return true;
     }
     return false;
@@ -40,8 +68,49 @@ bool anyLiveScopeMatches(const QVector<AppScope> &live, const QString &selector)
 
 } // namespace
 
+Ledger carryInto(const QDate &date, const Ledger &previous, const Profile &profile)
+{
+    Ledger fresh;
+    fresh.user = previous.user.isEmpty() ? profile.user : previous.user;
+    fresh.date = date;
+    // What a pot has spent walks into the new day with it. This is the whole of
+    // what `resets: never` is: the daily budgets start over here and these do
+    // not, so two hours are two hours until somebody hands over more -- and the
+    // turn of the date is not somebody.
+    fresh.keptSeconds = previous.keptSeconds;
+    // And so does what somebody handed over, because handing over more is the
+    // only thing that refills a pot and it is no use to a pot it cannot reach.
+    // Folded here and not carried as grants, once per day crossed: `report`,
+    // `house` and `collect` all add days together out of `grants`, and a grant
+    // copied into every day it outlived would be counted once per day there.
+    //
+    // Operator credit and not every grant. A `leave` adjustment is an answer to
+    // *how much remains today*, and its own page says it must not be repeated
+    // after consumption -- carrying it into tomorrow is exactly repeating it.
+    // It is also what the household is told a pot has been given, and an
+    // adjustment must never feed back into the household's number, which is the
+    // rule `creditedSeconds` exists for. `leave` is refused on a budget that
+    // never resets, so nothing is being quietly dropped here; this is the same
+    // decision said twice, once where it is written and once where it is read.
+    //
+    // The outgoing day's grants and no others. Every earlier day was folded by
+    // the turn that left it, so this walks the whole chain by only ever looking
+    // at one link of it.
+    fresh.keptGranted = previous.keptGranted;
+    for (const Budget &budget : profile.budgets) {
+        if (budget.carriesOver())
+            fresh.addKeptGranted(budget.id, previous.creditedSeconds(budget.id));
+    }
+    // The events do not come with it, deliberately. A budget that ran out
+    // yesterday and is still out says so again this morning before it acts,
+    // which is docs/design.md §6: nobody is cut off cold, and a person who meets
+    // a spent pot at nine has been told why.
+    return fresh;
+}
+
 Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const Ledger &ledger,
-                 const QDateTime &now, int tickSeconds)
+                 const QDateTime &now, int tickSeconds, const QString &siteInFront,
+                 const QStringList &alsoFurniture)
 {
     Outcome outcome;
     outcome.ledger = ledger;
@@ -52,12 +121,8 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
     // the new file. Warnings and exhaustions go with it, which is what makes a
     // fresh morning a fresh set of warnings.
     const QDate today = now.date();
-    if (outcome.ledger.date != today) {
-        Ledger fresh;
-        fresh.user = outcome.ledger.user.isEmpty() ? profile.user : outcome.ledger.user;
-        fresh.date = today;
-        outcome.ledger = fresh;
-    }
+    if (outcome.ledger.date != today)
+        outcome.ledger = carryInto(today, outcome.ledger, profile);
     if (outcome.ledger.user.isEmpty())
         outcome.ledger.user = profile.user;
 
@@ -85,7 +150,17 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
 
     // 1. The verdict, per app.
     for (const AppScope &scope : live) {
-        if (profile.verdictFor(scope.id) != Verdict::Deny)
+        // The session's own furniture is not judged. `default: deny` is about
+        // what somebody chose to open, and closing `udiskie` two seconds after
+        // login is omahouse breaking the desktop it is a guest on. See
+        // `Furniture.h` for why unknown is never furniture.
+        if (isFurniture(scope.id, alsoFurniture))
+            continue;
+        // The executable beside the id, never instead of it -- Profile.h's
+        // three-argument `selectorMatches`. The Omarchy menu names every scope
+        // it opens `gtk-launch`, so without this a released program is closed
+        // before its window appears and the notification accuses the launcher.
+        if (profile.verdictFor(scope.id, scope.dominantExe) != Verdict::Deny)
             continue;
         // Said once per scope. A refused app that is closed and opened again
         // gets a new unit name from systemd and so is worth saying again, which
@@ -113,12 +188,55 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
     //    A negative tick is a caller with a bug, and it is floored rather than
     //    honoured: handing back time is how a loop that misfires turns into an
     //    afternoon nobody spent.
+    //    A site budget is spent by the other observation, and by that one only.
+    //    This is the first of the two places a `kind` has to be looked at, and
+    //    the reason is `*`: a site budget matching everything would be matched
+    //    by `anyLiveScopeMatches` against every scope on the machine and would
+    //    spend a day of browsing in an afternoon of anything at all. The two
+    //    namespaces are told apart here rather than by the shape of the string,
+    //    because there is no shape that tells `org.freedesktop.Platform` from
+    //    `youtube.com`.
     const int tick = qMax(0, tickSeconds);
+
+    // Furniture is not evidence that anybody is at the keyboard, so it is held
+    // out of the one selector that means "anything at all". A budget that names
+    // one of these by id is somebody asking for exactly that number, and it
+    // still gets it -- refusing would be this file deciding what an operator is
+    // allowed to be curious about.
+    QVector<AppScope> billable;
+    QVector<AppScope> furniture;
+    for (const AppScope &scope : live) {
+        if (isFurniture(scope.id, alsoFurniture))
+            furniture.append(scope);
+        else
+            billable.append(scope);
+    }
+
+    // The site in front, beside the budgets and never inside them --
+    // docs/design.md §5.2. Written whether or not anything has a budget about
+    // it, because the observing number is the whole of what §5.2 shipped and it
+    // goes on being true for a machine that never grows a site limit.
+    if (!siteInFront.isEmpty())
+        outcome.ledger.addSiteSeconds(siteInFront, tick);
+
     for (const Budget &budget : profile.budgets) {
         if (budget.id.isEmpty())
             continue;
-        if (anyLiveScopeMatches(live, budget.match))
-            outcome.ledger.addSeconds(budget.id, tick);
+        const bool spending = budget.isSite()
+            ? (!siteInFront.isEmpty() && anySelectorMatches(budget.match, siteInFront))
+            : anyLiveScopeMatches(billable, budget.match)
+                || (!budget.isSession() && anyLiveScopeMatches(furniture, budget.match));
+        if (spending) {
+            // Which of the two counters, decided by the profile and never by
+            // the shape of anything here. They are separate maps because
+            // everything that adds days or machines together reads the daily
+            // one, and a pot's running total is carried into the file of every
+            // day it touches -- summed, it would be counted once per day.
+            if (budget.carriesOver())
+                outcome.ledger.addKeptSeconds(budget.id, tick);
+            else
+                outcome.ledger.addSeconds(budget.id, tick);
+        }
     }
 
     // 3. The balance, per budget.
@@ -128,8 +246,9 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
         if (budget.id.isEmpty() || !budget.hasLimit())
             continue;
 
-        const int limit = budget.dailyMinutes * 60 + outcome.ledger.grantedSeconds(budget.id);
-        const int left = limit - outcome.ledger.secondsFor(budget.id);
+        const int limit = allowanceSeconds(profile, budget, outcome.ledger, now.date());
+        const int spent = spentSeconds(budget, outcome.ledger);
+        const int left = limit - spent;
 
         if (left > 0) {
             // Every mark this tick crossed is written down, so a tick long
@@ -140,6 +259,18 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
             int lowest = -1;
             for (int mark : profile.warnAt) {
                 if (mark <= 0 || left > mark * 60)
+                    continue;
+                // A mark the budget was never above is not a mark. The marks are
+                // absolute -- ten, five, one -- and a budget smaller than one of
+                // them is born with it already crossed, so it fires the instant
+                // the app opens and says nothing anybody can act on: a three
+                // minute budget announced five minutes left, and a ten minute
+                // session spent its ten minute mark at login. Strictly above,
+                // because a mark equal to the whole budget is the same event as
+                // opening the app. What is left when every mark goes this way --
+                // a budget of one minute -- still gets the grace warning, which
+                // is the one that was always going to matter there.
+                if (limit <= mark * 60)
                     continue;
                 if (outcome.ledger.hasWarned(budget.id, mark))
                     continue;
@@ -194,6 +325,32 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
         if (!acts || elapsed < grace)
             continue;
 
+        // The second place a `kind` has to be looked at, and the one that would
+        // be expensive to get wrong. Below this line the app half reaches into
+        // the cgroup tree and into logind; a site budget must never arrive
+        // there. It is a branch and not a filter on purpose -- the two halves
+        // cannot fall through into each other, so a site budget matching `*`
+        // closes nothing and ends nobody's session, which is exactly what a
+        // shared loop with an `if` in the middle of it would eventually do.
+        if (budget.isSite()) {
+            // One Block per domain the budget names, because a Block is an
+            // instruction about one domain and the browser has to be told each
+            // of them. The same shape the app half has below, where one budget
+            // holding several scopes closes each of them by name.
+            for (const QString &domain : budget.match) {
+                Decision decision;
+                decision.kind = Decision::Kind::Block;
+                decision.reason = Decision::Reason::Exhausted;
+                decision.budgetId = budget.id;
+                // The selector, not the id: what the browser has to be told is
+                // the domain, and a budget called `web` matching `*` is a limit
+                // on browsing rather than on a site called web.
+                decision.site = domain;
+                outcome.decisions.append(decision);
+            }
+            continue;
+        }
+
         if (budget.onExhausted == OnExhausted::Logout) {
             Decision decision;
             decision.kind = Decision::Kind::Logout;
@@ -207,7 +364,11 @@ Outcome evaluate(const Profile &profile, const QVector<AppScope> &scopes, const 
         // because closing is a write to one scope's cgroup.kill and a budget
         // can be holding several of them.
         for (const AppScope &scope : live) {
-            if (!selectorMatches(budget.match, scope.id))
+            // The same match the debit above was made on, or a budget would
+            // count a launcher's scope all day and close nothing at the end of
+            // it. The unit named is the launcher's, because that is the cgroup
+            // the program is really in.
+            if (!anySelectorMatches(budget.match, scope))
                 continue;
             Decision decision;
             decision.kind = Decision::Kind::Close;

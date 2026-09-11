@@ -10,15 +10,17 @@ An app is named by the id of its scope -- `chromium`, `org.freedesktop.Platform`
 
 Exit codes: 0, the run answered; 1, a usage error or a file that is there and would not parse; 2, something it was asked about is not there -- no such account, no such profile. The split matters to a script: a profiles.json full of half-written JSON must not read as `kid has no profile`.
 
-Four roots, and every one of them can be moved by a variable, which is what lets the end to end suite create, edit and read a profile as an ordinary user with nothing installed:
+Seven roots, and every one of them can be moved by a variable, which is what lets the end to end suite create, edit and read a profile as an ordinary user with nothing installed:
 
 - `/etc/omahouse/blocked`, or `$OMAHOUSE_CONFIG_DIR/blocked` -- the accounts that may not log in, one name per line, which stock `pam_listfile` reads. Written by `watch` and by nothing else, and its whole content is rewritten every cycle from what is true right now, which is what takes a name back out at the turn of the day.
 - `/etc/omahouse/profiles.json`, or `$OMAHOUSE_CONFIG_DIR/profiles.json` -- who is under rules. Root writes it and everyone reads it. Its absence is not an error: it is the state of every machine before the first profile is written, and `status` says so and goes on scanning.
 - `/var/lib/omahouse/<user>/<YYYY-MM-DD>.json`, or the same under `$OMAHOUSE_STATE_DIR` -- one ledger per day. A day with no file is a day nobody spent, and it is left out of a report rather than printed as a row of zeroes.
+- `/etc/chromium/policies/managed/omahouse.json`, or the same file under `$OMAHOUSE_CHROMIUM_POLICY_DIR` -- which sites open in the browser, composed from every profile at once. It belongs to another program's directory, so it is written under its own name and never merged into anybody else's file, and it is removed rather than emptied when the profiles stop asking for anything. The machine's own copy of it is only written by a run that is also managing the machine's own `/etc/omahouse`, which is what keeps the end to end suite away from the browser of whoever is running it.
 - `/sys/fs/cgroup`, or `$OMAHOUSE_CGROUP_ROOT` -- where the app scopes are read from.
 - `/proc`, or `$OMAHOUSE_PROC_ROOT` -- where the executable of a scope's processes is read from.
+- `/sys/class/drm`, or `$OMAHOUSE_DRM_ROOT` -- the screens. Every connector whose `status` is `connected` has a `dpms`, and that is how omahouse knows whether anybody is looking: a browser cannot be asked, because the browser spike measured one answering `active` for twenty-five minutes with the monitor physically off.
 
-The identity of a running app is its systemd scope and not the path of its executable. `app-Hyprland-chromium-031bdc27.scope` is `chromium`, `app-flatpak-org.freedesktop.Platform-2351381583.scope` is `org.freedesktop.Platform`, and `app-Hyprland-xdg\x2dterminal\x2dexec-151e8e07.scope` is `xdg-terminal-exec` once systemd's escaping is undone. That is what groups the twenty-one processes of one Chromium into one app, tells an app apart from session plumbing, and names a flatpak whose every process runs `/usr/bin/bwrap`.
+The identity of a running app is its systemd scope and not the path of its executable, which is consulted only where the scope's id is not the name of what is running. `app-Hyprland-chromium-031bdc27.scope` is `chromium`, `app-flatpak-org.freedesktop.Platform-2351381583.scope` is `org.freedesktop.Platform`, and `app-Hyprland-xdg\x2dterminal\x2dexec-151e8e07.scope` is `xdg-terminal-exec` once systemd's escaping is undone. That is what groups the twenty-one processes of one Chromium into one app, tells an app apart from session plumbing, and names a flatpak whose every process runs `/usr/bin/bwrap`.
 
 
 - **Usage:** `omahouse [-j --json] <SUBCOMMAND>`
@@ -30,12 +32,13 @@ The identity of a running app is its systemd scope and not the path of its execu
 
   The shapes, by verb:
 
-  - `status` -- `user`, `uid`, `date`, `session`, `profile` (the whole profile, or null), `scopes`, `unnamed`, `outOfReach` and `budgets`. A `scopes` entry is `id`, `unit`, `cgroup` and `processes`, plus `verdict` where there is a profile to give one, plus `exe`, `exeProcesses` and `exeAgrees` -- the executable most of its processes are running, how many of them are running it, and whether that backs up the id. `exe` and `exeAgrees` are null together when nothing in the scope could be read, which is no opinion and not a disagreement. `unnamed` is the same minus the id and the agreement, for a scope under `app.slice` whose unit name is not an app scope name. `outOfReach` is `processes` and the `units` they are in.
+  - `status` -- `user`, `uid`, `date`, `session`, `presence`, `profile` (the whole profile, or null), `scopes`, `unnamed`, `outOfReach` and `budgets`. A budget's `match` is a list of names, always, however many are in it -- the same shape `profiles.json` uses. `presence` is `present` (a boolean, or null when nothing could be read -- nobody there and nothing looked at must never read the same), `reason` (`using`, `screen-off`, `locked`, `other-session`, `no-session`, `unknown`), `screen`, `seatRead`, `seatUid`, and `today`, the seconds of the day spent in each state. A `scopes` entry is `id`, `unit`, `cgroup` and `processes`, plus `verdict` where there is a profile to give one, plus `exe`, `exeProcesses` and `exeAgrees` -- the executable most of its processes are running, how many of them are running it, and whether that backs up the id. `exe` and `exeAgrees` are null together when nothing in the scope could be read, which is no opinion and not a disagreement. `unnamed` is the same minus the id and the agreement, for a scope under `app.slice` whose unit name is not an app scope name. `outOfReach` is `processes` and the `units` they are in.
   - `report` -- `user`, `since`, `until`, `days` and `totals`. A day is the ledger of `docs/design.md` §4 without its `schemaVersion` and `user`, both of which would be the same words on every day of the range.
   - `profile list` -- an array of `user`, `displayName`, `enabled`, `enforce`, `default`, and the counts of `rules` and `budgets`.
-  - `profile show` -- the profile as `/etc/omahouse/profiles.json` holds it.
-  - every verb that writes a profile -- `profile add`, `profile remove`, `profile enforce`, `profile default`, `allow`, `deny`, `limit` -- prints the profile it wrote, or for `remove` the one it took out. So a script can write and read in one call, and the answer is the same shape `profile show` gives.
-  - `grant` -- `user`, `budget`, `minutes`, `by`, `at`, and the day's `usedSeconds`, `grantedSeconds`, `limitSeconds` and `leftSeconds` for that budget.
+  - `profile show` -- the profile as `/etc/omahouse/profiles.json` holds it, including its `web` half when it has one.
+  - `status` also carries `webPolicy`: the `path` of the managed policy file, `wholeMachine` (always true, and there so a reader cannot miss it), and `contents` -- the composed policy of every profile at once, or null when there should be no file on the machine at all.
+  - every verb that writes a profile -- `profile add`, `profile remove`, `profile enforce`, `profile default`, `allow`, `deny`, `limit`, `web block`, `web allow`, `web incognito` -- prints the profile it wrote, or for `remove` the one it took out. So a script can write and read in one call, and the answer is the same shape `profile show` gives.
+  - `grant` -- `user`, `budget`, `minutes`, `by`, `at`, and the day's `usedSeconds`, `grantedSeconds`, `limitSeconds` and `leftSeconds` for that budget. There is no field saying the minutes are not live yet, because they are: an enrolled machine adds what an operator has handed over on top of the household's credit, and the household folds it in later without the number moving.
 
   A budget with no limit has `limitSeconds` and `leftSeconds` null rather than zero: zero left is a budget that has run out, and the two must never read the same.
 
@@ -57,7 +60,17 @@ And it reports what it cannot see, which `docs/design.md` §5 asks of it in so m
 
 Two things it cannot name, and they are not the same thing. A scope under `app.slice` whose unit name is not an app scope name -- a `tmux-spawn-<uuid>.scope`, say -- is counted and not named. It is under `Counted, not named`, and the word is meant: its processes are real, so every budget whose selector is `*` -- the session -- is debited for it, because somebody who has been in a terminal all afternoon is somebody using the machine. What the missing id costs it is the two things that need a name: a limit of its own, and being allowed by name. So no rule can reach it and its verdict is the profile's default, which under `default: deny` with the teeth in means it is closed -- the honest reading of an allowlist, since a thing nobody can name is certainly not on it, and `enforce: false` is what a new profile is born with. Processes in `session.slice` are the real blind spot: an app started outside `uwsm app`, by a raw `exec` in a keybinding or from inside a terminal, lands in the compositor's own cgroup, where it cannot be told from Hyprland itself. It is not counted and it cannot be closed, because `cgroup.kill` there would take the session with it. That number is never zero on a live session -- the compositor's own processes are in it -- and saying so plainly is the point: the honest report of a limit, not an alarm.
 
-And it says when a scope is not what its name says. An app launched through a shim takes the shim's name, so the id is the launcher's and not the program's: `docs/design.md` round 4 found seven `app-Hyprland-gtk\x2dlaunch-*.scope` on the development machine with VS Code inside every one of them, and the terminal calling itself `xdg-terminal-exec`. Under `Not what the name says`, `status` prints the id, the executable most of its processes are running, and how many of them -- because a rule about `gtk-launch` is a rule about whatever it launches next, and nobody can weigh that without seeing what is in there. A flatpak reads the same way and is the opposite case: the id is right and the executable is `/usr/bin/bwrap` for every flatpak alike. Neither signal can overrule the other, which is why this is a sentence and never a verdict -- the rule goes on matching the id, and `evaluate` is never shown the executable.
+And it says when a scope is not what its name says. An app launched through a shim takes the shim's name, so the id is the launcher's and not the program's: `docs/design.md` round 4 found seven `app-Hyprland-gtk\x2dlaunch-*.scope` on the development machine with VS Code inside every one of them, and the terminal calling itself `xdg-terminal-exec`. Under `Not what the name says`, `status` prints the id, the executable most of its processes are running, and how many of them -- because a rule about `gtk-launch` is a rule about whatever it launches next, and nobody can weigh that without seeing what is in there. A flatpak reads the same way and is the opposite case: the id is right and the executable is `/usr/bin/bwrap` for every flatpak alike. Neither signal can overrule the other, which is why this is a sentence and never a verdict. What the executable does do is give a rule a second way to reach a scope whose id is not the name of what is running: a rule about `code` matches the scope the menu called `gtk-launch`, and the verdict printed here is the one `watch` would reach. It never takes a match away, so a rule naming a flatpak goes on matching it.
+
+And it says whether anybody is in front of the machine, under `Presence`. The browser spike measured a browser answering `active` for twenty-five minutes with the monitor physically off, so the question is asked of the machine instead: which session the seat is showing, from `loginctl`, and whether any connected screen is lit, from the kernel's `/sys/class/drm/*/dpms`. Never from the fiscalised user's own compositor -- root could open that socket and read `hyprctl monitors`, and it is refused because the socket lives in a directory that user owns. `docs/design.md` §5.1 has the whole of it and the presence PoC has the measurement.
+
+It is measured and reported, and it takes nothing away. What an app is billed is its running time, which is `docs/design.md` §5 and does not change here, so a budget still being spent beside `away: every connected screen is off` is not omahouse having quietly stopped counting -- and `status` says so on the same screen, because that is the reading somebody would otherwise take.
+
+And it says which site is in the front tab of the browser, under `TIME PER SITE`, with what the day has come to per site beside it. The site comes from a Chromium extension that reports the registrable domain and nothing else, through a native messaging host that appends it to a file in that account's own runtime directory; the day's totals come from the ledger, which the daemon wrote. So an operator asking about somebody else sees the totals and not the live tab -- the ledger is 0644 and the file is not -- and that asymmetry is deliberate.
+
+A site is counted only while the presence above says somebody is in front of the screen, and `status` prints `is NOT being counted` in so many words when the two disagree.
+
+A site with a budget on it appears twice, and the two rows are two different things: the `TIME PER SITE` table is every domain that was in front, budget or no budget, and the budget table is what a limit has been spent. A site whose budget has run out is in the machine's blocklist until the day turns, and `SITES` above says so.
 
 ### Arguments
 - **`[user]`** — Whose session to look at; defaults to whoever ran it
@@ -73,6 +86,8 @@ What was spent per budget, the time an operator granted, and what the daemon alr
 A user with no ledger is not an error. It is somebody who has not been counted yet, and it is said in one line naming the file that is not there, rather than as an empty table.
 
 This verb does not ask whether the account exists. A profile, and the days it accumulated, can outlive the account it was written for, and a report is exactly what somebody would want in that case.
+
+A day with time per site in it gets a `TIME PER SITE` table beside the budgets, and a range gets a `TOTAL PER SITE` beside the total. Beside, and never among: a site is not a budget, and adding `youtube.com` to a sum of budgets would be a report saying the day was twice as long as it was.
 
 ### Arguments
 - **`<user>`**
@@ -96,6 +111,8 @@ Put an account under rules.
 
 The profile is born observing and allowing: `enforce: false`, `default: allow`, the warn marks of `docs/design.md` §4 at ten, five and one minute, and twenty seconds of grace. Both defaults are the same choice, and `docs/design.md` gives the reason twice. A profile that counts without biting is one somebody can look at for a day and then switch on -- which is what the lan house always did -- and a profile written by halves that denies everything locks somebody out of their own machine. It is the reasoning of `onerr=succeed` on the PAM line of §2: the failure that leaves the rules soft is recoverable, and the one that leaves them hard is not.
 
+**`omahouse profile add '*'` writes the profile for anybody**: it applies to whoever sits at this machine without a profile of their own, which is how twenty machines carry rules for forty rotating customers without forty profiles typed by hand. Four things about it are not visible from the field and each is decided: somebody who has a profile of their own keeps it, and the whole list is looked at before this one is considered; an administrator is never covered, checked every cycle rather than written into the file, so somebody put in wheel tomorrow falls out of it on the next tick; what kind of machine this is does not come into it; and each person is reported under their own name, not under `*`, so the commands printed beside them are commands that can be run. A budget that never resets is refused on it, because a pot on a shared login is emptied once by the first person and never refilled. **Quote the `*`** -- unquoted it is the shell's wildcard, and every line this program prints about that profile quotes it for the same reason.
+
 An account in `wheel` is refused, and this is the one place this build refuses rather than warns. `docs/design.md` §1 makes the operator whoever is in wheel, so a profile for one of them is somebody fiscalising themselves by accident, and the person who could undo it is the person it would be imposed on.
 
 An account the machine does not have yet is not refused. The profile is written and the missing account is said out loud, because a profile can be written before its account and can outlive it -- which is also why `report` never asks either.
@@ -112,6 +129,73 @@ Only one profile per account: two would be two sets of rules nobody could point 
   The program it runs is `/usr/sbin/useradd`, or `$OMAHOUSE_USERADD`. The variable is not a convenience: `useradd` is irreversible enough never to be exercised outside the VM, so the end to end suite points it at a script that records the call and creates nothing.
 
   An account that is already there is left alone and said so; a useradd that fails is the profile not being written.
+
+## `omahouse profile publish`
+
+- **Usage:** `omahouse profile publish [--to <machine>] [--all] <user>`
+
+Profiles edited on the manager are drafts. Publishing checks every paired computer first; an unresolved change anywhere blocks every push. Resolve it with profile merge --take or --keep. Publishing is never scheduled. --all selects reached, paired computers that are behind or never published; unavailable computers are reported under not checked.
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--to <machine>`** — A paired destination; repeat to choose several
+- **`--all`** — Publish to all reached computers needing the draft
+
+## `omahouse profile merge`
+
+- **Usage:** `omahouse profile merge`
+
+What each computer says about one profile, against what this one says, and what to do about the difference.
+
+The second half of the emergency exit. omahouse is installed whole on every machine so somebody can sit down and fix it with the manager unreachable; a push stands back from what they did, and this is where a person is finally asked about it.
+
+**Three kinds of answer and not one**, because *it differs* would put three different decisions under one word. **new** is a profile for somebody this machine has never heard of -- nothing to conflict with, and the decision is whether to take it in. **changed** is both having one and not the same, which is the only real conflict. It is decided by the rules and never by the stamp: a pushed profile is restamped by the machine that takes it in, so two copies that agree on every rule differ in `writtenBy` and `writtenAt` as a matter of course, and a merge that read the stamp would list every machine in the house as changed forever. The stamp is in the table beside the answer, which is where who wrote each and when belongs. **gone** is that machine saying it has none while this one has one, which is somebody having removed it there and is the bluntest thing the exit is for.
+
+A fourth thing is not an answer: a machine nothing has been collected from. It is said out loud and never folded into *no differences*, for the reason `house` says which computer has not reported -- agreement and silence read the same and only one of them is a fact.
+
+`--take <machine>` puts that machine's version here, and taking a machine's *absence* takes a removal: agreeing that the account has no rules there means it has none here. `--keep <machine>` prints the document that makes that machine take this one, with what the manager believes is over there carried inside it as `supersedes` -- so a decision made against a version that has since changed lands nowhere instead of on the wrong one. **What is applied is what was listed**, and that is mechanism rather than discipline.
+
+Both flags at once is refused: one decision at a time. So is a machine nothing was collected from, because there is no version of it to decide about, and `--keep` where this machine has no profile, because a push carries a profile and cannot carry its absence.
+
+## `omahouse profile collect`
+
+- **Usage:** `omahouse profile collect`
+
+Take in the profile another computer says it has.
+
+The other half of `profile show --json`, and the same shape as `omahouse collect`: the machine's name, whose profile, and the document on standard input.
+
+    ssh arch@192.168.1.20 omahouse profile show kid --json | sudo omahouse profile collect 'the kitchen laptop' kid
+
+It lands beside that machine's days, under `/var/lib/omahouse/elsewhere/<machine>/<user>/profile.json`, in the directory a household has already learned the meaning of. **A document with no profile in it is an answer and is kept**: it means that machine says it has none, which is what an administrator removing one with the manager unreachable looks like from here. Without it, a removal and a machine that never reported are the same absence, and treating that as nothing happening is what quietly erases a deliberate removal. **Nothing is decided by taking it in** -- what arrives is what that machine says, filed where the deciding can read it, exactly as a collected day is filed without being added to anything yet.
+
+A document is accepted only for a computer the household has written down, and only for the account it was asked about: a profile filed under the wrong name is somebody else's rules in the place a merge will read them as this person's.
+
+**Reconciling several profiles is this, and taking one is `apply-staged`.** A push carries one profile from the manager to a machine; somebody using that in a loop to reconcile a household would be building this out of the wrong verb.
+
+It is read by the reader `profiles.json` gets, so a machine newer than this one is refused rather than misread -- which is why `profile show --json` carries the schema version around the profile.
+
+## `omahouse profile apply-staged`
+
+- **Usage:** `omahouse profile apply-staged`
+
+Take in the profile the household left in the stage.
+
+The machine's half of a profile arriving from a central omahouse. The manager cues a script that writes `/etc/omahouse/staged/profile.json` **as the node's service account** -- the directory belongs to it, so putting a document there needs no privilege -- and then runs this, which has root and does the reading.
+
+**It takes no arguments, and that is the whole design.** The sudoers entry that lets the node account run this names every argument, because a rule ending in a wildcard lets the caller append what it likes to whatever the pattern matched. A rule with nothing after the verb can only be that command or a refusal, which makes what the household may push a question somebody answers by reading a file. The price is that the path cannot be given on the command line, so it is fixed.
+
+The document is shaped like `profiles.json` with exactly one profile in it, and is read by the same reader that file gets: the schema version, the verdicts, an action that cannot happen to that kind of budget, and a budget that never resets on a profile for anybody are all refused here exactly as they are there. A refusal that lived only in the verbs would have this as its back door. Reconciling several profiles at once is `profile collect` and a merge, and is not this: somebody using this verb in a loop to reconcile a household would be building the merge out of the wrong one.
+
+A symbolic link in the way is refused before anything is opened, the directory as well as the file. Nothing is to be gained by one today -- whoever can write the stage is the account that already has its own line to root -- and that is exactly why nobody would look at it later, when that line is narrower and this is the door.
+
+**A push does not overwrite a profile somebody made here.** The tiebreak says the most recent written wins and a manager pushes on a schedule, so recency favours the central by construction: an administrator who fixes something by hand at two o'clock would be overwritten by the routine push at five past, with nobody deciding and nobody told. That defeats what omahouse being installed whole on every machine is for -- a fix the next cycle erases was not a fix -- and it would also destroy the evidence a merge exists to show, so the merge would list nothing forever without ever looking wrong.
+
+Three ways through, and nothing else: there is no profile here yet; the last write here was a push, so the household already knows what it is replacing; or the document carries a `supersedes` holding the profile the manager believes is here and it is exactly what is here. The last is somebody on the manager having looked at this machine's version and decided, which is the second pass of a merge and the only way a hand-made profile is replaced. It is the whole profile and not its stamp, because the stamp has a second's resolution and a machine edited twice inside one second would read as unchanged.
+
+What ends up written as `writtenBy` is the node's account, because a push has no person behind it. That is what lets a central tell later what it issued from what an administrator typed on the machine, so it is the answer that was wanted and not one to tidy away.
 
 ## `omahouse profile remove`
 
@@ -184,9 +268,238 @@ The settings, the rules in the order they are read -- the first that names an ap
 ### Arguments
 - **`<user>`**
 
+## `omahouse day`
+
+- **Usage:** `omahouse day [--date <date>] <user>`
+
+What this computer spent, as a document another computer can read.
+
+The ledger, unchanged. No summary, no envelope and no version of its own: the file on the machine that spent the time is already the answer to what a day was, and every transformation between there and the sum is a place the two can come to disagree. `omahouse report` is the verb for a person; this one is for a machine.
+
+One shape, whether or not `--json` was asked for. This verb exists to be read by another computer, and a second, prettier form would be a second answer to the same question.
+
+It needs no privilege: a ledger is 0644 and always has been.
+
+A day nobody spent is exit 2 and no document at all. That is the whole point of the exit code here -- a quiet afternoon and a machine that is not reporting must never look the same to the thing adding them up, and a ledger of zeroes printed under a real date would make them identical.
+
+**Today carries a pot.** A budget that never resets keeps its running total in the last file that touched it, so a morning nobody has written yet is read the way `status` reads it -- through `readDay`, with the pot carried in -- and is a day with something in it to report. Read plainly it reported every pot as untouched, the manager told the other machines so, and their next statement was refused for consumption moving backwards, every cycle, until something was spent here. A machine off at midnight and idle all morning is the ordinary case. `--date` reads a past day exactly as it was written, because a carry there would put a pot's running total into a day the pot was not touched.
+
+`--date` because a machine that was off at midnight still owes the house yesterday. `--date` and not `--on`: `profile enforce --on` already means something else, and one flag name with two meanings is a flag somebody gets wrong once.
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--date <date>`** — Which day, YYYY-MM-DD; today by default
+
+## `omahouse collect`
+
+- **Usage:** `omahouse collect <machine> <user>`
+
+Take in a day another computer spent, and file it where the sum will find it.
+
+The other end of `omahouse day`. The document comes in on standard input, which is what makes the seam replaceable: a scheduled Battery script, or a person with `ssh` and a pipe, and omahouse cannot tell the difference.
+
+    omahouse day julia | ssh study omahouse collect laptop julia
+
+What moves the bytes is deliberately not omahouse's. A daemon here would be a second thing to run, to supervise and to secure, for a job that is one file arriving.
+
+**A day is accepted only for a computer written down in `machines.json`**, and that refusal is the whole of what stands between the sum and a stranger: without it, whatever can reach this machine decides what the house spent.
+
+The document names its own person and its own date, and both are checked rather than trusted. A day filed under the wrong name is time added to somebody who did not spend it, and nothing downstream would ever notice -- `house` reads whatever is in the directory. A day dated later than today is refused too: accepting it puts a file in tomorrow's name that today's sum will not read and tomorrow's will, which is a total that changes overnight for no reason anybody can see.
+
+It is written through the same writer this machine's own days go through, so a collected day and a local one are the same bytes read by the same reader.
+
+Writing needs root, exactly as everything under `/var/lib/omahouse` does.
+
+### Arguments
+- **`<machine>`** — The household's name for the computer the day came from
+- **`<user>`**
+
+## `omahouse house`
+
+- **Usage:** `omahouse house`
+
+Adds consumption and operator credit from collected days. Local leave adjustments do not change the household credit. Missing machines are named. For exclusive credit across concurrent or disconnected machines, enroll the Battery and use allocation plan/apply; never broadcast a remaining balance with leave.
+
+## `omahouse machines`
+
+- **Usage:** `omahouse machines`
+
+The computers this household owns.
+
+omahouse has always known accounts and never known machines. Everything about more than one -- reaching another computer, reading its day, telling it something -- needs a place that says which computers are ours, and `/etc/omahouse/machines.json` is it. Beside `profiles.json`, read the same way: root writes it and everybody reads it.
+
+It holds no rules, and that is the whole of its design. What a machine does is its own `profiles.json`, on the machine, because a central that held the rules would be a central whose absence is a machine with no rules at all. A list that goes missing costs a household the ability to ask about its computers; a policy that goes missing costs it the rules.
+
+No file is the ordinary state and never an error. Most households are one computer, and one that has never been told about another is not misconfigured -- it says so and comes back.
+
+## `omahouse machine`
+
+- **Usage:** `omahouse machine <SUBCOMMAND>`
+
+One computer of this household: paired, added or forgotten.
+
+Pairing is a walk. Two computers with no prior channel cannot come to trust each other in one move -- Omakure checks a peer against an identity it was given beforehand, so somebody has to carry that identity between them, and the only question is whether they carry it or type it. These verbs are in the order a person actually moves:
+
+1. `omahouse machine invite --at <this computer>` where the operator sits. It prints one line.
+2. `sudo omahouse machine prepare --invite <line> --at <that computer>` on the new machine, which is where the operator already is, because they just installed Omarchy on it.
+3. `sudo omahouse machine add <a name> --pair <line>` back on the operator's computer.
+
+The line carries no secret: a node id, a public key, a transport certificate and an address, every one of them public. What it buys is not typing a kilobyte of hex twice, which is the step that was measured going wrong most often. It is refused rather than half-read when it arrives in pieces, because a terminal that wrapped it is the ordinary way it breaks and trusting half a certificate is the expensive way to find out.
+
+What those three replace is seven manual steps, each of which fails in a way that reads like a networking problem and is not: node operations run as the wrong account leaving root-owned locks nothing can clear, a `node init` before its config file exists, a config missing `version` and `[node]`, a `node serve` with no tokens file, a wire that refuses a non-loopback bind, the trust exchange in both directions, and one sudoers line.
+
+The trust is asymmetric on purpose. The new machine trusts the operator's as a Conductor and accepts Cues only for one named Battery; the operator's trusts the new one as a Performer and accepts none at all. A Conductor that could be cued back is a Conductor somebody took.
+
+The list itself is `omahouse machines`.
+
+## `omahouse machine link`
+
+- **Usage:** `omahouse machine link [FLAGS] <destination>`
+
+Install omahouse on another computer and link it here, in one command.
+
+This is what the whole of the pairing walk exists to make possible. A household buys a second computer, puts Omarchy on it, and the operator has ssh to it. From their own machine:
+
+    sudo omahouse machine link arch@192.168.1.20 \
+         --name "the kitchen laptop" --at 192.168.1.10:7879
+
+and that computer is installed, linked, and in the list. What it does is the three verbs of `machine invite`, `machine prepare` and `machine add --pair`, with the walking done over ssh instead of by a person carrying a line between two keyboards.
+
+**Only ssh access is needed on the far side**, which is the one thing the operator was promised would be enough. ssh is not wrapped or replaced and is given no options of its own beyond a destination: whatever their ssh already does — their keys, their config, their agent — is what this uses. The terminal is kept, so a sudo password on the far side can be typed.
+
+**One install, and nothing to go and find.** The omahouse package depends on omakure, so putting omahouse on that computer puts the wire on it too, and the browser's meter with it. It installs only when omahouse is not already there: re-linking a computer is an ordinary thing to do — an address changed, a manager was rebuilt — and it must not reinstall the package underneath somebody.
+
+**The far computer gets the whole of omahouse, not an agent.** That is the point of it. If this computer can never reach it again, whoever has root there sits at it and reads the day, hands over time, or switches the teeth off. A computer that could only be administered from somewhere else is a computer that is unadministrable exactly when something has gone wrong.
+
+The address of the far computer is taken from the destination that was just typed rather than asked for again, because that is the address which demonstrably reaches it, and two addresses somebody has to keep in agreement are two addresses that will one day disagree.
+
+Everything this machine can get wrong is refused before anything touches the far one. Finding out that the manager cannot describe itself *after* installing a package on somebody else's computer would leave that computer half linked, with no verb here that knows it.
+
+### Arguments
+- **`<destination>`** — An ssh destination, like arch@192.168.1.20
+
+### Flags
+- **`--name <name>`** — What the household calls it; its address by default
+- **`--as <name>`** — What to call **this** computer, where `--name` is the other one's.
+
+  Two flags, because this is the one verb that speaks about two computers at once and a household has a word for each. One flag doing both was the first thing tried and it made a household where every computer answered to the same name: `--name` reached the step that makes this machine a manager, and the study renamed itself after the laptop it had just linked -- on the one screen `machine kind` exists to tell them apart.
+
+  Left out, this computer keeps whatever it was already called, and a computer that has never been named goes by its hostname. A hostname is a fine default and it is not what a household says out loud, which is the whole reason `--name` exists for the other side.
+- **`--at <host:port>`** — Where the other computers will reach this one
+
+## `omahouse machine kind`
+
+- **Usage:** `omahouse machine kind`
+
+What this computer is in the household: alone, the manager, or managed.
+
+It was implicit until this verb existed -- a machine became the manager by running `machine invite` and became managed by running `machine prepare` -- and implicit is exactly wrong for it. Every verb after reads differently depending on the answer: `house` is the manager's question, `day` is a managed machine's answer, and a console open to the household belongs on one of them and not the other. Somebody who cannot ask a computer which it is cannot check any of that.
+
+**Alone is the default and it is not a lesser state.** Most households are one computer, and one computer under rules is the whole product working: the budgets are enforced, the browser is held, the day is written. Linking is what a second computer needs, not what the first one was missing -- and this verb says so in as many words, because `alone` is what somebody would otherwise read as `not set up yet`.
+
+**A managed computer gets the whole of omahouse, not an agent.** That is deliberate and it is what this file records. A thin client would be smaller and would fail the one situation it exists for: when the manager cannot be reached, whoever has root on the managed computer sits at it and fixes it there -- reads the day, hands over time, switches the teeth off. A computer that could only be administered from somewhere else is a computer that is unadministrable exactly when something has gone wrong.
+
+It lives in `/etc/omahouse/machine.json`, and deliberately not in `machines.json`: that file is the household's list of *other* computers, and a computer can be in somebody else's list without knowing it. This is what this one says about itself. Its absence is a computer on its own, which is most of them and never an error.
+
+A file that says `managed` and names no manager is refused rather than read, and so is a kind this build does not know. Reading either as `alone` would drop a computer out of a household it is really in, and nothing downstream would notice.
+
+## `omahouse machine invite`
+
+- **Usage:** `omahouse machine invite [--at <host:port>] [--name <name>]`
+
+Print the line that lets another computer trust this one.
+
+Run where the operator sits. It gives this machine an Omakure identity if it has none yet -- the one-time act of becoming the household's Conductor -- writes the Omakure config, and prints one line to carry to the computer being added.
+
+`--at` is required and is never guessed. A machine cannot know which of its addresses the household will reach it on, and a wrong one is a pairing that completes and then does nothing.
+
+Running it again is safe and is how an operator whose address changed tells the house. The config is rendered whole, with every machine already paired still in its peer list: a rewrite that dropped them would be a household whose computers trust each other and cannot find each other.
+
+It writes `/etc/omakure/node.toml` in full, and says so. A config half of which is somebody's and half of which is ours has no owner, and the failure of that is a merge that silently drops the peers.
+
+### Flags
+- **`--at <host:port>`** — Where the other computers will reach this one
+- **`--name <name>`** — What this computer calls itself, like "the study"
+
+## `omahouse machine prepare`
+
+- **Usage:** `omahouse machine prepare [FLAGS]`
+
+Put this computer under a household, from the line it was given.
+
+Run as root on the computer being added, with the operator sitting at it. It does, in one go, the seven things that were found by getting each of them wrong first:
+
+- writes `/etc/omakure/node.toml` with the operator's machine as its one peer and one Battery it may be cued for -- **before** `node init`, because init runs as the node's account and `/etc/omakure` is root's, and left to create the file itself it answers `io_failed: Permission denied`
+- gives this machine an Omakure identity, if it has none. Never twice: the second `node init` is the one that cannot be undone without deleting an identity another machine already trusts
+- trusts the operator's machine as a Conductor
+- writes a tokens file, because `node serve` refuses to start at all without one -- `auth required` -- and then nothing is listening on the wire either, which reads like peering and is startup
+- writes one sudoers line, naming one binary. The account that answers a Cue has no shell and no sudo, and omahouse's writing verbs need root because `/etc/omahouse/profiles.json` is a root daemon's file. A rule naming `ALL` here would turn a Cue for one script into a route to everything
+- drops in `--allow-non-loopback-direct` and `NoNewPrivileges=no` over Omakure's own unit, as a drop-in and never an edit: the unit is rewritten by every reinstall, and a household that upgrades Omakure must not silently lose its wire
+- prints the line to carry back
+
+The service failing to start is said and is not the pairing failing. Everything above it is the part that is hard to get right; a machine with no systemd still has its identity, its trust and its config, and throwing all of that away because nothing started would be the wrong trade.
+
+### Flags
+- **`--invite <line>`** — The line `omahouse machine invite` printed
+- **`--at <host:port>`** — Where this computer will answer
+- **`--name <name>`** — What this computer calls itself
+- **`--battery <name>`** — The Battery it may be cued for; omahouse by default
+
+## `omahouse machine add`
+
+- **Usage:** `omahouse machine add [FLAGS]`
+
+Write a computer down, or write down more about one.
+
+The name is the household's word for it -- `the kitchen laptop` -- and it is the handle every other verb takes. The node id is Omakure's, and both are kept because they answer different questions: one is what a person says out loud and the other is what a peer is checked against, so conflating them would mean renaming a computer breaks its trust.
+
+Both `--node` and `--at` are optional, because there is a real state between owning a computer and reaching it. A name on its own is a note to self, and the answer says which of the two it is rather than leaving somebody to find out when nothing responds.
+
+Writing one down again updates it, which is how a machine named before it was paired becomes reachable. A field left off keeps what the file had: this verb never silently forgets something already written.
+
+`--pair` is the other half of the walk and does more than write the file down. It trusts that machine as a Performer here, writes it into this machine's own peer list, and starts the service -- because trusting a computer and knowing where it is are two different files, and a name written down for a machine this one cannot speak to is exactly the state `reachable` exists to deny. The trust goes first and the list after: the list is a note to self and can be written again in a second.
+
+It takes the name from the line when none is given, and refuses `--node` or `--at` beside it. Those would be somebody correcting a value they cannot have checked, and what that buys is a peer trusted under one identity and looked for at another.
+
+### Flags
+- **`--node <id>`** — The Omakure node identity, like omk1_1c6eeda142
+- **`--at <host:port>`** — Where its wire answers, like 192.168.1.20:7879
+- **`--pair <line>`** — The line `omahouse machine prepare` printed
+
+## `omahouse machine token`
+
+- **Usage:** `omahouse machine token <machine>`
+
+How to read one computer: where its console answers, and the bearer that opens it.
+
+Two lines on stdout -- the address, then the bearer -- so a script can take either without parsing. This verb exists to be read by whatever fetches days, and it is a verb rather than a file so that the format stays omahouse's.
+
+It needs root, because what it prints is a credential. The bearers live in `/etc/omahouse/machine-tokens.json` at 0600, beside `machines.json` and deliberately not in it: that file is 0644 because a household reads its own list, and one file that is half public and half secret is a file somebody eventually publishes.
+
+A machine written down without pairing has nothing to read it with, and that is exit 2 rather than an empty line.
+
+The bearer is scoped to running the scripts that machine already declares and reading what they printed -- never `node:write`. It is the same power the Cue path grants, because they are the same scripts; what withholding `node:write` buys is that a stolen bearer cannot re-trust peers or rewrite the config, which are the two things that would make it permanent.
+
+### Arguments
+- **`<machine>`**
+
+## `omahouse machine remove`
+
+- **Usage:** `omahouse machine remove`
+
+Take a computer out of the household's list.
+
+It does nothing to the machine. Its rules, its daemon, its accounts and its day are all exactly where they were, and the answer says so -- a verb that read as `remove` and left a fiscalised computer running would be a verb somebody trusts once.
+
+The bearer for it goes too. Forgetting a machine while keeping the key to it is the shape of every credential nobody remembers they still hold.
+
+Unpairing it in Omakure, and taking the rules off whoever lives there, are separate acts with separate verbs. This one only forgets.
+
 ## `omahouse allow`
 
-- **Usage:** `omahouse allow [--limit <duration>] <user> <app>`
+- **Usage:** `omahouse allow [--limit <duration>] <user> <app>…`
 
 Let an app run, and put it on the clock.
 
@@ -196,18 +509,20 @@ The app is named by the id of its scope, which is what `omahouse status` lists. 
 
 An app allowed without a limit of its own spends the session's budget and nothing else.
 
-It warns, and does not refuse, when the id does not name one program. An app launched through a shim takes the shim's name -- `docs/design.md` round 4 found seven `gtk-launch` scopes on the development machine with VS Code inside every one of them -- so allowing that id is allowing whatever it launches next. The warning prints what is running inside the scopes that are open under it, and the rule is written anyway: it may be exactly what was meant, and a flatpak reads the same way for the opposite reason, since every flatpak on a machine runs `/usr/bin/bwrap`. With nothing open under that id there is no evidence, and with no evidence there is nothing said.
+Several apps at once is one budget between them, and it exists because one program is not always one id: a single Chromium window produces `chromium`, holding the child processes, and `org.chromium.Chromium`, holding the one that owns the window. `omahouse allow kid chromium org.chromium.Chromium --limit 45m` is a browser limited to 45 minutes; the same two commands run separately are two clocks of 45 minutes that happen to agree, and whoever writes only one of them leaves half the browser with no limit at all. Each app still gets a rule of its own, so one of them can be taken back on its own; the budget is named after the first, which is the handle `limit --budget` and `grant --budget` take. Run over a budget that already exists, it replaces both the number and the names.
+
+It warns, and does not refuse, when the id does not name one program. An app launched through a shim takes the shim's name -- `docs/design.md` round 4 found seven `gtk-launch` scopes on the development machine with VS Code inside every one of them -- so allowing that id is allowing whatever it launches next. The warning prints what is running inside the scopes that are open under it, and the rule is written anyway: it may be exactly what was meant, and a flatpak reads the same way for the opposite reason, since every flatpak on a machine runs `/usr/bin/bwrap`. Allowing the program's own name is usually what was meant and is enough -- a scope whose id is a launcher's is also matched by a rule naming what is running inside it. With nothing open under that id there is no evidence, and with no evidence there is nothing said.
 
 ### Arguments
 - **`<user>`**
-- **`<app>`** — The id of the app's scope, as `omahouse status` lists it
+- **`<app>…`** — The id of the app's scope, as `omahouse status` lists it. Several is one budget between them
 
 ### Flags
 - **`--limit <duration>`** — And no more than this a day: 45m, 2h, 1h30m
 
 ## `omahouse deny`
 
-- **Usage:** `omahouse deny <user> <app>`
+- **Usage:** `omahouse deny <user> <app>…`
 
 Do not let an app run.
 
@@ -215,21 +530,35 @@ The mirror of `allow`, and the way to take back a rule that was written by mista
 
 A budget written for that app is left where it is. The rule and the clock are two facts, and a program that is denied today may be allowed again tomorrow with the same limit it had.
 
+Several apps at once writes a rule for each, for the reason `allow` takes several: one program is not always one id, and a browser half denied is a browser.
+
 ### Arguments
 - **`<user>`**
-- **`<app>`**
+- **`<app>…`**
 
 ## `omahouse limit`
 
-- **Usage:** `omahouse limit [--session <duration>] [--budget <id>=<duration>] <user>`
+- **Usage:** `omahouse limit [FLAGS] <user>`
 
-How long a day, for the session or for one app.
+How long a day, for the session, for one app or for one site.
 
-`--session` is the budget whose selector is `*`, which is the whole of what makes the session an ordinary budget -- `docs/design.md` §2, and the reason there is no branch for `the user's time` anywhere in the core. It logs the session out when it runs out. `--budget <id>=<duration>` is one app's, and it closes that app.
+`--session` is the budget whose selector is `*`, which is the whole of what makes the session an ordinary budget -- `docs/design.md` §2, and the reason there is no branch for `the user's time` anywhere in the core. It logs the session out when it runs out. `--budget <id>=<duration>` is one app's, and it closes that app. `--site <domain>=<duration>` is one site's, and it stops that site opening.
 
-A budget that is already there gets the new number and keeps everything else: what a budget does when it runs out is a decision somebody made once, and a new limit is not a reason to take it back.
+**A site budget is the same noun with the other kind of selector.** The warning marks, the grace window, the notification, the grant and the ledger that remembers what was already said are the ones an app budget already had, unchanged. What differs is the two ends: what spends it is the site in the front tab of the browser crossed with whether anybody is in front of the screen (`docs/design.md` §5.2), and what happens when it runs out is that the domain goes into the browser's `URLBlocklist` instead of a cgroup being closed.
+
+**It comes back on its own.** Nothing has to remember to unblock a site: every cycle works out from today's ledger which sites are out of time right now and makes the policy file say exactly that, so the turn of the local date lets it open again, and so does `omahouse grant`, and so does `omahouse profile enforce --off`. That is the same discipline `/etc/omahouse/blocked` keeps for the PAM refusal of `docs/design.md` §2.
+
+**And it holds for the whole machine**, exactly as `omahouse web block` does and for the same reason: Chromium's policy directory is a compile-time constant, so one file decides for every account that opens Chromium here. A site somebody has spent their thirty minutes on stops opening for the operator too, until the day turns.
+
+A site is named by its bare domain, and a bare domain covers its subdomains. A whole URL, a path or a scheme is refused rather than repaired into a rule about its host -- the same refusal `omahouse web block` makes, by the same routine, so that a site cannot be named one way in the budgets and another way in the report.
+
+A budget that is already there gets the new number and keeps everything else: what a budget does when it runs out is a decision somebody made once, and a new limit is not a reason to take it back. An id that already names a budget of the other kind is refused rather than converted -- `org.freedesktop.Platform` is a scope id with dots in it, so there is no shape that tells an app id from a domain, and one id meaning both would be two rows of the report that are the same row.
 
 A budget can be written for an app no rule names. That is a program somebody wants a number for at the end of the day, and it is a legitimate thing to ask for.
+
+**`--resets never` makes it a pot rather than an allowance**, for any of the three shapes: two hours are two hours until somebody hands over more, and the turn of the date, a logout and a walk to another computer give none of them back -- `docs/design.md` §2. `--resets daily` is what a budget means when it says nothing, so it is never written into the file; absent, a new budget is daily and a budget that is already there keeps whatever it was, for the reason it keeps what it does when it runs out. The line printed back says which it is: `2h a day` is an allowance, `2h in all` is a pot. `profile show` and `status` say it in a `RESETS` column on every row.
+
+**It is refused on the profile for anybody.** That profile is shared, so a pot on it is emptied once by the first person to sit down and never refilled -- `never` is what took the midnight away. The file reader makes the same refusal, and it is made here as well so the person typing it is told why rather than shown a profiles.json that will not read.
 
 ### Arguments
 - **`<user>`**
@@ -237,6 +566,8 @@ A budget can be written for an app no rule names. That is a program somebody wan
 ### Flags
 - **`--session <duration>`** — The whole session: 2h
 - **`--budget <id>=<duration>`** — One budget by id: minecraft=45m
+- **`--site <domain>=<duration>`** — One site by domain: youtube.com=30m
+- **`--resets <daily|never>`** — Whether the clock goes back to zero at the turn of the date: daily, or never
 
 ## `omahouse grant`
 
@@ -248,6 +579,10 @@ The verb that is the difference between an operator and a form. `docs/design.md`
 
 The minutes go into the day's own ledger, `/var/lib/omahouse/<user>/<YYYY-MM-DD>.json`, and so they expire when the file does: the balance resets at the local turn of the date, and a grant that survived it would be tomorrow's time given away today. It adds to the limit rather than replacing it, and two grants add up.
 
+**A budget whose `resets` is `never` is the exception, and it is the exception the word `never` asks for.** A pot is emptied by being spent and refilled by somebody handing over more, so the turn of the date folds what was handed over into the pot's running total instead of dropping it. Dropping it left the spending the grant had paid for and took the decision away, which is worse than losing both.
+
+**On a machine enrolled in a household it lands here immediately**, and it lands once, and on a pot it is credit for every computer in the house from the next synchronization. The statement that machine holds says how much of its own credit the household has already folded into the total, so what has been handed over since is added on top -- and when the household does fold it in, that number rises by the same amount the credit does and the balance does not move. There is nothing to wait for and nothing to repeat. On a day the household has said nothing about, what an operator has handed over is the whole of the allowance: the daily number is the household's to give and a machine out of contact does not give it.
+
 Signed with the name of whoever asked. Under `pkexec` that is the person polkit authenticated and not root, because `root gave kid ten minutes` is not the line an operator wants to read back in a month.
 
 A budget the profile does not have is refused: time added to a counter the daemon never looks at would read on the report as though it had been given.
@@ -258,6 +593,113 @@ A budget the profile does not have is refused: time added to a counter the daemo
 ### Flags
 - **`--session <duration>`** — More of the session: 10m
 - **`--budget <id>=<duration>`** — More of one budget: minecraft=15m
+
+## `omahouse leave`
+
+- **Usage:** `omahouse leave [--session <time>] [--budget <id=time>]`
+
+Set how much remains on this machine today. Zero (0m) is supported. A budget that never resets is refused: it answers *how much remains today* and a pot has no today, so it would either expire at the turn of the date and undo itself or survive it and recharge the pot every morning. `grant` is what puts more in one. Writes a local adjustment, excluded from household credit. This is a manual override for standalone profiles, not a distributed synchronization protocol: repeating an old remaining balance after consumption would recharge it. Enrolled profiles take their balance from the household's statement, which `allocation apply` reads, and use `grant` when somebody wants to hand over more. Untagged historical grants remain operator credit because their original intent cannot be recovered.
+
+### Flags
+- **`--session <time>`** — What should be left of the session today
+- **`--budget <id=time>`** — What should be left of one budget today
+
+## `omahouse web`
+
+- **Usage:** `omahouse web [--all-but-listed] [--only-listed] [user] <SUBCOMMAND>`
+
+Which sites open in the browser, and whether incognito does.
+
+The same three parts the app half has -- a default verdict, a list of `(match, verdict)` rules, and the verbs to change them -- with a domain where a scope id would be. `omahouse web block kid youtube.com` is `omahouse deny kid steam` written about a site, and the profile holds it in the same shape:
+
+    "web": { "default": "allow", "incognito": "deny",
+              "rules": [ { "match": "youtube.com", "verdict": "deny" } ] }
+
+**It holds for the whole machine, and that was decided rather than overlooked.** Chromium's policy directory is a compile-time constant -- `docs/the-browser-half.md` §3.1 reads it out of `policy_paths.cc` -- so there is no per-account browser policy on Linux short of a managed cloud account, which is exactly what this project is not. One file therefore decides for every account that opens Chromium here, the operator's included. `omahouse web` says so once when it writes and `omahouse status` says so once when it prints, and neither says it twice.
+
+**Profiles that disagree compose to the most restrictive, with no precedence between them.** A domain opens on this machine only if every profile with web rules allows it; one profile blocking it blocks it for all of them, and one profile's `--only-listed` puts `*` in front of everybody. Inventing a precedence would mean a rule an operator wrote, and can still read back in `omahouse profile show`, silently not happening -- with nothing in that file to tell them why. Being more restrictive than one profile asked for is visible the moment somebody opens the site, so the surprise is put where it will be noticed.
+
+A site is named by its bare domain, and a bare domain covers its subdomains: `youtube.com` is also `www.youtube.com` and `m.youtube.com`. A whole URL, a path or a scheme is refused rather than repaired into a rule about its host, because a rule that is not quite the one that was typed is a rule nobody finds out about until the day it does not fire.
+
+The file it writes is `/etc/chromium/policies/managed/omahouse.json` -- its own name, beside whatever else is in that directory, because Chromium merges every file it finds there and Omarchy's `browser-policy.sh` already owns `policies.json`. It is written atomically and 0644, and it is **removed** rather than emptied the moment the profiles stop asking for anything: taking the last block back, or removing the last profile that had web rules, takes the file off the machine. An empty managed policy left behind is a machine that still looks managed, and `pacman -R omahouse` removes the same path for the same reason.
+
+An allowlist with nothing blocked beside it is not a policy. `URLAllowlist` is only ever an exception carved out of `URLBlocklist`, so `omahouse web allow` on a machine where nothing is blocked writes no file and says so. That is not a guess: the browser spike measured the same trap one policy over, where a `NativeMessagingAllowlist` with no blocklist beside it let through exactly the host it was meant to keep out.
+
+None of this is a security boundary, and it claims exactly what the app allowlist claims. Nothing in the browser stops a child opening a different browser; what stops them is the app allowlist of `docs/design.md` §5, with the same hole -- a released terminal launches anything. `docs/design.md` §10 already says not to release one in a profile that is meant to hold.
+
+### Arguments
+- **`[user]`** — Whose sites, when setting the mode rather than one rule
+
+### Flags
+- **`--all-but-listed`** — Every site opens except the blocked ones
+- **`--only-listed`** — Only the listed sites open, and nothing else
+
+## `omahouse web block`
+
+- **Usage:** `omahouse web block <user> <domain>`
+
+Do not let that site open, for every account on this machine.
+
+A rule that is already there is changed in place rather than appended to: the first rule that names a site is the one that wins, so a second line about it would be a line that never fires. The domain is lower cased on the way in, because a hostname is not case sensitive -- the opposite of the app half, where `org.freedesktop.Platform` and `org.freedesktop.platform` are two different flatpaks.
+
+It says who else has a say. If another profile allows that domain, the block still wins -- the most restrictive composes -- and the profile that was overruled is named, because being overruled in silence is the one thing that would make the rule dishonest.
+
+### Arguments
+- **`<user>`**
+- **`<domain>`** — The site's bare domain, like youtube.com; subdomains are covered
+
+## `omahouse web allow`
+
+- **Usage:** `omahouse web allow <user> <domain>`
+
+Let that site open through what is blocked.
+
+The mirror of `block`, and the way to take a rule back. Taking back the last block on the machine takes the policy file with it.
+
+An allowlist entry is an exception carved out of a blocklist and nothing else: with nothing blocked anywhere, it blocks nothing and no file is written, and the line printed says so rather than reading as a rule that is doing something.
+
+It cannot open a site another profile blocks. There is one file and no precedence, so the most restrictive of the two is what the machine does.
+
+### Arguments
+- **`<user>`**
+- **`<domain>`**
+
+## `omahouse web incognito`
+
+- **Usage:** `omahouse web incognito [--allow] [--deny] <user>`
+
+Whether incognito windows open.
+
+`--deny` writes `IncognitoModeAvailability: 1`, and like everything else on this page it is a per-machine act.
+
+`--allow` asks the browser for nothing at all -- it does not write a `0`. Writing one would override whatever else on the machine had turned incognito off, and omahouse being *more* permissive than it was asked to be is the one direction it never takes by itself.
+
+An incognito window is not extra screen time. `docs/the-browser-half.md` §4.3: it is the same browser, in the same `app.slice` scope, under the same profile, so the session budget and the browser's own budget go on debiting exactly as they did. What it buys is anonymity about *which site*, inside a total that keeps running -- which is what makes `--allow` a defensible answer rather than a hole somebody left open.
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--allow`** — Incognito windows open
+- **`--deny`** — Incognito windows do not open
+
+## `omahouse meter`
+
+- **Usage:** `omahouse meter`
+
+Chromium's native messaging host, started by the browser and never by a person.
+
+It is stupid on purpose, and that is the whole design. Chromium spawns it as whoever opened the browser -- the browser spike measured uid 1001, inside the child's session, with her bus in the environment -- so this half has no privilege and is given none. It reads native messaging frames on stdin, takes the one field it understands, and appends `<epoch seconds> <site>` to `/run/user/<uid>/omahouse/focus`. It reads no profile, knows nothing about a budget, accumulates nothing, and never touches the ledger -- which it could not write anyway, since `/var/lib/omahouse` is root's.
+
+`docs/the-browser-half.md` §8.1 reached instead for a socket in the root daemon, with framing and a second writer's worth of validation, and called it the largest single piece of unplanned work on that page. This is what replaced it: `omahouse watch` is already root, already ticks every two seconds, and already knows whether anybody is in front of the screen, so it reads that file the way it reads `/sys/class/drm`. There is no new endpoint and nothing listening, and the accumulation stays in exactly one place.
+
+It revalidates what the extension sent rather than trusting it. The extension is supposed to send a registrable domain and nothing more -- `youtube.com`, never `youtube.com/watch?v=...`, because the URL is not a thing this program should ever be able to learn -- and a compromised one must not be able to push a whole URL through by putting one in the field. Anything that is not a plausible domain is written as `-`, which is what the browser itself sends when there is no site in front. A message with no site field at all is dropped rather than written as anything, because a host that read a message it did not understand as "there is nothing on the screen" would be making a claim about the screen.
+
+The file is bounded: at a quarter of a megabyte it is started again, because nothing ever reads more than its last line and a file that grows without a ceiling in a tmpfs is a session that eventually cannot write anything at all. It goes away with the runtime directory at logout, which is exactly the lifetime it should have.
+
+Typing this verb at a terminal is refused. Native messaging is always a pipe, so a tty on stdin is somebody wondering what it does -- and what it would do is sit there silently for ever. What decides which extension may reach it is `allowed_origins` in `/etc/chromium/native-messaging-hosts/com.omahouse.meter.json`, which is root's file; the origin Chromium passes as an argument is not read, because a check over an argument the caller chose proves nothing.
+
+`$OMAHOUSE_RUNTIME_ROOT` moves the root it writes under, for the reason every other root here has a variable: the end to end suite drives this over a pipe with no browser on the machine.
 
 ## `omahouse watch`
 
@@ -291,6 +733,16 @@ Two files are all it writes -- the day's ledger and `/etc/omahouse/blocked` -- s
 
 With no profile anywhere it says so and comes back. A daemon spinning every two seconds over an empty list is a fan running for nothing.
 
+It reads the seat and the screens once per cycle -- not once per profile, because there is one seat and one set of monitors and they are facts about the machine -- and writes what it found into the day's ledger beside the budgets, under `presence`. Nothing acts on it. A cycle with no way to look says `unknown` and writes nothing at all about presence, because an hour of `unknown` in somebody's day is an hour described as a failure to look.
+
+And it reads the site in the front tab, out of `/run/user/<uid>/omahouse/focus`, which the browser's native messaging host (`omahouse meter`) appends to. It bills that site the tick **only where the presence above says somebody is really in front of the screen**: a browser is a witness to what is on the screen and a proven liar about whether anybody is looking at it, and the browser spike measured one answering `active` ninety-four times through half an hour of an empty room with the monitor physically off for twenty-five minutes of it. So a tab left on YouTube overnight adds nothing.
+
+That file belongs to the person being measured and is treated as such: it is opened without following a symlink at either component, refused unless it is a regular file owned by that very account, read a bounded tail at a time, and only its last complete line is looked at. Every way it can be wrong -- deleted, truncated, filled with rubbish, dated into the future, gone stale -- is one answer, which is that nothing is billed for that tick. What evading it wins is anonymity and not minutes: the total time on the machine is held by the cgroup walk and by the PAM line, and neither is reachable from that file.
+
+The seconds land in the day's ledger beside the budgets, under `sites`, and they are also what spends a budget written with `omahouse limit --site` -- `docs/design.md` §5.3. Such a budget warns at the same marks, waits out the same grace and takes the same grants as one about an app; what differs is that running out puts the domain into the browser's managed policy rather than closing a cgroup.
+
+And it comes back out on its own, by the same path the name in `/etc/omahouse/blocked` does. Every cycle works out from today's ledger which sites are out of time right now and makes the policy file say exactly that, so the turn of the day, a grant and `profile enforce --off` each let a site open again without knowing that file exists -- and with nothing out of time the file is removed rather than emptied.
+
 It stops on SIGINT and SIGTERM after the cycle it is in, which is a `rename` away from being no cycle at all.
 
 ### Flags
@@ -300,6 +752,70 @@ It stops on SIGINT and SIGTERM after the cycle it is in, which is a `rename` awa
 - **`--once`** — One cycle, and out.
 
   No loop behind it, so it is a question rather than a daemon: what does omahouse count right now, and what would it say. It prints the accounting -- the apps it found, the budgets it debited, and what is left of each -- because somebody typed it and is waiting for an answer, where the loop only writes its journal.
+- **`--for <seconds>`** — Cycles for that many seconds, and then out.
+
+  The middle ground between `--once`, which measures a single instant, and running forever, which needs somebody to own the process. A bounded run is what lets the loop be a scheduled job: something starts it every minute, it works for that minute, and it ends. A tick that jams dies with the minute it was in rather than jamming for a day, and what restarts it is the schedule rather than the unit's `Restart=always`.
+
+  It is measured in whole seconds, like `--interval` and unlike every other length in this program. The two are siblings -- both are about this loop's clock -- and the duration vocabulary elsewhere reads a bare number as minutes, so `--for 60` would quietly mean an hour. A flag whose plain number means one thing here and another next to it is a flag somebody gets wrong once and never trusts again.
+
+  The window ends between cycles and never inside one. A run cut off halfway through deciding would leave a scope SIGTERMed with nobody to finish the sequence, so the last cycle a bounded run does is a whole one and the process may outlive its window by up to a tick.
+
+  Shorter than one cycle is refused: it would count nothing at all. So is asking for it together with `--once`, because they want different things -- one cycle, or cycles for a while -- and guessing which would be guessing about somebody's evening.
 - **`--dry-run`** — Decide, and touch nothing.
 
   It reads the tree, debits the tick and prints the whole of the accounting -- including what it would have closed and who it would have refused at the next login -- and then writes no ledger, writes no `blocked`, sends no notification, signals nothing and ends nobody's session. What makes the loop safe to point at a machine nobody meant to fiscalise, and it needs no privilege of any kind.
+
+## `omahouse allocation`
+
+- **Usage:** `omahouse allocation <SUBCOMMAND>`
+
+Opt-in household allocation. The Battery schedules and transports commands; omahouse reserves and validates credit. Issued portions are not reclaimed from offline machines. Membership is frozen for the day, and all machines must report within 120 seconds before any extra allocation. Missing daily portions enforce zero. Keep manager reservations backed up.
+
+## `omahouse allocation init`
+
+- **Usage:** `omahouse allocation init <user>`
+
+Enroll this manager as here
+
+### Arguments
+- **`<user>`**
+
+## `omahouse allocation enroll`
+
+- **Usage:** `omahouse allocation enroll [--node <authority>] [--name <machine>] <user>`
+
+Bind a profile to an authority and machine; enforce zero until allocated
+
+### Arguments
+- **`<user>`**
+
+### Flags
+- **`--node <authority>`** — Authority returned by the manager init
+- **`--name <machine>`** — Exact registered machine name
+
+## `omahouse allocation apply`
+
+- **Usage:** `omahouse allocation apply <user>`
+
+Read and apply a current allocation JSON document from stdin
+
+### Arguments
+- **`<user>`**
+
+## `omahouse allocation plan`
+
+- **Usage:** `omahouse allocation plan <user>`
+
+Reserve exclusive portions before delivery, and print the plan
+
+### Arguments
+- **`<user>`**
+
+## `omahouse allocation show`
+
+- **Usage:** `omahouse allocation show <user>`
+
+Read enrollment and the manager reservation document
+
+### Arguments
+- **`<user>`**

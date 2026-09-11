@@ -21,6 +21,18 @@
   is in wheel, and the thing being changed is somebody else's evening. A five
   minute window where the machine will do it again without asking is a window
   where the person it is about is standing at the same keyboard.
+
+  `auth_admin` and not `auth_self`, which would be a shorter file and a hole.
+  This action is the only gate in front of the CLI running as root -- omahouse
+  does not refuse a write from an account that is under rules, because by then
+  it is root and there is nobody left to refuse -- so `auth_self` here is the
+  fiscalised account authorising its own release with its own password.
+
+  What `auth_admin` cannot say is *which* administrator, and on a machine with
+  two people in wheel the prompt takes the other one's password without saying
+  so. That is said in `org.omarchy.omahouse.rules`, beside this file: an
+  administrator authenticates as themselves, and everybody else arrives here
+  and is asked for an administrator's password exactly as written above.
 -->
 <policyconfig>
 

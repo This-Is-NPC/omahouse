@@ -1,0 +1,285 @@
+"""The pairing portion of `docs/how-to-link-another-computer.md`, typed for real.
+
+The install, pairing, publication and removal commands follow the walkthrough.
+The first central draft reaches the empty client without any separate Battery
+setup. Usage collection and manual balance adjustment follow that publication.
+
+It starts from the state the page says it starts from: a second computer running
+Omarchy with **no omahouse on it**, reachable by ssh and nothing else. The
+package is installed by the one command under test, out of a repository, with
+pacman resolving its dependency on omakure the way pacman resolves dependencies.
+A case that reached around the package manager would prove nothing about the
+install it is here to prove.
+
+The two machines play the two parts of the page: `dad` is the operator's
+computer -- "this one", the manager -- and `poc` is the one being linked.
+"""
+
+import json
+
+MACHINE = "poc"
+WHY = "the pairing walkthrough installs, identifies and removes a second computer"
+
+WIRE = 7879
+
+
+def run(vm):
+    dad = vm.peer("dad")
+    try:
+        walked(vm, dad)
+    finally:
+        # The operator's machine is borrowed, not ours. `the_parent_administers`
+        # asserts this same machine has no omahouse on it.
+        dad.root("rm -f /usr/bin/omahouse", check=False)
+        dad.root("rm -rf /root/.ssh", check=False)
+        # And the machine under test gets its omahouse back however this ended.
+        # A case that failed halfway would otherwise leave every case after it
+        # on a machine with no omahouse, all failing for a reason none of them
+        # can explain.
+        if vm.ssh("command -v omahouse", check=False)[0] != 0:
+            vm.put(str(vm.build_binary), "/tmp/omahouse")
+            vm.root("install -Dm755 /tmp/omahouse /usr/bin/omahouse")
+
+
+def walked(vm, dad):
+    Failed = vm.Failed
+    here, there = dad.address, vm.address
+    # The page writes `kid` and says in as many words that it is a placeholder
+    # for a login name. Here it is the account these machines really have, which
+    # is what makes the commands below the page's commands rather than a
+    # transcription of them.
+    child = vm.subject
+
+    # -- what the page says you need before you start ------------------------
+    #
+    # "The other computer runs Omarchy and you have ssh to it. That is the whole
+    # of what is needed there -- no omahouse yet, no omakure, nothing installed
+    # by hand."
+    dad.put(str(vm.build_binary), "/tmp/omahouse")
+    dad.root("install -Dm755 /tmp/omahouse /usr/bin/omahouse")
+    # And no rules on it yet. `reset()` reaches the machine a run is *about*
+    # and reaches a borrowed one only on the way out, so a case that borrowed
+    # this machine earlier can still have a profile on it -- and step 3 would
+    # then fail on `julia already has a profile`, which is the right refusal to
+    # the wrong question.
+    dad.root("rm -f /etc/omahouse/profiles.json /etc/omahouse/machines.json "
+             "/etc/omahouse/machine.json /etc/omahouse/machine-tokens.json")
+    dad.root("rm -rf /var/lib/omahouse/*")
+
+    # The operator's own ssh, which the page assumes and this program does not
+    # wrap. Root's, because `machine link` is run under sudo.
+    # `sh -c`, because `sudo a && b` sudoes only `a`.
+    dad.root("sh -c 'mkdir -p /root/.ssh && chmod 700 /root/.ssh'")
+    dad.put(vm.key, "/tmp/key")
+    dad.root("install -m 600 /tmp/key /root/.ssh/id_ed25519")
+    dad.root("sh -c 'printf \"Host *\\n  StrictHostKeyChecking no\\n"
+             "  UserKnownHostsFile /dev/null\\n  LogLevel ERROR\\n\" "
+             "> /root/.ssh/config && chmod 600 /root/.ssh/config'")
+
+    # And the far machine as the page describes it: Omarchy, ssh, nothing else.
+    # The repository stands in for the shelf a household would have; removing
+    # omahouse is what makes this a computer that has never had it.
+    packages = [vm.built_package, vm.built_omakure_package]
+    vm.serve_a_repository(packages)
+    vm.root("pacman -Rns --noconfirm omahouse", check=False)
+    # And every file the suite itself deployed by hand before any case ran.
+    # Read out of the package rather than listed here, so the two cannot drift:
+    # a path this case forgot is `pacman -S` refusing the whole transaction with
+    # `exists in filesystem`, which reads like a packaging fault and is a dirty
+    # machine.
+    owned = [line for line in vm.root(
+        f"bsdtar -tf /var/cache/omahouse-suite/{vm.built_package.name}").splitlines()
+        if line and not line.startswith(".") and not line.endswith("/")]
+    vm.root("rm -f " + " ".join("/" + path for path in owned))
+    vm.root("rm -rf /etc/omahouse /var/lib/omahouse /etc/omakure /var/lib/omakure "
+            "/var/lib/omakure-workspace /etc/sudoers.d/omahouse-node")
+    vm.root("systemctl disable --now omakure-node.service", check=False)
+    vm.root("rm -rf /etc/systemd/system/omakure-node.service.d")
+    vm.root("systemctl daemon-reload", check=False)
+    if vm.ssh("command -v omahouse", check=False)[0] == 0:
+        raise Failed("the machine being linked still has omahouse on it, so this "
+                     "case would not prove the install")
+    if dad.root(f"ssh arch@{there} true", check=False)[0] != 0:
+        raise Failed(f"the operator's machine cannot ssh to {there}, which is the "
+                     "one thing the page says it needs")
+    print("      a second computer with Omarchy, ssh, and no omahouse")
+
+    # -- 1. Link it ----------------------------------------------------------
+    #
+    # The one command the page opens with.
+    code, said = dad.root(
+        f"omahouse machine link arch@{there} "
+        f"--name 'the kitchen laptop' --as 'the study' --at {here}:{WIRE}",
+        check=False, timeout=600)
+    if code != 0:
+        raise Failed(f"the one command of step 1 came back {code}:\n{said[:900]}")
+    for sentence in ("the kitchen laptop: paired",
+                     "the kitchen laptop is linked",
+                     "log in there as root"):
+        if sentence not in said:
+            raise Failed(f"step 1 does not print {sentence!r}, which the page "
+                         f"says it does:\n{said[:700]}")
+    print("      one command: installed, linked, and in the list")
+
+    # And it really installed it, out of the repository, with the dependency
+    # resolved. This is the whole reason the far machine started empty.
+    if vm.ssh("command -v omahouse", check=False)[0] != 0:
+        raise Failed("the far machine still has no omahouse after `machine link`")
+    if vm.ssh("command -v omakure", check=False)[0] != 0:
+        raise Failed("omahouse was installed without omakure, so the one install "
+                     "was not the only install")
+    owner = vm.root("pacman -Qo /usr/bin/omahouse", check=False)[1]
+    if "omahouse" not in owner:
+        raise Failed(f"omahouse is on the machine but pacman does not own it, so "
+                     f"it did not come from a package: {owner.strip()[:200]}")
+    print(f"      {owner.strip().splitlines()[-1][:80]}")
+
+    # -- 2. Ask each computer what it is -------------------------------------
+    manager = dad.root("omahouse machine kind")
+    # The word `--as` asked for, and not a hostname. The page prints it above
+    # the sentence below, and a household that cannot name its own console has
+    # a list of computers with a stranger at the top of it.
+    if "the study" not in manager:
+        raise Failed(f"the operator's machine is not called what --as asked "
+                     f"for:\n{manager}")
+    if "the household's console" not in manager:
+        raise Failed(f"the operator's machine does not call itself the console:\n"
+                     f"{manager}")
+
+    # And it calls itself something of its own. `--name` on `machine link` is
+    # the *other* computer's name, and passing it through to the verb that makes
+    # this one a manager gave a household where every computer answered `the
+    # kitchen laptop` -- on the one screen the page says will tell them apart.
+    # The sentence below was already checked and could never have caught it.
+    if "the kitchen laptop" in manager:
+        raise Failed(f"the operator's machine took the name of the computer it "
+                     f"just linked:\n{manager}")
+
+    managed = dad.root(f"ssh arch@{there} omahouse machine kind", check=False)[1]
+    # The sentence the whole design turns on, and the page says so in bold.
+    if "still enforcing its own rules on its own" not in managed:
+        raise Failed(f"the linked machine does not say it still enforces its own "
+                     f"rules:\n{managed}")
+    if "its manager is" not in managed:
+        raise Failed(f"the linked machine does not name its manager:\n{managed}")
+    # Two computers, two names. The page prints them as two different words and
+    # a household that cannot tell its computers apart has no use for a list.
+    if managed.splitlines()[0].strip() == manager.splitlines()[0].strip():
+        raise Failed(f"both computers call themselves "
+                     f"{manager.splitlines()[0].strip()!r}")
+    print("      each computer says what it is, and the managed one says it is "
+          "still its own")
+
+    # No Battery setup here: the single link command must leave publication ready.
+    dad.root(f"omahouse profile add {child} --name Kid")
+    dad.root(f"omahouse limit {child} --session 2h")
+    dad.root(f"omahouse profile publish {child} --to 'the kitchen laptop'")
+    remote = json.loads(vm.root(f"omahouse --json profile show {child}"))
+    if next(b for b in remote["profiles"][0]["budgets"] if b["id"] == "session")["dailyMinutes"] != 120:
+        raise Failed(f"the linked client did not receive its first draft: {remote}")
+    print("      the one link command also made remote publication ready")
+
+    # -- 4. Read the day across both -----------------------------------------
+    #
+    # An afternoon on each, so the sum is of two computers that both spent
+    # something rather than of one and a zero.
+    vm.seed_ledger({"session": 2400})
+    dad.seed_ledger({"session": 600})
+
+    # The pipe the page prints, typed exactly. It is the whole of the transport
+    # and it is deliberately something a person can type.
+    code, said = dad.root(
+        f"sh -c \"ssh arch@{there} omahouse day {child} | "
+        f"omahouse collect 'the kitchen laptop' {child}\"", check=False)
+    if code != 0 or "counts towards the house" not in said:
+        raise Failed(f"the pipe of step 4 came back {code}:\n{said[:500]}")
+
+    document = json.loads(dad.root(f"omahouse --json house {child}"))
+    session = [b for b in document["budgets"] if b["id"] == "session"][0]
+    if [c["machine"] for c in session["spent"]] != ["here", "the kitchen laptop"]:
+        raise Failed(f"the house is not adding up both computers: {session}")
+    if session["limitSeconds"] != 7200:
+        raise Failed(f"2h is not two hours in the household: {session}")
+    if session["totalSeconds"] < 2400:
+        raise Failed(f"the far machine's day did not reach the sum: {session}")
+    left = session["leftSeconds"]
+    print(f"      the house has spent {session['totalSeconds']}s of 7200s; "
+          f"{left}s stand")
+
+    # -- Adjust the standalone machine's balance manually --------------------
+    # Scheduled household sharing is covered separately by a_shared_pot.
+    minutes = max(1, left // 60)
+    code, said = dad.root(
+        f"ssh arch@{there} sudo omahouse leave {child} --session {minutes}m",
+        check=False)
+    if code != 0:
+        raise Failed(f"the manual adjustment came back {code}:\n{said[:400]}")
+    if "left today" not in said:
+        raise Failed(f"`leave` does not say what is left:\n"
+                     f"{said[:300]}")
+
+    # And it really moved the far machine's own number, which is the only thing
+    # that makes the manual adjustment worth typing.
+    theirs = json.loads(vm.root(f"omahouse --json status {child}"))
+    budget = [b for b in theirs["budgets"] if b["id"] == "session"][0]
+    if budget["leftSeconds"] != minutes * 60:
+        raise Failed(f"the far machine still thinks it has {budget['leftSeconds']}s "
+                     f"and not the {minutes * 60}s the house left it: {budget}")
+    print(f"      told from here, the far machine now has {minutes}m of its own")
+
+    # -- Taking it back ------------------------------------------------------
+    forgotten = dad.root("omahouse machine remove 'the kitchen laptop'")
+    if "Nothing on that machine changed" not in forgotten:
+        raise Failed(f"removing does not say what it did not do:\n{forgotten}")
+    # And it really did not: the page's second sentence is the one somebody
+    # trusts, so it is the one worth checking.
+    still = vm.root(f"omahouse --json profile show {child}", check=False)
+    if still[0] != 0:
+        raise Failed("forgetting the computer took its profile with it, and the "
+                     "page says it does not")
+    print("      forgotten here, and untouched there")
+
+    # -- And taking omahouse off it entirely ---------------------------------
+    #
+    # The page's last line says how-to-install-and-remove.md "applies there
+    # exactly as it does here", and that sentence has never been tested on a
+    # machine that was linked. Everything the removal is measured against was
+    # put there by the install; linking puts more on a machine afterwards, and
+    # the scriptlet's `_artifacts` -- the one place any of those paths is
+    # written down -- has never heard of any of it.
+    code, said = vm.root("pacman -Rns --noconfirm omahouse", check=False)
+    if code != 0:
+        raise Failed(f"taking omahouse off the linked computer said {code}:\n{said[:500]}")
+    if "everything omahouse put on this machine is off it" not in said:
+        raise Failed(f"the removal no longer says what it promises:\n{said[:600]}")
+
+    # What linking put there, in the order it would hurt. Each is checked for
+    # itself, because `they are all still there` and `one of them is still
+    # there` are different reports and only the second one is ever surprising.
+    left = []
+    for path, why in (
+            ("/etc/sudoers.d/omahouse-node",
+             "a sudoers rule, with nothing on the machine left to explain it"),
+            ("/etc/systemd/system/omakure-node.service",
+             "the node's unit"),
+            ("/etc/systemd/system/omakure-node.service.d/omahouse.conf",
+             "the drop-in that puts the console on the household network"),
+            ("/etc/omahouse/machine.json",
+             "the machine still calls itself managed"),
+            ("/etc/omahouse/machine-tokens.json",
+             "a bearer token, 0600 and readable by root alone"),
+            ("/etc/omahouse/omakure-token",
+             "the node's own bearer"),
+    ):
+        if vm.root(f"test -e {path}", check=False)[0] == 0:
+            left.append(f"  {path}\n      {why}")
+    running = vm.root("systemctl is-active omakure-node.service", check=False)[1].strip()
+    if running == "active":
+        left.append("  omakure-node.service is still running, on a machine with "
+                    "no omahouse on it")
+
+    if left:
+        raise Failed(
+            "`pacman -R` says everything omahouse put on this machine is off it, "
+            "and this is still on it:\n" + "\n".join(left))
+    print("      and pacman -R took the link off with it")

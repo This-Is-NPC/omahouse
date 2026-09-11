@@ -41,13 +41,23 @@ struct AppScope {
     /// all VS Code. The launcher shim gives the scope its own name, so the id
     /// collapses every app opened that way into one word.
     ///
-    /// It is not a second selector, and `Policy::evaluate` never sees it. The
-    /// two signals fail in opposite places -- the id fails on a shim and is
-    /// right about a flatpak, the executable is right about a shim and is
-    /// `/usr/bin/bwrap` for every flatpak alike -- so neither can overrule the
-    /// other. This one is for configuration and for the report: it is what lets
-    /// `status` say what a scope really holds and `allow` say what an id would
-    /// really let in.
+    /// It is not a second selector and it cannot overrule the id. The two
+    /// signals fail in opposite places -- the id fails on a shim and is right
+    /// about a flatpak, the executable is right about a shim and is
+    /// `/usr/bin/bwrap` for every flatpak alike -- so neither answers instead of
+    /// the other.
+    ///
+    /// What it does is answer *beside* the id, in the one place the id has
+    /// nothing to say: a scope whose executable does not corroborate its name
+    /// can also be matched by a selector the executable does corroborate. That
+    /// is `selectorMatches` in Profile.h, and it is what lets a rule about
+    /// `code` reach the program the Omarchy menu opened under the name
+    /// `gtk-launch`. A scope whose id already names what is running is matched
+    /// by that name and by no other, which is what keeps this a fallback rather
+    /// than a second namespace.
+    ///
+    /// It is also what `status` reports and what the picker shows: an operator
+    /// about to write a rule is told what an id would really let in.
     QString dominantExe;
     /// How many processes of the scope are running `dominantExe`. Zero with an
     /// empty path is "nobody looked, or nothing could be read"; the count is
@@ -108,10 +118,16 @@ QString scopeIdFromUnit(const QString &unit, QString *error);
 /// `/usr/share/code/chrome_crashpad_handler`, `xdg-terminal-exec` against the
 /// terminal it opened. So is `org.freedesktop.Platform` against
 /// `/usr/bin/bwrap`, and that one is not a mistake to fix here -- the executable
-/// really is bwrap for every flatpak on the machine. A disagreement is a thing
-/// to say out loud to whoever is writing a rule, not a thing to decide by, and
-/// the caller says both halves of it so the operator can tell which case they
-/// are looking at.
+/// really is bwrap for every flatpak on the machine. A disagreement is still a
+/// thing to say out loud to whoever is writing a rule, and the caller says both
+/// halves of it so the operator can tell which case they are looking at.
+///
+/// This function is asked two different questions with the same two arguments,
+/// and `selectorMatches` in Profile.h asks both. *Does this scope's id name what
+/// is running* opens the door -- a disagreement means the id has nothing useful
+/// to say. *Does this selector name what is running* is what may then walk
+/// through it. Both are needed, and the first is what keeps a scope that has
+/// already said what it is from being matched by a second name.
 ///
 /// An empty path is not a disagreement. It is nobody having looked, or a process
 /// whose executable could not be read, and having no opinion is the honest

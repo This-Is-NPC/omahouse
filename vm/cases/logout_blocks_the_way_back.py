@@ -44,24 +44,28 @@ def run(vm):
     # something is open. An app first, then the clock means something.
     vm.launch(args="900")
 
-    vm.make_profile(budgets={"session": 1}, default="allow",
-                    grace=vm.manifest["budgets"]["grace_seconds"], warn_at=(1,))
-    vm.seed_ledger({"session": 60 - vm.manifest["budgets"]["session_seconds"]})
+    patience = vm.pace["patience_seconds"]
+    vm.make_profile(budgets={"session": vm.whole_minutes(vm.pace["session_seconds"])},
+                    default="allow", grace=vm.pace["grace_seconds"], warn_at=(1,))
+    vm.seed_ledger({"session": vm.already_spent(vm.pace["session_seconds"])})
 
     marker = vm.ssh("date '+%Y-%m-%d %H:%M:%S'").strip()
     vm.start_daemon()
 
     # 1. The name in the file, and the sessions gone.
-    vm.wait_for(lambda: vm.subject in vm.blocked(), 90,
+    vm.wait_for(lambda: vm.subject in vm.blocked(), patience,
                 f"{vm.subject} to be written into /etc/omahouse/blocked")
     blocked_at = time.time()
-    vm.wait_for(lambda: not vm.sessions(), 60, "the session to end")
+    vm.wait_for(lambda: not vm.sessions(), patience, "the session to end")
     print(f"      blocked, then {sessions_before} ended "
           f"{time.time() - blocked_at:.0f}s later")
 
     # 2. And it stays down. The tty1 autologin fires again within seconds, and
-    #    what has to happen is that PAM refuses it -- not that nothing tried.
-    stayed_down_until = time.time() + 25
+    #    what has to happen is that PAM refuses it -- not that nothing tried. So
+    #    the window has to span more than one retry, whichever regime is running,
+    #    and the assertion below about the number of refusals is what makes that
+    #    the case rather than the hope.
+    stayed_down_until = time.time() + vm.pace["stay_down_seconds"]
     while time.time() < stayed_down_until:
         if vm.sessions():
             raise Failed(f"{vm.subject} logged straight back in: {vm.sessions()}")
@@ -87,10 +91,10 @@ def run(vm):
     # 3. The operator hands over ten minutes with the machine still shut --
     #    docs/design.md §1 -- and nothing else has to be done.
     vm.root(f"omahouse grant {vm.subject} --session 10m")
-    vm.wait_for(lambda: vm.subject not in vm.blocked(), 30,
+    vm.wait_for(lambda: vm.subject not in vm.blocked(), patience,
                 f"{vm.subject} to come out of /etc/omahouse/blocked")
     asked = time.time()
-    vm.wait_for(lambda: bool(vm.sessions()), 90,
+    vm.wait_for(lambda: bool(vm.sessions()), patience,
                 "the autologin to be let through again")
     print(f"      granted 10m; unblocked, and the session came back on its own "
           f"{time.time() - asked:.0f}s later as {vm.sessions()}")

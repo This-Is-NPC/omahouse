@@ -1,0 +1,702 @@
+#include <QtTest>
+
+#include "Profile.h"
+#include "WebPolicy.h"
+
+using namespace omahouse;
+
+namespace {
+
+// A profile is a whole account under rules, and every case here is about one
+// field of it, so the builder takes the web half and leaves everything else at
+// what `profile add` writes.
+Profile person(const QString &user, const Web &web = Web())
+{
+    Profile profile;
+    profile.user = user;
+    profile.enabled = true;
+    profile.web = web;
+    return profile;
+}
+
+Web webThat(Verdict defaultVerdict, const QVector<Rule> &rules = {})
+{
+    Web web;
+    web.defaultVerdict = defaultVerdict;
+    web.rules = rules;
+    return web;
+}
+
+Rule block(const QString &domain)
+{
+    return Rule {domain, Verdict::Deny};
+}
+
+Rule open(const QString &domain)
+{
+    return Rule {domain, Verdict::Allow};
+}
+
+} // namespace
+
+// docs/design.md §11, and the whole of it that can be proved without a browser,
+// without root and without a disk. What the file holds is arithmetic over a list
+// of profiles; where the file goes is `src/sys`, and it is not this suite's
+// business.
+class WebPolicyTests : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    // The case every machine is in before anybody asks for anything, and the
+    // case a machine has to come back to. Not "write an empty policy": no file.
+    void noProfileAsksForAnything()
+    {
+        QVERIFY(!chromiumPolicyFor({}).needed());
+        QVERIFY(!chromiumPolicyFor({person(QStringLiteral("julia"))}).needed());
+    }
+
+    void oneBlockedSite()
+    {
+        const ChromiumPolicy policy = chromiumPolicyFor(
+            {person(QStringLiteral("julia"),
+                    webThat(Verdict::Allow, {block(QStringLiteral("youtube.com"))}))});
+
+        QVERIFY(policy.needed());
+        QCOMPARE(policy.blocklist, QStringList {QStringLiteral("youtube.com")});
+        QVERIFY(policy.allowlist.isEmpty());
+        QVERIFY(!policy.incognitoDenied);
+
+        const QJsonObject written = policy.toJson();
+        QCOMPARE(written.keys(), QStringList {QStringLiteral("URLBlocklist")});
+        QCOMPARE(written.value(QStringLiteral("URLBlocklist")).toArray().size(), 1);
+    }
+
+    // The measured trap, one policy over: the browser spike found a
+    // `NativeMessagingAllowlist` with no blocklist beside it letting through
+    // exactly the host it was meant to keep out. The same is true of
+    // `URLAllowlist`, so an allowlist alone is not a policy -- it is a file that
+    // makes a machine look managed while it is not, and there is no file.
+    void anAllowlistWithNothingBlockedIsNoPolicyAtAll()
+    {
+        const ChromiumPolicy policy = chromiumPolicyFor(
+            {person(QStringLiteral("julia"),
+                    webThat(Verdict::Allow, {open(QStringLiteral("wikipedia.org"))}))});
+
+        QVERIFY(!policy.needed());
+        QVERIFY(policy.blocklist.isEmpty());
+        QVERIFY(policy.allowlist.isEmpty());
+        QVERIFY(policy.toJson().isEmpty());
+    }
+
+    // `--only-listed`: everything blocked, and the listed sites carved back out
+    // of it. The allowlist means something here because there is a blocklist for
+    // it to be an exception to.
+    void onlyTheListedSitesOpen()
+    {
+        const ChromiumPolicy policy = chromiumPolicyFor(
+            {person(QStringLiteral("julia"),
+                    webThat(Verdict::Deny, {open(QStringLiteral("wikipedia.org")),
+                                            open(QStringLiteral("scratch.mit.edu"))}))});
+
+        QCOMPARE(policy.blocklist, QStringList {QStringLiteral("*")});
+        QCOMPARE(policy.allowlist,
+                 (QStringList {QStringLiteral("scratch.mit.edu"),
+                               QStringLiteral("wikipedia.org")}));
+    }
+
+    // Written the other way round in a file somebody edited by hand. The default
+    // verdict is the rule nobody wrote at the end of the list, so a `*` rule
+    // *last* is that same rule spelled out -- and it has to land in the same
+    // place, without reaching the blocklist as a second literal `*`.
+    //
+    // Last, and not first, because the first rule that names a site wins and `*`
+    // names every site: a `*` at the top of the list is a list with one rule in
+    // it. That is the app half's behaviour too, and it is the model rather than
+    // a quirk of this file.
+    void blockingEverythingByRuleIsTheSameThing()
+    {
+        const ChromiumPolicy byRule = chromiumPolicyFor(
+            {person(QStringLiteral("julia"),
+                    webThat(Verdict::Allow, {open(QStringLiteral("wikipedia.org")),
+                                             block(QStringLiteral("*"))}))});
+        const ChromiumPolicy byDefault = chromiumPolicyFor(
+            {person(QStringLiteral("julia"),
+                    webThat(Verdict::Deny, {open(QStringLiteral("wikipedia.org"))}))});
+
+        QVERIFY(byRule == byDefault);
+        QCOMPARE(byRule.blocklist, QStringList {QStringLiteral("*")});
+    }
+
+    // The composition rule of WebPolicy.h, and the reason it is written down:
+    // the most restrictive wins, and there is no precedence. julia's block
+    // reaches pedro's machine, because there is only one machine.
+    void twoProfilesThatDisagreeAboutOneSite()
+    {
+        const ChromiumPolicy policy = chromiumPolicyFor({
+            person(QStringLiteral("julia"),
+                   webThat(Verdict::Allow, {block(QStringLiteral("youtube.com"))})),
+            person(QStringLiteral("pedro"),
+                   webThat(Verdict::Allow, {open(QStringLiteral("youtube.com"))})),
+        });
+
+        QCOMPARE(policy.blocklist, QStringList {QStringLiteral("youtube.com")});
+        // And never in both lists. Chromium gives the allowlist the tie, so a
+        // domain in both is a domain that opens -- which would turn "the most
+        // restrictive wins" into its exact opposite.
+        QVERIFY(!policy.allowlist.contains(QStringLiteral("youtube.com")));
+    }
+
+    // The harder half of the same rule: one profile asking for `--only-listed`
+    // puts `*` in front of everybody, and the other profile's sites open only
+    // because they are named. A site the second profile never mentioned is shut,
+    // which is the cost of there being one file, and it is why `omahouse web`
+    // prints who else has a say.
+    void oneProfileClosingTheDoorClosesItForEverybody()
+    {
+        const ChromiumPolicy policy = chromiumPolicyFor({
+            person(QStringLiteral("julia"),
+                   webThat(Verdict::Deny, {open(QStringLiteral("wikipedia.org"))})),
+            person(QStringLiteral("pedro"),
+                   webThat(Verdict::Allow, {open(QStringLiteral("github.com"))})),
+        });
+
+        QVERIFY(policy.blocklist.contains(QStringLiteral("*")));
+        // github.com is named by pedro and falls to julia's `deny` default, so
+        // the two disagree and the restrictive one holds.
+        QVERIFY(policy.blocklist.contains(QStringLiteral("github.com")));
+        QCOMPARE(policy.allowlist, QStringList {QStringLiteral("wikipedia.org")});
+    }
+
+    void incognitoDeniedByOneAndAllowedByAnother()
+    {
+        Web denies;
+        denies.incognitoStated = true;
+        denies.incognito = Verdict::Deny;
+        Web allows;
+        allows.incognitoStated = true;
+        allows.incognito = Verdict::Allow;
+
+        const ChromiumPolicy policy = chromiumPolicyFor({
+            person(QStringLiteral("julia"), denies),
+            person(QStringLiteral("pedro"), allows),
+        });
+
+        QVERIFY(policy.incognitoDenied);
+        QCOMPARE(policy.toJson().value(QStringLiteral("IncognitoModeAvailability")).toInt(), 1);
+    }
+
+    // Said `allow` is not the same as said nothing, and neither of them writes
+    // `IncognitoModeAvailability: 0`. omahouse being more permissive than it was
+    // asked to be -- overriding some other administrator's file to turn
+    // incognito back on -- is the one direction this never takes by itself.
+    void allowingIncognitoAsksTheBrowserForNothing()
+    {
+        Web allows;
+        allows.incognitoStated = true;
+        allows.incognito = Verdict::Allow;
+
+        const ChromiumPolicy policy =
+            chromiumPolicyFor({person(QStringLiteral("julia"), allows)});
+        QVERIFY(!policy.needed());
+        QVERIFY(!policy.toJson().contains(QStringLiteral("IncognitoModeAvailability")));
+    }
+
+    // A profile switched off has to stop doing things to the machine, or
+    // "disabled" is a word for something still in force.
+    void adisabledProfileIsNotConsulted()
+    {
+        Profile off = person(QStringLiteral("julia"),
+                             webThat(Verdict::Allow, {block(QStringLiteral("youtube.com"))}));
+        off.enabled = false;
+        QVERIFY(!chromiumPolicyFor({off}).needed());
+    }
+
+    // The file is compared with what is already on disk to decide whether to
+    // write at all, so the same decision read in a different order has to come
+    // out the same bytes. Otherwise every verb rewrites the policy forever.
+    void theSameDecisionInAnyOrderIsTheSameFile()
+    {
+        const Profile julia =
+            person(QStringLiteral("julia"),
+                   webThat(Verdict::Allow, {block(QStringLiteral("youtube.com")),
+                                            block(QStringLiteral("tiktok.com"))}));
+        const Profile pedro =
+            person(QStringLiteral("pedro"),
+                   webThat(Verdict::Allow, {block(QStringLiteral("tiktok.com"))}));
+
+        QVERIFY(chromiumPolicyFor({julia, pedro}) == chromiumPolicyFor({pedro, julia}));
+        QCOMPARE(chromiumPolicyFor({julia, pedro}).blocklist,
+                 (QStringList {QStringLiteral("tiktok.com"), QStringLiteral("youtube.com")}));
+    }
+
+    // The undoing path of docs/design.md §11, without uninstalling anything:
+    // the last block taken back is a machine with no policy file on it.
+    void takingTheLastBlockBackLeavesNothingBehind()
+    {
+        Profile julia = person(QStringLiteral("julia"),
+                               webThat(Verdict::Allow, {block(QStringLiteral("youtube.com"))}));
+        QVERIFY(chromiumPolicyFor({julia}).needed());
+
+        julia.web.rules[0].verdict = Verdict::Allow;
+        QVERIFY(!chromiumPolicyFor({julia}).needed());
+    }
+
+    // The first rule that names a site wins, the same order and for the same
+    // reason as the app half: the rules are read as the operator wrote them.
+    void theFirstRuleAboutASiteWins()
+    {
+        const Web web = webThat(Verdict::Allow, {open(QStringLiteral("youtube.com")),
+                                                 block(QStringLiteral("youtube.com"))});
+        QCOMPARE(web.verdictFor(QStringLiteral("youtube.com")), Verdict::Allow);
+        QCOMPARE(web.verdictFor(QStringLiteral("anything.else")), Verdict::Allow);
+    }
+
+    // A profile with a web half survives the trip through profiles.json, and a
+    // profile without one does not grow an empty `web` on the way -- which is
+    // what keeps "never had web rules" and "had them taken away" one state.
+    void theWebHalfSurvivesTheFile()
+    {
+        Profile julia = person(QStringLiteral("julia"),
+                               webThat(Verdict::Deny, {block(QStringLiteral("youtube.com")),
+                                                       open(QStringLiteral("wikipedia.org"))}));
+        julia.web.incognitoStated = true;
+        julia.web.incognito = Verdict::Deny;
+
+        const QJsonObject written = julia.toJson();
+        QVERIFY(written.contains(QStringLiteral("web")));
+
+        Profile read;
+        QString error;
+        QVERIFY2(Profile::fromJson(written, &read, &error), qPrintable(error));
+        QCOMPARE(read.web.defaultVerdict, Verdict::Deny);
+        QCOMPARE(read.web.rules.size(), 2);
+        QCOMPARE(read.web.rules.at(0).match, QStringLiteral("youtube.com"));
+        QCOMPARE(read.web.rules.at(0).verdict, Verdict::Deny);
+        QVERIFY(read.web.incognitoStated);
+        QCOMPARE(read.web.incognito, Verdict::Deny);
+        QVERIFY(chromiumPolicyFor({read}) == chromiumPolicyFor({julia}));
+
+        QVERIFY(!person(QStringLiteral("pedro")).toJson().contains(QStringLiteral("web")));
+    }
+
+    // Every profiles.json written before this existed has no `web` key at all.
+    // That is the ordinary state of the file and not a failure, and it must not
+    // be guessed into a deny.
+    void aProfileWithNoWebKeyIsNotAFailure()
+    {
+        const QJsonObject old {
+            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("default"), QStringLiteral("deny")},
+        };
+        Profile read;
+        QString error;
+        QVERIFY2(Profile::fromJson(old, &read, &error), qPrintable(error));
+        QVERIFY(!read.web.saysAnything());
+        QCOMPARE(read.web.defaultVerdict, Verdict::Allow);
+        QVERIFY(!read.web.incognitoStated);
+    }
+
+    void aWebHalfThatWillNotParseIsSaidAndNotGuessed()
+    {
+        QString error;
+        Profile read;
+
+        QJsonObject notAnObject {
+            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("web"), QStringLiteral("no")},
+        };
+        QVERIFY(!Profile::fromJson(notAnObject, &read, &error));
+        QVERIFY(error.contains(QStringLiteral("web")));
+
+        QJsonObject unknownVerdict {
+            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("web"),
+             QJsonObject {{QStringLiteral("incognito"), QStringLiteral("sometimes")}}},
+        };
+        QVERIFY(!Profile::fromJson(unknownVerdict, &read, &error));
+        QVERIFY(error.contains(QStringLiteral("sometimes")));
+    }
+
+    // -- the sites that ran out today -----------------------------------------
+
+    // A site limit on a machine with no web rules at all. There is no policy
+    // file until the time runs out, there is one while it is out, and there is
+    // none again once it is not -- which is the same file appearing and going
+    // away that taking the last block back does, and it has to be, because a
+    // restriction left behind at midnight is one nothing on the machine knows
+    // how to lift.
+    void aSiteOutOfTimeIsAPolicyOnItsOwn()
+    {
+        const QVector<Profile> nobodyHasWebRules {person(QStringLiteral("julia"))};
+        QVERIFY(!chromiumPolicyFor(nobodyHasWebRules).needed());
+
+        const ChromiumPolicy out =
+            chromiumPolicyFor(nobodyHasWebRules, {QStringLiteral("youtube.com")});
+        QVERIFY(out.needed());
+        QCOMPARE(out.blocklist, QStringList {QStringLiteral("youtube.com")});
+        QVERIFY(out.allowlist.isEmpty());
+
+        QVERIFY(!chromiumPolicyFor(nobodyHasWebRules, {}).needed());
+    }
+
+    // The clock has the last word. A profile that allows a site is allowing it
+    // in general and not for the thirty-first minute, so a site that has run out
+    // is blocked -- and it is never also allowlisted, because Chromium gives the
+    // allowlist the tie and that would turn the block into its opposite.
+    void aSiteOutOfTimeIsBlockedEvenWhereAProfileAllowsIt()
+    {
+        const Profile julia =
+            person(QStringLiteral("julia"),
+                   webThat(Verdict::Deny, {open(QStringLiteral("youtube.com")),
+                                           open(QStringLiteral("wikipedia.org"))}));
+
+        const ChromiumPolicy lit = chromiumPolicyFor({julia});
+        QVERIFY(lit.allowlist.contains(QStringLiteral("youtube.com")));
+
+        const ChromiumPolicy spent =
+            chromiumPolicyFor({julia}, {QStringLiteral("youtube.com")});
+        QVERIFY(spent.blocklist.contains(QStringLiteral("youtube.com")));
+        QVERIFY2(!spent.allowlist.contains(QStringLiteral("youtube.com")),
+                 "a site that ran out was left in the allowlist, which opens it");
+        // And the rest of the profile is untouched: only the site that ran out
+        // moved.
+        QVERIFY(spent.allowlist.contains(QStringLiteral("wikipedia.org")));
+    }
+
+    // A budget on browsing at all, run out. `*` reaches the file the way
+    // `--only-listed` does and not as a domain called star.
+    void abudgetOnBrowsingItselfBlocksEverything()
+    {
+        const ChromiumPolicy spent =
+            chromiumPolicyFor({person(QStringLiteral("julia"))}, {QStringLiteral("*")});
+        QCOMPARE(spent.blocklist, QStringList {QStringLiteral("*")});
+    }
+
+    // The same set in any order is the same file, sites included -- which is
+    // what stops a two second loop rewriting the policy forever because two
+    // orderings of one decision compare unequal.
+    void theSameDayInAnyOrderIsStillTheSameFile()
+    {
+        const Profile julia = person(QStringLiteral("julia"),
+                                     webThat(Verdict::Allow, {block(QStringLiteral("tiktok.com"))}));
+        QVERIFY(chromiumPolicyFor({julia}, {QStringLiteral("youtube.com"),
+                                            QStringLiteral("archlinux.org")})
+                == chromiumPolicyFor({julia}, {QStringLiteral("archlinux.org"),
+                                               QStringLiteral("youtube.com")}));
+    }
+
+    // -- a budget about a site, in the file -----------------------------------
+
+    // `kind` survives the trip, and it is written only when it is `site`: a
+    // `"kind": "app"` on every budget would rewrite every profiles.json on every
+    // machine to say what it already said.
+    void aSiteBudgetSurvivesTheFileAndAnAppBudgetSaysNothingNew()
+    {
+        Profile julia = person(QStringLiteral("julia"));
+        Budget site;
+        site.id = QStringLiteral("youtube.com");
+        site.match = {QStringLiteral("youtube.com")};
+        site.selects = Selects::Site;
+        site.dailyMinutes = 30;
+        site.onExhausted = OnExhausted::Block;
+        Budget app;
+        app.id = QStringLiteral("chromium");
+        app.match = {QStringLiteral("chromium")};
+        app.dailyMinutes = 45;
+        app.onExhausted = OnExhausted::Close;
+        julia.budgets = {site, app};
+
+        const QJsonObject written = julia.toJson();
+        const QJsonArray budgets = written.value(QStringLiteral("budgets")).toArray();
+        QCOMPARE(budgets.at(0).toObject().value(QStringLiteral("kind")).toString(),
+                 QStringLiteral("site"));
+        QVERIFY2(!budgets.at(1).toObject().contains(QStringLiteral("kind")),
+                 "an app budget wrote a kind, which rewrites every file on every machine");
+
+        Profile read;
+        QString error;
+        QVERIFY2(Profile::fromJson(written, &read, &error), qPrintable(error));
+        QCOMPARE(read.budgets.at(0).selects, Selects::Site);
+        QCOMPARE(read.budgets.at(0).onExhausted, OnExhausted::Block);
+        QCOMPARE(read.budgets.at(1).selects, Selects::App);
+        QCOMPARE(read.budgets.at(1).onExhausted, OnExhausted::Close);
+    }
+
+    // One budget, two names, and a file that is not rewritten for the profiles
+    // that only ever had one.
+    void aBudgetAboutTwoIdsIsOneClockInTheFile()
+    {
+        Profile julia = person(QStringLiteral("julia"));
+        Budget browser;
+        browser.id = QStringLiteral("chromium");
+        browser.match = {QStringLiteral("chromium"), QStringLiteral("org.chromium.Chromium")};
+        browser.dailyMinutes = 45;
+        browser.onExhausted = OnExhausted::Close;
+        Budget editor;
+        editor.id = QStringLiteral("code");
+        editor.match = {QStringLiteral("code")};
+        editor.dailyMinutes = 45;
+        editor.onExhausted = OnExhausted::Close;
+        julia.budgets = {browser, editor};
+
+        const QJsonArray budgets = julia.toJson().value(QStringLiteral("budgets")).toArray();
+        const QJsonValue two = budgets.at(0).toObject().value(QStringLiteral("match"));
+        const QJsonValue one = budgets.at(1).toObject().value(QStringLiteral("match"));
+        QVERIFY2(two.isArray(), "two names did not come out as a list");
+        QCOMPARE(two.toArray().size(), 2);
+        // And one name is a list of one. There is no second spelling: a bare
+        // string was accepted while there were files to keep reading, and there
+        // are none.
+        QVERIFY2(one.isArray(), "one name came out as something other than a list");
+        QCOMPARE(one.toArray().size(), 1);
+
+        Profile read;
+        QString error;
+        QVERIFY2(Profile::fromJson(julia.toJson(), &read, &error), qPrintable(error));
+        QCOMPARE(read.budgets.at(0).match,
+                 QStringList({QStringLiteral("chromium"),
+                              QStringLiteral("org.chromium.Chromium")}));
+        QCOMPARE(read.budgets.at(1).match, QStringList{QStringLiteral("code")});
+    }
+
+    // A bare string is refused rather than read as a list of one.
+    //
+    // Two spellings of one value is a reader with a branch in it, a writer with
+    // a choice to make and a case pinning that they agree. What was buying all
+    // three was not rewriting the profiles.json files that exist, and there are
+    // none: nothing is released and every file is on a machine that can be
+    // rebuilt.
+    void aBareNameIsNotASpellingOfAListOfOne()
+    {
+        const QJsonObject written {
+            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("budgets"),
+             QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("code")},
+                                      {QStringLiteral("match"), QStringLiteral("code")},
+                                      {QStringLiteral("dailyMinutes"), 45}}}}};
+        Profile read;
+        QString error;
+        QVERIFY(!Profile::fromJson(written, &read, &error));
+        QVERIFY2(error.contains(QStringLiteral("list of names")), qPrintable(error));
+    }
+
+    // And what is refused. A budget that matches nothing is a clock nobody can
+    // spend and nobody can see is unspendable, so it is said where the file is
+    // read rather than repaired into one that matches everything.
+    void aBudgetThatIsAboutNothingIsRefused()
+    {
+        const auto profileWith = [](const QJsonValue &match) {
+            QJsonObject entry {{QStringLiteral("id"), QStringLiteral("code")},
+                               {QStringLiteral("dailyMinutes"), 45}};
+            if (!match.isUndefined())
+                entry.insert(QStringLiteral("match"), match);
+            return QJsonObject {{QStringLiteral("user"), QStringLiteral("julia")},
+                                {QStringLiteral("budgets"), QJsonArray {entry}}};
+        };
+
+        Profile read;
+        QString error;
+        QVERIFY(!Profile::fromJson(profileWith(QJsonArray{}), &read, &error));
+        QVERIFY2(error.contains(QStringLiteral("about nothing")), qPrintable(error));
+        QVERIFY(!Profile::fromJson(profileWith(QJsonArray{QStringLiteral("code"), 7}), &read,
+                                   &error));
+        QVERIFY2(error.contains(QStringLiteral("not a name")), qPrintable(error));
+        QVERIFY(!Profile::fromJson(profileWith(QJsonValue(7)), &read, &error));
+        QVERIFY(!Profile::fromJson(profileWith(QJsonValue::Undefined), &read, &error));
+        QVERIFY2(error.contains(QStringLiteral("no match")), qPrintable(error));
+    }
+
+// `resets` survives the file, and is written only when it is `never`.
+    void aBudgetThatOutlivesTheDaySurvivesTheFile()
+    {
+        Profile julia = person(QStringLiteral("julia"));
+        Budget pot;
+        pot.id = QStringLiteral("pot");
+        pot.match = {QStringLiteral("chromium")};
+        pot.resets = Resets::Never;
+        pot.dailyMinutes = 120;
+        pot.onExhausted = OnExhausted::Close;
+        Budget day;
+        day.id = QStringLiteral("session");
+        day.match = {QStringLiteral("*")};
+        day.dailyMinutes = 120;
+        julia.budgets = {pot, day};
+
+        const QJsonArray budgets = julia.toJson().value(QStringLiteral("budgets")).toArray();
+        QCOMPARE(budgets.at(0).toObject().value(QStringLiteral("resets")).toString(),
+                 QStringLiteral("never"));
+        QVERIFY2(!budgets.at(1).toObject().contains(QStringLiteral("resets")),
+                 "a daily budget wrote a resets, which rewrites every file on every machine");
+
+        Profile read;
+        QString error;
+        QVERIFY2(Profile::fromJson(julia.toJson(), &read, &error), qPrintable(error));
+        QVERIFY(read.budgets.at(0).carriesOver());
+        QVERIFY(!read.budgets.at(1).carriesOver());
+
+        // And an unknown one is said rather than guessed at, because a budget
+        // whose reset was misread is a clock that starts over at the wrong
+        // moment and reads back out of `profile show` looking correct.
+        const QJsonObject wrong {
+            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("budgets"),
+             QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("pot")},
+                                      {QStringLiteral("match"), QJsonArray{QStringLiteral("chromium")}},
+                                      {QStringLiteral("resets"), QStringLiteral("weekly")}}}}};
+        QVERIFY(!Profile::fromJson(wrong, &read, &error));
+        QVERIFY2(error.contains(QStringLiteral("weekly")), qPrintable(error));
+    }
+
+// Who wrote a profile down, and when, survives the file and is absent
+    // until somebody writes it.
+    void theStampSurvivesTheFileAndIsAbsentUntilItIsWritten()
+    {
+        Profile julia = person(QStringLiteral("julia"));
+        QVERIFY2(!julia.toJson().contains(QStringLiteral("writtenBy")),
+                 "a profile nobody has changed wrote a stamp, which rewrites every "
+                 "profiles.json on every machine");
+        QVERIFY(!julia.toJson().contains(QStringLiteral("writtenAt")));
+
+        julia.writtenBy = QStringLiteral("howl");
+        julia.writtenAt = QDateTime(QDate(2026, 9, 8), QTime(15, 1, 40),
+                                    QTimeZone::fromSecondsAheadOfUtc(-3 * 3600));
+
+        Profile read;
+        QString error;
+        QVERIFY2(Profile::fromJson(julia.toJson(), &read, &error), qPrintable(error));
+        QCOMPARE(read.writtenBy, QStringLiteral("howl"));
+        QCOMPARE(read.writtenAt, julia.writtenAt);
+        QCOMPARE(read.toJson(), julia.toJson());
+
+        // `withoutTheStamp` is what "did this change" is asked of, so it has to
+        // drop both halves and nothing else. Without this, every save would
+        // differ from the last by the stamp itself and every profile would be
+        // stamped on every run.
+        Profile other = julia;
+        other.writtenBy = QStringLiteral("ana");
+        other.writtenAt = julia.writtenAt.addDays(9);
+        QCOMPARE(other.withoutTheStamp(), julia.withoutTheStamp());
+        other.enforce = !other.enforce;
+        QVERIFY(other.withoutTheStamp() != julia.withoutTheStamp());
+
+        // A stamp that is there and unreadable is refused rather than dropped.
+        // Silently becoming "never" would make the profile that has one lose
+        // every tiebreak against one that does not.
+        QJsonObject broken = julia.toJson();
+        broken.insert(QStringLiteral("writtenAt"), QStringLiteral("last Tuesday"));
+        QVERIFY(!Profile::fromJson(broken, &read, &error));
+        QVERIFY2(error.contains(QStringLiteral("writtenAt")), qPrintable(error));
+        broken.insert(QStringLiteral("writtenAt"), 17);
+        QVERIFY(!Profile::fromJson(broken, &read, &error));
+    }
+
+// A pot on a login several people share is a pot the first of them empties
+    // and nobody ever refills, so it is refused where the file is read.
+    //
+    // Where and not whether is the point. The other rule about this profile --
+    // that administrators are not caught by it -- lives in the cycle, because
+    // somebody put in wheel tomorrow has to fall out of a fallback that was
+    // written before and is still correct. This one is a fact about the file
+    // and belongs with the other things the file cannot mean.
+    void aProfileForAnybodyCannotHoldAPotThatNeverResets()
+    {
+        const auto shared = [](Resets resets) {
+            QJsonObject budget {{QStringLiteral("id"), QStringLiteral("pot")},
+                                {QStringLiteral("match"), QJsonArray{QStringLiteral("*")}},
+                                {QStringLiteral("dailyMinutes"), 120}};
+            if (resets == Resets::Never)
+                budget.insert(QStringLiteral("resets"), QStringLiteral("never"));
+            return QJsonObject {{QStringLiteral("user"), anybody()},
+                                {QStringLiteral("budgets"), QJsonArray {budget}}};
+        };
+
+        Profile read;
+        QString error;
+        QVERIFY(!Profile::fromJson(shared(Resets::Never), &read, &error));
+        QVERIFY2(error.contains(QStringLiteral("never resets")), qPrintable(error));
+        QVERIFY2(error.contains(QStringLiteral("for anybody")), qPrintable(error));
+
+        // And `daily` on the same profile is fine, or the refusal above would
+        // be about profiles for anybody rather than about pots on them.
+        QVERIFY2(Profile::fromJson(shared(Resets::Daily), &read, &error), qPrintable(error));
+        QVERIFY(read.isForAnybody());
+
+        // As is a pot on somebody's own profile, which is the whole point of
+        // pots and must not have been taken away by this.
+        QJsonObject mine = shared(Resets::Never);
+        mine.insert(QStringLiteral("user"), QStringLiteral("julia"));
+        QVERIFY2(Profile::fromJson(mine, &read, &error), qPrintable(error));
+        QVERIFY(read.budgets.at(0).carriesOver());
+        QVERIFY(!read.isForAnybody());
+    }
+
+    // A site with no action named blocks, an app with none warns. Different
+    // defaults because they are the honest reading of each: the observing stage
+    // for apps is `enforce: false`, and for sites it was the whole of §5.2.
+    void aSiteBudgetWithNoActionNamedBlocks()
+    {
+        const QJsonObject written {
+            {QStringLiteral("user"), QStringLiteral("julia")},
+            {QStringLiteral("budgets"),
+             QJsonArray {QJsonObject {{QStringLiteral("id"), QStringLiteral("youtube.com")},
+                                      {QStringLiteral("match"), QJsonArray{QStringLiteral("youtube.com")}},
+                                      {QStringLiteral("kind"), QStringLiteral("site")},
+                                      {QStringLiteral("dailyMinutes"), 30}}}},
+        };
+        Profile read;
+        QString error;
+        QVERIFY2(Profile::fromJson(written, &read, &error), qPrintable(error));
+        QCOMPARE(read.budgets.at(0).onExhausted, OnExhausted::Block);
+    }
+
+    // An instruction with nothing on the other end of it is refused where the
+    // file is read, and not repaired into something that would run. A `close` on
+    // a site names no cgroup and a `block` on an app names no domain, and either
+    // one would read back out of `profile show` and never fire.
+    void anActionThatCannotHappenToThatKindIsRefused()
+    {
+        const auto budgetSaying = [](const QString &kind, const QString &action) {
+            QJsonObject entry {{QStringLiteral("id"), QStringLiteral("thing")},
+                               {QStringLiteral("match"), QJsonArray{QStringLiteral("thing")}},
+                               {QStringLiteral("onExhausted"), action}};
+            if (!kind.isEmpty())
+                entry.insert(QStringLiteral("kind"), kind);
+            return QJsonObject {{QStringLiteral("user"), QStringLiteral("julia")},
+                                {QStringLiteral("budgets"), QJsonArray {entry}}};
+        };
+
+        Profile read;
+        QString error;
+        QVERIFY(!Profile::fromJson(budgetSaying(QStringLiteral("site"),
+                                                QStringLiteral("close")),
+                                   &read, &error));
+        QVERIFY(error.contains(QStringLiteral("close")));
+        QVERIFY(!Profile::fromJson(budgetSaying(QStringLiteral("site"),
+                                                QStringLiteral("logout")),
+                                   &read, &error));
+        QVERIFY(!Profile::fromJson(budgetSaying(QString(), QStringLiteral("block")), &read,
+                                   &error));
+        QVERIFY(error.contains(QStringLiteral("block")));
+
+        // And an unknown kind is said rather than guessed at.
+        QVERIFY(!Profile::fromJson(budgetSaying(QStringLiteral("website"),
+                                                QStringLiteral("warn")),
+                                   &read, &error));
+        QVERIFY(error.contains(QStringLiteral("website")));
+
+        // `warn` fits both: it is the observing stage of either.
+        QVERIFY(Profile::fromJson(budgetSaying(QStringLiteral("site"), QStringLiteral("warn")),
+                                  &read, &error));
+        QVERIFY(Profile::fromJson(budgetSaying(QString(), QStringLiteral("warn")), &read,
+                                  &error));
+    }
+};
+
+#include "tst_webpolicy.moc"
+
+int runWebPolicyTests(int argc, char **argv)
+{
+    WebPolicyTests tests;
+    return QTest::qExec(&tests, argc, argv);
+}

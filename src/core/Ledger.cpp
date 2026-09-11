@@ -105,11 +105,69 @@ void Ledger::addSeconds(const QString &budgetId, int amount)
     seconds[budgetId] = secondsFor(budgetId) + amount;
 }
 
+int Ledger::keptSecondsFor(const QString &budgetId) const
+{
+    return keptSeconds.value(budgetId, 0);
+}
+
+void Ledger::addKeptSeconds(const QString &budgetId, int amount)
+{
+    if (budgetId.isEmpty() || amount == 0)
+        return;
+    keptSeconds[budgetId] = keptSecondsFor(budgetId) + amount;
+}
+
+int Ledger::keptGrantedFor(const QString &budgetId) const
+{
+    return keptGranted.value(budgetId, 0);
+}
+
+void Ledger::addKeptGranted(const QString &budgetId, int amount)
+{
+    if (budgetId.isEmpty() || amount == 0)
+        return;
+    keptGranted[budgetId] = keptGrantedFor(budgetId) + amount;
+}
+
+int Ledger::presenceSecondsFor(const QString &reason) const
+{
+    return presence.value(reason, 0);
+}
+
+void Ledger::addPresenceSeconds(const QString &reason, int amount)
+{
+    if (reason.isEmpty() || amount == 0)
+        return;
+    presence[reason] = presenceSecondsFor(reason) + amount;
+}
+
+int Ledger::siteSecondsFor(const QString &site) const
+{
+    return sites.value(site, 0);
+}
+
+void Ledger::addSiteSeconds(const QString &site, int amount)
+{
+    if (site.isEmpty() || amount == 0)
+        return;
+    sites[site] = siteSecondsFor(site) + amount;
+}
+
 int Ledger::grantedSeconds(const QString &budgetId) const
 {
     int total = 0;
     for (const Grant &grant : grants) {
-        if (grant.budget == budgetId && grant.minutes > 0)
+        if (grant.budget == budgetId && grant.minutes != 0)
+            total += grant.minutes * 60;
+    }
+    return total;
+}
+
+int Ledger::creditedSeconds(const QString &budgetId) const
+{
+    int total = 0;
+    for (const Grant &grant : grants) {
+        if (grant.budget == budgetId && !grant.adjustment)
             total += grant.minutes * 60;
     }
     return total;
@@ -150,12 +208,15 @@ QJsonObject Ledger::toJson() const
 
     QJsonArray grantArray;
     for (const Grant &grant : grants) {
-        grantArray.append(QJsonObject{
+        QJsonObject entry{
             {QStringLiteral("at"), isoWithOffset(grant.at)},
             {QStringLiteral("by"), grant.by},
             {QStringLiteral("budget"), grant.budget},
             {QStringLiteral("minutes"), grant.minutes},
-        });
+        };
+        if (grant.adjustment)
+            entry.insert(QStringLiteral("kind"), QStringLiteral("adjustment"));
+        grantArray.append(entry);
     }
 
     QJsonArray eventArray;
@@ -173,20 +234,68 @@ QJsonObject Ledger::toJson() const
         eventArray.append(object);
     }
 
-    return QJsonObject{
-        {QStringLiteral("schemaVersion"), kSchemaVersion},
+    QJsonObject document{
+        {QStringLiteral("schemaVersion"), kLedgerSchema},
         {QStringLiteral("user"), user},
         {QStringLiteral("date"), date.toString(Qt::ISODate)},
         {QStringLiteral("budgets"), budgetObject},
         {QStringLiteral("grants"), grantArray},
         {QStringLiteral("events"), eventArray},
     };
+
+    // The rule for the three optional objects below, said once here.
+    //
+    // Each is written only when it has something to say. Not to keep older
+    // ledgers readable -- an empty object would be read fine -- but because
+    // this file is rewritten every couple of seconds for as long as the machine
+    // is on. `"presence": {}, "sites": {}, "kept": {}` on a machine that has
+    // none of the three is three lies about what was measured, on every tick,
+    // forever.
+    //
+    // It is worth being precise about what this rule is *not*, because a
+    // neighbouring one was removed for being the other thing: writing a field
+    // only when it means something is design. Reading two spellings of one
+    // value, as a budget's `match` did, was compatibility wearing design's
+    // clothes, and it went the moment somebody asked which files it was for.
+    if (!presence.isEmpty()) {
+        QJsonObject presenceObject;
+        for (auto it = presence.constBegin(); it != presence.constEnd(); ++it)
+            presenceObject.insert(it.key(), it.value());
+        document.insert(QStringLiteral("presence"), presenceObject);
+    }
+
+    // The rule above, for a machine with no browser extension on it.
+    if (!sites.isEmpty()) {
+        QJsonObject siteObject;
+        for (auto it = sites.constBegin(); it != sites.constEnd(); ++it)
+            siteObject.insert(it.key(), it.value());
+        document.insert(QStringLiteral("sites"), siteObject);
+    }
+    // The rule above, for profiles with no budget that outlives the day.
+    if (!keptSeconds.isEmpty()) {
+        QJsonObject kept;
+        for (auto it = keptSeconds.constBegin(); it != keptSeconds.constEnd(); ++it)
+            kept.insert(it.key(), it.value());
+        document.insert(QStringLiteral("kept"), kept);
+    }
+    // And again for what was handed over to those budgets, which is written
+    // apart from `kept` because the two are a decision and an observation and
+    // one of them is allowed to be larger than the other.
+    if (!keptGranted.isEmpty()) {
+        QJsonObject granted;
+        for (auto it = keptGranted.constBegin(); it != keptGranted.constEnd(); ++it)
+            granted.insert(it.key(), it.value());
+        document.insert(QStringLiteral("keptGranted"), granted);
+    }
+    if (!allocation.isEmpty()) document.insert(QStringLiteral("allocation"), allocation);
+    if (observedAt.isValid()) document.insert(QStringLiteral("observedAt"), isoWithOffset(observedAt));
+    return document;
 }
 
 bool Ledger::fromJson(const QJsonObject &object, Ledger *out, QString *error)
 {
     const QString what = QStringLiteral("a ledger");
-    if (!checkSchemaVersion(object, what, error))
+    if (!checkSchemaVersion(object, kLedgerSchema, what, error))
         return false;
 
     Ledger ledger;
@@ -202,6 +311,17 @@ bool Ledger::fromJson(const QJsonObject &object, Ledger *out, QString *error)
             *error = QStringLiteral("a ledger has an unreadable date: %1").arg(dateText);
         return false;
     }
+
+    if (object.contains(QStringLiteral("allocation"))) {
+        if (!object.value(QStringLiteral("allocation")).isObject()) {
+            if (error) *error = QStringLiteral("allocation must be an object");
+            return false;
+        }
+        ledger.allocation = object.value(QStringLiteral("allocation")).toObject();
+    }
+    if (object.contains(QStringLiteral("observedAt"))
+            && !wantsDateTime(object, QStringLiteral("observedAt"), what, &ledger.observedAt, error))
+        return false;
 
     const QJsonValue budgetsValue = object.value(QStringLiteral("budgets"));
     if (!budgetsValue.isUndefined() && !budgetsValue.isObject()) {
@@ -219,6 +339,88 @@ bool Ledger::fromJson(const QJsonObject &object, Ledger *out, QString *error)
             return false;
         }
         ledger.seconds.insert(it.key(), it.value().toInt());
+    }
+
+    // Absent in every ledger written before presence was measured, which is
+    // every ledger already on the machines this ships to. Absent is empty and
+    // never an error.
+    const QJsonValue presenceValue = object.value(QStringLiteral("presence"));
+    if (!presenceValue.isUndefined() && !presenceValue.isObject()) {
+        if (error)
+            *error = QStringLiteral("a ledger has a presence field that is not an object");
+        return false;
+    }
+    const QJsonObject presenceObject = presenceValue.toObject();
+    for (auto it = presenceObject.constBegin(); it != presenceObject.constEnd(); ++it) {
+        if (!it.value().isDouble()) {
+            if (error) {
+                *error = QStringLiteral("the ledger of %1 has a non-numeric presence count "
+                                        "for %2")
+                             .arg(ledger.user, it.key());
+            }
+            return false;
+        }
+        ledger.presence.insert(it.key(), it.value().toInt());
+    }
+
+    // Absent in every ledger written before the browser was measured, and
+    // absent for good on a machine with no extension. Absent is empty and never
+    // an error.
+    const QJsonValue sitesValue = object.value(QStringLiteral("sites"));
+    if (!sitesValue.isUndefined() && !sitesValue.isObject()) {
+        if (error)
+            *error = QStringLiteral("a ledger has a sites field that is not an object");
+        return false;
+    }
+    const QJsonObject siteObject = sitesValue.toObject();
+    for (auto it = siteObject.constBegin(); it != siteObject.constEnd(); ++it) {
+        if (!it.value().isDouble()) {
+            if (error) {
+                *error = QStringLiteral("the ledger of %1 has a non-numeric site count "
+                                        "for %2")
+                             .arg(ledger.user, it.key());
+            }
+            return false;
+        }
+        ledger.sites.insert(it.key(), it.value().toInt());
+    }
+
+    // Absent in every ledger written before a budget could outlive the day,
+    // which is every ledger on the machines this ships to.
+    const QJsonValue keptValue = object.value(QStringLiteral("kept"));
+    if (!keptValue.isUndefined() && !keptValue.isObject()) {
+        if (error)
+            *error = QStringLiteral("a ledger has a kept field that is not an object");
+        return false;
+    }
+    const QJsonObject kept = keptValue.toObject();
+    for (auto it = kept.constBegin(); it != kept.constEnd(); ++it) {
+        if (!it.value().isDouble()) {
+            if (error) {
+                *error = QStringLiteral("the ledger of %1 has a non-numeric kept count for %2")
+                             .arg(ledger.user, it.key());
+            }
+            return false;
+        }
+        ledger.keptSeconds.insert(it.key(), it.value().toInt());
+    }
+
+    const QJsonValue grantedValue = object.value(QStringLiteral("keptGranted"));
+    if (!grantedValue.isUndefined() && !grantedValue.isObject()) {
+        if (error)
+            *error = QStringLiteral("a ledger has a keptGranted field that is not an object");
+        return false;
+    }
+    const QJsonObject granted = grantedValue.toObject();
+    for (auto it = granted.constBegin(); it != granted.constEnd(); ++it) {
+        if (!it.value().isDouble()) {
+            if (error) {
+                *error = QStringLiteral("the ledger of %1 has a non-numeric kept grant for %2")
+                             .arg(ledger.user, it.key());
+            }
+            return false;
+        }
+        ledger.keptGranted.insert(it.key(), it.value().toInt());
     }
 
     const QJsonValue grantsValue = object.value(QStringLiteral("grants"));
@@ -251,6 +453,13 @@ bool Ledger::fromJson(const QJsonObject &object, Ledger *out, QString *error)
             return false;
         }
         grant.minutes = minutes.toInt();
+        if (entry.contains(QStringLiteral("kind"))) {
+            if (entry.value(QStringLiteral("kind")) != QJsonValue(QStringLiteral("adjustment"))) {
+                if (error) *error = QStringLiteral("a grant has an unknown kind");
+                return false;
+            }
+            grant.adjustment = true;
+        }
         ledger.grants.append(grant);
     }
 

@@ -2,7 +2,11 @@ OMAHOUSE_PROJECT_DIR = $$PWD
 OMAHOUSE_SOURCE_ROOT = $$clean_path($$PWD/..)
 include($$PWD/../qmake/layout.pri)
 
-QT       += core testlib
+# `qml` is QJSEngine and nothing else -- no window toolkit, no QtQuick, and no
+# screen. `tst_polkit.cpp` needs a JavaScript interpreter because the polkit
+# rules file omahouse installs *is* a JavaScript program, and the only honest
+# way to check what it decides is to run it.
+QT       += core testlib qml
 QT       -= gui
 CONFIG   += testcase c++17 console
 CONFIG   -= app_bundle
@@ -17,11 +21,19 @@ SOURCES += \
     tst_scopename.cpp \
     tst_policy.cpp \
     tst_duration.cpp \
+    tst_focus.cpp \
     tst_ledger.cpp \
     tst_proc.cpp \
     tst_paths.cpp \
+    tst_presence.cpp \
     tst_watch.cpp \
-    tst_enforce.cpp
+    tst_enforce.cpp \
+    tst_webpolicy.cpp \
+    tst_fleet.cpp \
+    tst_kind.cpp \
+    tst_publication.cpp \
+    tst_pairing.cpp \
+    tst_polkit.cpp
 
 # The suite links the same archive the CLI links, rather than recompiling the
 # core's sources into itself: a test that builds its own copy of the library can

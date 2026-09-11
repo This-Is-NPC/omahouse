@@ -19,7 +19,7 @@ import omahouse
 //
 // The keyboard hub is the same idea. `root` holds the focus whenever the window
 // is not in a field or a sheet, and every key is decided in `handleKey` rather
-// than spread across the three views -- which is how a key ends up working in
+// than spread across the four views -- which is how a key ends up working in
 // one of them and not the others. The views own no keys at all.
 //
 // Two faces, and nobody chooses. `House.face` is `operator` for somebody in
@@ -41,21 +41,81 @@ Window {
     // ------------------------------------------------------------------ state
     readonly property bool operating: House.face === "operator"
     readonly property var people: House.people
+    readonly property var household: House.household
+    readonly property string householdSentence: {
+        if (win.household.kind === "managed")
+            return " · managed from another computer"
+        if (win.household.kind !== "manager")
+            return ""
+        const machines = win.household.machines || []
+        const names = machines.map(function (machine) { return machine.name })
+        return " · manages " + machines.length + " computer" + (machines.length === 1 ? "" : "s")
+               + (names.length ? " · " + names.join(", ") : "")
+    }
     property int view: 1
     property int cursorPeople: 0
     property int cursorPrograms: 0
+    property int cursorSites: 0
     property int cursorToday: 0
-    property string filter: ""
+    property int cursorFleet: 0
+    // One needle per list, and never one for the window.
+    //
+    // The key sheet says `/ filter this list`, and for a long time it was one
+    // string applied to all five at once. What that cost was not a narrower
+    // list: the profile the window is about follows the cursor of the people
+    // list, so a needle that missed the person emptied the people list, and
+    // then the programs view had nobody to be about and drew *nobody is under
+    // rules yet* over a household that was right there.
+    //
+    // Each list keeps its own, across going somewhere else and coming back --
+    // which is what "this list" means, and the status bar always shows the one
+    // belonging to the view on screen, so nothing is narrowed by something
+    // invisible. `Esc` clears the one in front of you.
+    property string filterPeople: ""
+    property string filterPrograms: ""
+    property string filterToday: ""
+    property string filterSites: ""
+    property string filterFleet: ""
     property bool filtering: false
+
+    /// The needle of the list on screen. Read-only: writing it would be writing
+    /// one of five and the binding could not say which, so `setFilter` says it.
+    readonly property string filter: win.view === 1 ? win.filterPeople
+                                    : win.view === 2 ? win.filterPrograms
+                                    : win.view === 5 ? win.filterFleet
+                                    : win.view === 4 ? win.filterSites
+                                                     : win.filterToday
+
+    function setFilter(text) {
+        if (win.view === 1)
+            win.filterPeople = text
+        else if (win.view === 2)
+            win.filterPrograms = text
+        else if (win.view === 5)
+            win.filterFleet = text
+        else if (win.view === 4)
+            win.filterSites = text
+        else
+            win.filterToday = text
+    }
     /// What `minutes`, `grant` and `drop` are about, kept from the moment the
     /// prompt opens: the cursor is free to move while a sheet is up, and an
     /// answer that read the cursor back would land on whatever row is under it
     /// by then.
     property string target: ""
     property string targetKind: ""
+    property bool targetSession: false
+    property string publishUser: ""
+    property string editUser: ""
+    property string pendingAction: ""
+    property var pendingRow: null
+
+    function personNamed(user) {
+        return win.people.find(function (one) { return one.user === user }) || null
+    }
 
     readonly property bool blocked: helpSheet.visible || commandPalette.visible
-                                    || prompt.visible || confirm.visible || picker.visible
+                                    || prompt.visible || confirm.visible || picker.visible || profilePicker.visible || publishSheet.visible
                                     || win.filtering
 
     // Where a cursor really is, as opposed to where it was last put.
@@ -72,6 +132,7 @@ Window {
 
     readonly property int peopleCursor: win.clamp(win.cursorPeople, win.peopleRows.length)
     readonly property int programCursor: win.clamp(win.cursorPrograms, win.programRows.length)
+    readonly property int siteCursor: win.clamp(win.cursorSites, win.siteRows.length)
     readonly property int todayCursor: win.clamp(win.cursorToday, win.todayRows.length)
 
     // The profile the window is about follows the cursor of the first view, and
@@ -89,32 +150,64 @@ Window {
 
     readonly property var allPrograms: win.subject === "" ? []
         : (House.snapshot.programs[win.subject] || [])
+    readonly property var allSites: win.subject === "" ? []
+        : (House.snapshot.sites[win.subject] || [])
     readonly property var allToday: win.subject === "" ? []
         : (House.snapshot.today[win.subject] || [])
+    readonly property var machineRows: (win.household.machines || []).map(function (machine) {
+        return {name: machine.name, id: "", state: machine.reachable ? "paired" : "not paired",
+                machineOnly: true, limited: false}
+    })
+    readonly property var fleetRows: {
+        let rows = win.subject === "" ? win.machineRows : ((House.snapshot.fleet || {})[win.subject] || [])
+        if (win.subject !== "" && rows.length === 0)
+            rows = win.machineRows
+        const publication = win.person ? win.person.publication || [] : []
+        const decorated = rows.map(function (row) {
+            const copy = Object.assign({}, row)
+            const found = publication.find(function (one) { return one.machine === row.name })
+            copy.publication = found ? found.state : ""
+            return copy
+        })
+        return win.narrow(decorated, win.filterFleet)
+    }
+    readonly property bool fleetHasBudgets: win.fleetRows.some(function (row) { return !row.machineOnly })
+    readonly property int fleetCursor: win.clamp(win.cursorFleet, win.fleetRows.length)
     readonly property var catalogue: win.subject === "" ? []
         : (House.snapshot.catalog[win.subject] || [])
 
-    function matches(row) {
-        const needle = win.filter.trim().toLowerCase()
-        if (needle === "")
-            return true
-        const parts = [row.id || "", row.name || "", row.user || "", row.text || ""]
-        for (let i = 0; i < parts.length; i++) {
-            if (String(parts[i]).toLowerCase().indexOf(needle) >= 0)
-                return true
-        }
-        return false
+    /// The rows of one list that answer to one needle. The needle is a
+    /// parameter and never read off the window, which is the whole of the fix:
+    /// a function that reached for `win.filter` would narrow every list by
+    /// whichever one happens to be on screen.
+    function narrow(rows, needle) {
+        const wanted = String(needle).trim().toLowerCase()
+        if (wanted === "")
+            return rows
+        return rows.filter(function (row) {
+            const parts = [row.id || "", row.name || "", row.user || "", row.text || ""]
+            for (let i = 0; i < parts.length; i++) {
+                if (String(parts[i]).toLowerCase().indexOf(wanted) >= 0)
+                    return true
+            }
+            return false
+        })
     }
 
-    readonly property var peopleRows: win.people.filter(win.matches)
-    readonly property var programRows: win.allPrograms.filter(win.matches)
-    readonly property var todayRows: win.allToday.filter(win.matches)
+    readonly property var peopleRows: win.narrow(win.people, win.filterPeople)
+    readonly property var programRows: win.narrow(win.allPrograms, win.filterPrograms)
+    readonly property var siteRows: win.narrow(win.allSites, win.filterSites)
+    readonly property var todayRows: win.narrow(win.allToday, win.filterToday)
 
     readonly property var rows: win.view === 1 ? win.peopleRows
                               : win.view === 2 ? win.programRows
+                              : win.view === 5 ? win.fleetRows
+                              : win.view === 4 ? win.siteRows
                                                : win.todayRows
     readonly property int cursor: win.view === 1 ? win.peopleCursor
                                  : win.view === 2 ? win.programCursor
+                                 : win.view === 5 ? win.fleetCursor
+                                 : win.view === 4 ? win.siteCursor
                                                   : win.todayCursor
     readonly property var currentRow: win.cursor < 0 || win.cursor >= win.rows.length
         ? null : (win.rows[win.cursor] || null)
@@ -140,7 +233,21 @@ Window {
         if (!win.operating)
             return rows
 
+        rows.push({ id: "fleet", key: "f", hint: "machines",
+                    label: "manage the household machines", usable: win.view !== 5 && (person !== null || win.machineRows.length > 0) })
+        if (win.view === 5) {
+            rows.push({ id: "grant", key: "+", hint: "household credit",
+                        label: "add household credit for the next synchronization",
+                        usable: row !== null && row.limited })
+            return rows
+        }
         if (win.view === 1) {
+            const standing = person && person.standing ? person.standing : {unresolved: false, changedOn: []}
+            const resolve = standing.error || (standing.changedOn || []).join(", ")
+            if (win.household.kind === "manager") rows.push({ id: "publish", key: "u", hint: standing.unresolved ? "resolve " + resolve : "publish",
+                        label: standing.unresolved ? "resolve " + resolve + " before publishing" : "publish this draft",
+                        usable: win.household.kind === "manager" && win.machineRows.length > 0
+                                && person !== null && !standing.unresolved && !Admin.busy })
             rows.push({ id: "new", key: "n", hint: "new profile",
                         label: "put an account under rules", usable: true })
             rows.push({ id: "enforce", key: "e",
@@ -174,6 +281,44 @@ Window {
             rows.push({ id: "drop", key: "x", hint: "off the list",
                         label: "take this program off the list",
                         usable: row !== null && row.released })
+        } else if (win.view === 4) {
+            // The web half of docs/design.md §11, and the two verbs are `block`
+            // and `allow` rather than the app half's `allow` and `deny` for the
+            // reason the CLI gives where they are implemented: taking a program
+            // off somebody's list and changing what every browser on the machine
+            // will open are different enough acts that they should not be one
+            // word.
+            rows.push({ id: "block", key: "b", hint: "block a site",
+                        label: "stop a site opening", usable: person !== null })
+            // Only where taking the block back would really let the site open.
+            // A site that is out of time today is blocked by the clock and no
+            // rule can talk back to it (WebPolicy.h: the clock has the last word
+            // in the composition), and a site another profile blocks stays
+            // blocked whatever this one says. A chip lit for either would be a
+            // chip that lies about what pressing it does.
+            rows.push({ id: "unblock", key: "o", hint: "let it open",
+                        label: "let this site open again",
+                        usable: row !== null && row.asked && !row.outOfTime })
+            rows.push({ id: "minutes", key: "m", hint: "minutes",
+                        label: "minutes a day on this site",
+                        usable: row !== null })
+            rows.push({ id: "grant", key: "+", hint: "more today",
+                        label: "more time today on this site",
+                        usable: row !== null && row.hasBudget })
+            rows.push({ id: "sites", key: "d",
+                        hint: person && person.onlyListedSites ? "all but blocked"
+                                                               : "only listed",
+                        label: person && person.onlyListedSites
+                               ? "let every site open except the blocked"
+                               : "let only the listed sites open",
+                        usable: person !== null })
+            rows.push({ id: "incognito", key: "i",
+                        hint: person && person.incognitoDenied ? "incognito on"
+                                                               : "incognito off",
+                        label: person && person.incognitoDenied
+                               ? "let incognito windows open"
+                               : "stop incognito windows opening",
+                        usable: person !== null })
         } else {
             rows.push({ id: "day", key: "s", hint: "the day",
                         label: "how long the whole day is",
@@ -184,6 +329,16 @@ Window {
             rows.push({ id: "grant", key: "+", hint: "more today",
                         label: "more time today for this budget",
                         usable: row !== null && row.kind === "budget" })
+            // A pot or an allowance. Only where there is a number to keep,
+            // because a budget with no limit has nothing for the turn of the
+            // date to empty, and `limit` wants the number said again.
+            rows.push({ id: "pot", key: "p",
+                        hint: row && row.pot ? "resets daily" : "never resets",
+                        label: row && row.pot
+                               ? "let this budget reset daily again"
+                               : "make this budget a pot that never resets",
+                        usable: row !== null && row.kind === "budget"
+                                && row.limited === true })
         }
         return rows
     }
@@ -217,7 +372,8 @@ Window {
             { key: "Esc", label: "back, or clear the filter, or leave a control" },
             { key: "1", label: "the people under rules" },
             { key: "2", label: "the programs of the one under the cursor" },
-            { key: "3", label: "their day: what is left, and what happened" }
+            { key: "3", label: "their day: what is left, and what happened" },
+            { key: "4", label: "their sites: what opens, and the minutes on it" }
         ]
         const window = [
             { key: "/", label: "filter this list" },
@@ -274,8 +430,12 @@ Window {
     }
 
     function go(which) {
+        if (which === 5 && !win.operating) return
         win.view = which
-        win.filter = ""
+        // The needle of the list being left is left with it. Each list keeps
+        // its own, and the status bar shows the one in front of you, so coming
+        // back to a narrowed list is a thing you can see rather than a thing
+        // that happens to you.
         win.filtering = false
         win.takeFocus()
     }
@@ -287,12 +447,20 @@ Window {
             win.cursorPeople = at
         else if (win.view === 2)
             win.cursorPrograms = at
+        else if (win.view === 5)
+            win.cursorFleet = at
+        else if (win.view === 4)
+            win.cursorSites = at
         else
             win.cursorToday = at
         if (win.view === 1)
             peopleList.positionViewAtIndex(at, ListView.Contain)
         else if (win.view === 2)
             programList.positionViewAtIndex(at, ListView.Contain)
+        else if (win.view === 5)
+            fleetList.positionViewAtIndex(at, ListView.Contain)
+        else if (win.view === 4)
+            siteList.positionViewAtIndex(at, ListView.Contain)
         else
             todayList.positionViewAtIndex(at, ListView.Contain)
     }
@@ -309,18 +477,42 @@ Window {
 
     function finishFilter(clear) {
         if (clear)
-            win.filter = ""
+            win.setFilter("")
         win.filtering = false
         win.setCursor(win.cursor)
         win.takeFocus()
     }
 
     // ---------------------------------------------------------------- actions
-    function perform(id) {
+    function perform(id, selectedUser) {
+        if (!win.operating && ["open", "back", "fleet"].indexOf(id) < 0) return
         Admin.clear()
-        const person = win.person
-        const row = win.currentRow
+        if (!selectedUser && ["release", "minutes", "block", "day"].indexOf(id) >= 0) {
+            if (win.people.length === 0) return
+            win.pendingAction = id
+            win.pendingRow = win.currentRow
+            profilePicker.purpose = id === "release" ? "Add a program"
+                                  : id === "block" ? "Block a site"
+                                  : id === "day" ? "Set the day's limit" : "Set a limit"
+            profilePicker.open()
+            return
+        }
+        const person = selectedUser ? win.personNamed(selectedUser) : win.person
+        const row = selectedUser ? win.pendingRow : win.currentRow
+        win.editUser = person ? person.user : ""
 
+        if (id === "publish") {
+            if (win.household.kind !== "manager" || person === null
+                || !person.standing || person.standing.unresolved)
+                return
+            win.publishUser = person.user
+            publishSheet.open(person.publication || [], person.name)
+            return
+        }
+        if (id === "fleet") {
+            win.go(5)
+            return
+        }
         if (id === "open") {
             if (win.person !== null)
                 win.go(2)
@@ -342,10 +534,7 @@ Window {
             return
         }
 
-        // Everything below is about the profile under the cursor, and every one
-        // of them is marked unusable in the table when there is none -- so this
-        // is a second lock on a door already bolted, and it stays because the
-        // cost of being wrong is a TypeError in a window somebody is using.
+        // Creation uses the explicitly chosen profile; row actions use the visible profile.
         if (person === null)
             return
 
@@ -367,10 +556,30 @@ Window {
             if (row === null)
                 return
             win.target = row.id
-            win.targetKind = row.kind
-            prompt.ask("minutes", "Minutes a day for " + win.target,
-                       "45m, 2h, 1h30m. It is the whole day's allowance for this one "
-                       + "program; time an operator hands over today is on top of it.",
+            win.targetKind = row.site === true ? "site" : row.kind
+            win.targetSession = row.session === true
+            const aSite = row.kind === "site" || row.site === true
+            // A pot is not a day. The title and the words change with the
+            // shape, and the number written keeps the shape: `limit` leaves
+            // `resets` alone unless it is said.
+            prompt.ask("minutes",
+                       (row.pot === true ? "Minutes in all for "
+                        : aSite ? "Minutes a day on " : "Minutes a day for ") + win.target
+                       + " · Profile: " + person.user,
+                       row.pot === true
+                       ? "45m, 2h. This budget never resets, so this is everything it "
+                         + "has until somebody hands over more; a new number keeps it "
+                         + "a pot."
+                       : aSite
+                       // The crossing of docs/design.md §5.2, said where the
+                       // number is being decided: a site is billed only where
+                       // the browser and the screen agree, so the limit somebody
+                       // writes here is not wall clock time.
+                       ? "30m, 1h. Counted only while somebody is in front of the "
+                         + "screen, and the site stops opening once it is spent — "
+                         + "until the turn of the day, or until more time is handed over."
+                       : "45m, 2h, 1h30m. It is the whole day's allowance for this one "
+                         + "program; time an operator hands over today is on top of it.",
                        "", row.daily || "", false)
         } else if (id === "grant") {
             if (row === null)
@@ -381,6 +590,21 @@ Window {
                        "10m, 1h. It goes into today's ledger and expires with it, and it "
                        + "adds to the limit rather than replacing it.",
                        "+", "", false)
+        } else if (id === "pot") {
+            if (row === null || row.limited !== true)
+                return
+            // The number said again as it is written in the profile, because
+            // `limit` is where a budget's shape is written and it takes the
+            // number with the shape; `daily` is that number and not what
+            // today's grants have made of it, for the reason `m` opens with
+            // it. Which of the three shapes, carried on the row and never
+            // inferred from the id, as `m` does.
+            const shape = row.session ? ["--session", row.daily]
+                        : row.site === true ? ["--site", row.id + "=" + row.daily]
+                                            : ["--budget", row.id + "=" + row.daily]
+            Admin.run(row.pot ? "reset daily again" : "never reset",
+                      ["limit", person.user].concat(shape)
+                          .concat(["--resets", row.pot ? "daily" : "never"]))
         } else if (id === "drop") {
             if (row === null)
                 return
@@ -388,10 +612,43 @@ Window {
             confirm.ask("drop", "Take " + row.id + " off the list?",
                         "Any limit written for it stays where it is: a program denied "
                         + "today may be allowed again tomorrow with the same number.")
+        } else if (id === "block") {
+            // Opened with the row's own domain when that row is not already
+            // blocked here, and empty otherwise. The same courtesy `m` does, and
+            // it costs nothing to be wrong about: the field is selected, so the
+            // first character typed replaces it.
+            //
+            // The reach of a browser policy is not said here. It is on the view
+            // this sheet is drawn over, once, which is where docs/design.md §11
+            // wants it: said once per screen and never per rule, because a tool
+            // that re-argues a settled decision every time it is used is a tool
+            // people stop reading.
+            prompt.ask("block", "Which site should stop opening? · Profile: " + person.user,
+                       "The site's name on its own, like youtube.com — not a whole "
+                       + "address. A bare domain covers its subdomains too.",
+                       "", row !== null && row.asked !== true ? row.id : "", false)
+        } else if (id === "unblock") {
+            if (row === null)
+                return
+            Admin.run("let " + row.id + " open", ["web", "allow", person.user, row.id])
+        } else if (id === "sites") {
+            Admin.run(person.onlyListedSites ? "every site but the blocked"
+                                             : "only the listed sites",
+                      ["web", person.user,
+                       person.onlyListedSites ? "--all-but-listed" : "--only-listed"])
+        } else if (id === "incognito") {
+            Admin.run(person.incognitoDenied ? "let incognito windows open"
+                                             : "stop incognito windows opening",
+                      ["web", "incognito", person.user,
+                       person.incognitoDenied ? "--allow" : "--deny"])
         } else if (id === "day") {
             prompt.ask("day", "How long is " + person.user + "'s day?",
-                       "2h, 90m. This is the budget whose selector is everything, and it "
-                       + "ends the session when it runs out.",
+                       person.hasSessionBudget && person.session.pot === true
+                       ? "2h, 90m. This session never resets, so this is everything it "
+                         + "has until somebody hands over more; a new number keeps it a "
+                         + "pot."
+                       : "2h, 90m. This is the budget whose selector is everything, and it "
+                         + "ends the session when it runs out.",
                        "", person.hasSessionBudget ? (person.session.daily || "") : "", false)
         }
     }
@@ -404,22 +661,38 @@ Window {
             Admin.run("put " + text + " under rules", ["profile", "add", text])
             return
         }
-        const person = win.person
+        const person = win.personNamed(win.editUser)
         if (person === null)
             return
         if (topic === "day") {
             Admin.run("the day's total", ["limit", person.user, "--session", text])
         } else if (topic === "minutes") {
+            // `--site` and never `--budget`, and the CLI refuses the wrong one
+            // rather than guessing: Profile.h says there is no shape that tells
+            // a scope id with dots in it from a domain with dots in it, so which
+            // namespace an id is in has to be carried and not inferred. That is
+            // what `targetKind` and the row's own `site` are for.
+            if (win.targetSession) {
+                Admin.run("the day's total", ["limit", person.user, "--session", text])
+                return
+            }
+            if (win.targetKind === "site") {
+                Admin.run("minutes a day",
+                          ["limit", person.user, "--site", win.target + "=" + text])
+                return
+            }
             // The budget id is the CLI's handle, and a program that has none yet
             // gets its rule and its clock in one verb -- `allow --limit` is
             // sugar for exactly this, because they are one thought at the moment
             // somebody is configuring.
-            const budget = win.targetKind === "budget" ? win.budgetNamed(win.target) : null
-            const program = win.targetKind === "budget" ? null : win.programNamed(win.target)
+            const budget = win.targetKind === "budget" ? win.budgetNamed(win.target, win.editUser) : null
+            const program = win.targetKind === "budget" ? null : win.programNamed(win.target, win.editUser)
             if (budget !== null)
                 Admin.run("minutes a day", budget.session
                           ? ["limit", person.user, "--session", text]
-                          : ["limit", person.user, "--budget", win.target + "=" + text])
+                          : budget.site === true
+                            ? ["limit", person.user, "--site", win.target + "=" + text]
+                            : ["limit", person.user, "--budget", win.target + "=" + text])
             else if (program !== null && program.hasBudget)
                 Admin.run("minutes a day",
                           ["limit", person.user, "--budget", program.budgetId + "=" + text])
@@ -427,7 +700,7 @@ Window {
                 Admin.run("minutes a day",
                           ["allow", person.user, win.target, "--limit", text])
         } else if (topic === "grant") {
-            const budget = win.budgetNamed(win.target)
+            const budget = win.budgetNamed(win.target, win.editUser)
             const session = budget !== null && budget.session === true
             Admin.run("more time today", session
                       ? ["grant", person.user, "--session", text]
@@ -435,6 +708,8 @@ Window {
         } else if (topic === "release") {
             Admin.run("release " + win.target,
                       ["allow", person.user, win.target])
+        } else if (topic === "block") {
+            Admin.run("stop " + text + " opening", ["web", "block", person.user, text])
         } else if (topic === "releaseLimit") {
             Admin.run("release " + win.target, text === ""
                       ? ["allow", person.user, win.target]
@@ -449,18 +724,20 @@ Window {
     /// budget called `code` about the program called `code`, which is the
     /// ordinary case -- and one lookup that searched both would answer with
     /// whichever list it happened to look in first.
-    function budgetNamed(id) {
-        for (let i = 0; i < win.allToday.length; i++) {
-            if (win.allToday[i].kind === "budget" && win.allToday[i].id === id)
-                return win.allToday[i]
+    function budgetNamed(id, user) {
+        const rows = House.snapshot.today[user || win.subject] || []
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i].kind === "budget" && rows[i].id === id)
+                return rows[i]
         }
         return null
     }
 
-    function programNamed(id) {
-        for (let i = 0; i < win.allPrograms.length; i++) {
-            if (win.allPrograms[i].id === id)
-                return win.allPrograms[i]
+    function programNamed(id, user) {
+        const rows = House.snapshot.programs[user || win.subject] || []
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i].id === id)
+                return rows[i]
         }
         return null
     }
@@ -489,7 +766,7 @@ Window {
         // chance to have an opinion.
         if (event.key === Qt.Key_Escape) {
             if (win.filter !== "")
-                win.filter = ""
+                win.setFilter("")
             else if (!root.activeFocus)
                 win.takeFocus()
             else
@@ -515,7 +792,7 @@ Window {
             event.accepted = true
             return
         }
-        if (text === "1" || text === "2" || text === "3") {
+        if (text === "1" || text === "2" || text === "3" || text === "4") {
             win.go(parseInt(text))
             event.accepted = true
             return
@@ -582,6 +859,7 @@ Window {
         target: Admin
         function onDone(ok) {
             House.reload()
+            publishSheet.showResult()
         }
     }
 
@@ -618,13 +896,22 @@ Window {
                 height: 40
                 color: Theme.panel
 
+                // The two halves are anchored to their own edges, so the room
+                // between them is what the left one may have and no more: tiled
+                // at half a screen they were drawn over each other. The tabs
+                // keep their width -- a tab with a word missing is a key nothing
+                // answers -- and the sentence gives way from its tail, the way
+                // every other label in this window does when it runs out of
+                // room.
                 Row {
+                    id: face
                     anchors.left: parent.left
                     anchors.leftMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 10
 
                     Label {
+                        id: title
                         anchors.verticalCenter: parent.verticalCenter
                         text: "omahouse"
                         font.bold: true
@@ -633,16 +920,19 @@ Window {
                         objectName: "faceLabel"
                         anchors.verticalCenter: parent.verticalCenter
                         quiet: true
+                        width: Math.max(0, Math.min(implicitWidth,
+                                                    tabs.x - face.x - x - 16))
                         // Said out loud, because it is the answer to "why can I
                         // not change anything here" and to "why did it ask for a
                         // password". Neither is a thing to leave somebody to
                         // work out from what does and does not happen.
                         text: House.user + " · " + House.face + " · " + House.faceReason
-                              + (Admin.elevates ? " · writes through pkexec" : "")
+                              + (Admin.elevates ? " · writes through pkexec" : "") + win.householdSentence
                     }
                 }
 
                 Row {
+                    id: tabs
                     anchors.right: parent.right
                     anchors.rightMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
@@ -674,6 +964,15 @@ Window {
                         quiet: true
                         on: win.view === 3
                         onClicked: win.go(3)
+                    }
+                    Chip {
+                        anchors.verticalCenter: parent.verticalCenter
+                        objectName: "viewChip4"
+                        label: "sites"
+                        key: "4"
+                        quiet: true
+                        on: win.view === 4
+                        onClicked: win.go(4)
                     }
                     Rule {
                         vertical: true
@@ -790,7 +1089,7 @@ Window {
                         focused: win.filtering
                         lead: "/"
                         placeholder: "filter"
-                        onTextChanged: if (win.filtering) win.filter = filterField.text
+                        onTextChanged: if (win.filtering) win.setFilter(filterField.text)
                         onAccepted: win.finishFilter(false)
                         onCancelled: win.finishFilter(true)
                     }
@@ -806,6 +1105,106 @@ Window {
                 height: parent.height - header.height - bar.height - status.height - 3
 
                 // ------------------------------------------------ 1 · people
+                Item {
+                    anchors.fill: parent
+                    visible: win.view === 5 && win.operating
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 16
+                        spacing: 12
+                        Label {
+                            width: parent.width
+                            // The person's name, as the status bar and
+                            // every other view say it -- not the login.
+                            // This is the only heading in the window
+                            // that names the account it is about, and
+                            // the word for an account nobody selected
+                            // is already `nobody`: an account whose
+                            // login happens to be that word would read
+                            // here as no account at all.
+                            text: win.person === null
+                                  ? "Household machines"
+                                  : "Household machines · " + win.person.name
+                            font.pixelSize: 20
+                        }
+                        Label {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            quiet: true
+                            text: !win.fleetHasBudgets ? "The computers linked to this household."
+                                  : "One pot, spent on any of them: every row of a budget "
+                                  + "shows the same credit and the same balance, and USED "
+                                  + "is that computer's share of having spent it. A recent "
+                                  + "report is not a live connection, and a machine that "
+                                  + "has not reported leaves the balance behind."
+                        }
+                        Label {
+                            width: parent.width
+                            visible: win.fleetRows.length === 0
+                            text: win.subject === "" ? "No computers match this filter."
+                                  : "No limited budgets to manage. Configure a profile and enroll the Battery."
+                            wrapMode: Text.WordWrap
+                        }
+                        Row {
+                            objectName: "fleetColumns"
+                            width: parent.width
+                            Label { width: parent.width * 0.45; text: !win.fleetHasBudgets ? "MACHINE" : "MACHINE / BUDGET"; quiet: true }
+                            Label { visible: win.fleetHasBudgets; text: "USED / CREDIT / LEFT"; quiet: true }
+                        }
+                        ListView {
+                            id: fleetList
+                            objectName: "fleetList"
+                            width: parent.width
+                            height: Math.max(0, parent.height - y)
+                            clip: true
+                            model: win.fleetRows
+                            spacing: 4
+                            delegate: Rectangle {
+                                id: fleetRow
+                                required property int index
+                                required property var modelData
+                                width: fleetList.width
+                                height: 96
+                                color: index === win.fleetCursor ? Theme.panel : "transparent"
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.margins: 8
+                                    spacing: 3
+                                    Row {
+                                        width: parent.width
+                                        Label {
+                                            width: parent.width * 0.45
+                                            elide: Text.ElideRight
+                                            text: fleetRow.modelData.name + (fleetRow.modelData.machineOnly ? "" : " / " + fleetRow.modelData.id)
+                                        }
+                                        Label {
+                                            width: parent.width * 0.55
+                                            elide: Text.ElideRight
+                                            visible: !fleetRow.modelData.machineOnly
+                                            text: fleetRow.modelData.machineOnly ? "" : fleetRow.modelData.used + " / "
+                                                  + fleetRow.modelData.credit + " / " + fleetRow.modelData.left
+                                        }
+                                    }
+                                    Label {
+                                        width: parent.width
+                                        text: fleetRow.modelData.state + (fleetRow.modelData.publication ? " · " + fleetRow.modelData.publication : "")
+                                        quiet: true
+                                        elide: Text.ElideRight
+                                    }
+                                    Label {
+                                        width: parent.width
+                                        visible: !fleetRow.modelData.machineOnly
+                                        text: fleetRow.modelData.machineOnly ? "" : "Last report: " + fleetRow.modelData.lastReport
+                                        quiet: true
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                                TapHandler { onTapped: win.setCursor(fleetRow.index) }
+                            }
+                        }
+                    }
+                }
+
                 Item {
                     anchors.fill: parent
                     visible: win.view === 1
@@ -897,6 +1296,7 @@ Window {
                                     text: personRow.who.policy + " · " + personRow.who.teeth
                                           + " · " + personRow.who.programCount + " program"
                                           + (personRow.who.programCount === 1 ? "" : "s")
+                                          + (personRow.who.publicationSummary ? " · " + personRow.who.publicationSummary : "")
                                 }
                             }
 
@@ -1055,6 +1455,8 @@ Window {
                                     quiet: true
                                     text: programRow.app.limited
                                           ? programRow.app.ending + " when the time is up"
+                                            + (programRow.app.pot === true
+                                               ? " · never resets" : "")
                                           : "no limit of its own — it spends the day's total"
                                 }
                             }
@@ -1143,7 +1545,11 @@ Window {
                             readonly property var line: todayRow.modelData
                             readonly property bool isBudget: todayRow.line.kind === "budget"
                             width: todayList.width
-                            height: todayRow.isBudget ? 56 : 26
+                            // Taller only where there is a household line to
+                            // hold: a machine on its own draws exactly the row
+                            // it always drew.
+                            height: todayRow.isBudget
+                                    ? (todayRow.line.house === true ? 74 : 56) : 26
                             color: todayList.currentIndex === todayRow.index
                                    ? Theme.fill(Theme.accent, 0.16) : "transparent"
 
@@ -1195,7 +1601,35 @@ Window {
                                     text: todayRow.line.limited
                                           ? todayRow.line.spent + " spent · "
                                             + todayRow.line.ending + " when it runs out"
+                                            + (todayRow.line.pot === true
+                                               ? " · never resets" : "")
                                           : todayRow.line.spent + " spent · no limit"
+                                }
+                                // The house, on the machine that manages it.
+                                //
+                                // Under this machine's own numbers and not over
+                                // them: what is enforced here is what is spent
+                                // here, and the household total is the other
+                                // fact — `session: 2h` is two hours in the
+                                // house and not two hours per computer. The
+                                // machines that have sent nothing today are
+                                // named, because a total quietly missing a
+                                // computer is worse than no total at all.
+                                Label {
+                                    objectName: "todayHouse"
+                                    visible: todayRow.line.house === true
+                                    quiet: true
+                                    color: Theme.accent
+                                    width: parent.width
+                                    elide: Text.ElideRight
+                                    text: "the house: " + (todayRow.line.houseSpent || "")
+                                          + " spent"
+                                          + (todayRow.line.houseLimited === true
+                                             ? " · " + todayRow.line.houseLeft + " left" : "")
+                                          + " · " + (todayRow.line.houseWhere || "")
+                                          + ((todayRow.line.notHeardFrom || "") !== ""
+                                             ? " · not heard from " + todayRow.line.notHeardFrom
+                                             : "")
                                 }
                             }
 
@@ -1266,6 +1700,200 @@ Window {
                         }
                     }
                 }
+
+                // -------------------------------------------------- 4 · sites
+                //
+                // docs/design.md §11 for what opens, §5.2 for the minutes and
+                // §5.1 for the reason the minutes can be smaller than the
+                // afternoon felt.
+                //
+                // A view of its own rather than rows folded into the programs
+                // list. `House::sitesOf` gives the long reason; the short one is
+                // that not one command on the row is the same. `x` on a program
+                // writes `omahouse deny`, and the nearest thing on a site is
+                // `omahouse web allow`, which is not a removal at all.
+                Item {
+                    anchors.fill: parent
+                    visible: win.view === 4
+
+                    // Two sentences that are about the whole view and never
+                    // about a row, so they are drawn once above the list rather
+                    // than on every line: `j` cannot walk past them and `/`
+                    // cannot filter them away.
+                    Column {
+                        id: siteNotes
+                        anchors.top: parent.top
+                        anchors.topMargin: 10
+                        anchors.left: parent.left
+                        anchors.leftMargin: 16
+                        anchors.right: parent.right
+                        anchors.rightMargin: 16
+                        spacing: 4
+                        visible: win.person !== null
+
+                        // Presence, where it explains something. An app is
+                        // billed for running, screen or no screen -- §5.1 says
+                        // so and this window must not imply otherwise -- but a
+                        // site is billed only where the browser and the screen
+                        // agree, so a number that does not match somebody's
+                        // memory of the afternoon is answered on the line above
+                        // it rather than left to be worked out.
+                        Label {
+                            objectName: "sitePresence"
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            elide: Text.ElideNone
+                            quiet: true
+                            text: "Minutes here are counted only while somebody is in front "
+                                  + "of the screen. "
+                                  + (win.person === null
+                                     || win.person.presenceToday === ""
+                                     ? "Nothing has been measured today."
+                                     : "Today: " + win.person.presenceToday + ".")
+                        }
+                        // And the reach, once. `omahouse web` says it once when
+                        // it writes and `omahouse status` once when it prints;
+                        // this is the window's one place, and the sheets that
+                        // open over this view deliberately do not repeat it.
+                        Label {
+                            objectName: "siteReach"
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            elide: Text.ElideNone
+                            quiet: true
+                            text: House.reach
+                        }
+                    }
+
+                    Label {
+                        anchors.centerIn: parent
+                        visible: win.siteRows.length === 0
+                        quiet: true
+                        width: parent.width - 80
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
+                        elide: Text.ElideNone
+                        text: win.subject === "" ? "nobody is under rules yet"
+                            : win.filter !== "" ? "no site here answers to that"
+                            : win.operating
+                              ? "no site has been named yet — press b, or click the chip"
+                              : "no site has been named yet"
+                    }
+
+                    ListView {
+                        id: siteList
+                        objectName: "siteList"
+                        anchors.top: siteNotes.visible ? siteNotes.bottom : parent.top
+                        anchors.topMargin: 10
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        clip: true
+                        model: win.siteRows
+                        currentIndex: win.siteCursor
+                        boundsBehavior: Flickable.StopAtBounds
+                        Accessible.role: Accessible.List
+
+                        delegate: Rectangle {
+                            id: siteRow
+                            required property var modelData
+                            required property int index
+                            readonly property var place: siteRow.modelData
+                            width: siteList.width
+                            height: 56
+                            color: siteList.currentIndex === siteRow.index
+                                   ? Theme.fill(Theme.accent, 0.16) : "transparent"
+
+                            Accessible.role: Accessible.ListItem
+                            Accessible.name: siteRow.place.id + ", " + siteRow.place.state
+
+                            Rectangle {
+                                width: 2
+                                height: parent.height
+                                color: siteList.currentIndex === siteRow.index
+                                       ? Theme.accent : "transparent"
+                            }
+
+                            Column {
+                                anchors.left: parent.left
+                                anchors.leftMargin: 16
+                                anchors.right: siteClock.left
+                                anchors.rightMargin: 16
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 3
+
+                                Row {
+                                    spacing: 8
+                                    Label {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: siteRow.place.name
+                                        font.pixelSize: 13
+                                    }
+                                    Label {
+                                        objectName: "siteState"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: siteRow.place.blocked
+                                        quiet: true
+                                        color: Theme.urgent
+                                        text: siteRow.place.state
+                                    }
+                                }
+                                Label {
+                                    quiet: true
+                                    color: siteRow.place.outOfTime
+                                           || siteRow.place.overruled ? Theme.urgent
+                                                                      : Theme.dim
+                                    text: siteRow.place.note
+                                }
+                            }
+
+                            Column {
+                                id: siteClock
+                                anchors.right: parent.right
+                                anchors.rightMargin: 16
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 190
+                                spacing: 4
+
+                                Label {
+                                    width: parent.width
+                                    horizontalAlignment: Text.AlignRight
+                                    color: siteRow.place.exhausted ? Theme.urgent
+                                                                   : Theme.foreground
+                                    // The day's minutes on that site when there
+                                    // is no clock on it, and the balance when
+                                    // there is. Never both: two numbers about
+                                    // the same afternoon, one of them a
+                                    // subtraction of the other, is a row nobody
+                                    // reads twice the same way.
+                                    text: siteRow.place.limited
+                                          ? siteRow.place.left + " left of "
+                                            + siteRow.place.limit
+                                          : siteRow.place.today
+                                            ? siteRow.place.today + " today" : ""
+                                }
+                                Meter {
+                                    width: parent.width
+                                    limited: siteRow.place.limited
+                                    spentSeconds: siteRow.place.spentSeconds
+                                    allowanceSeconds: siteRow.place.allowanceSeconds
+                                }
+                                Label {
+                                    width: parent.width
+                                    horizontalAlignment: Text.AlignRight
+                                    visible: siteRow.place.granted !== ""
+                                    quiet: true
+                                    color: Theme.accent
+                                    text: "+" + siteRow.place.granted + " handed over today"
+                                }
+                            }
+
+                            TapHandler {
+                                onTapped: win.setCursor(siteRow.index)
+                            }
+                        }
+                    }
+                }
             }
 
             Rule {}
@@ -1277,8 +1905,30 @@ Window {
                 total: win.rows.length
                 note: win.person === null ? House.faceReason
                     : win.view === 1 ? win.people.length + " under rules"
+                    // The two profile-wide facts about sites, on the line the
+                    // programs view puts the two profile-wide facts about
+                    // programs on. Both are things `d` and `i` change and
+                    // neither belongs on a row.
+                    : win.view === 4 ? win.person.name + " · " + win.person.sitePolicy
+                                       + " · " + win.person.incognito
                                      : win.person.name + " · " + win.person.policy
                 blind: win.person === null ? 0 : win.person.blindProcesses
+                // Two sources, one line, and they must stay two.
+                //
+                // `House.error` is a file the window could not read;
+                // `Admin.message` is what a verb said back, refusal included.
+                // They land in the same place and read alike, which is exactly
+                // why somebody will one day want to fold them into one string
+                // in `House` and save a branch here.
+                //
+                // What that would break is not here. `shoot()` in
+                // tests/tst_studio.cpp refuses to save a picture taken while
+                // `House.error` is set -- that is the guard that catches a
+                // fixture breaking and the household vanishing out of a
+                // screenshot -- while `19-operator-refusal.png` is deliberately
+                // a picture of an `Admin.message`. One channel would force a
+                // choice between the guard and that picture, and both are
+                // right. They are separate upstream; keep them separate.
                 message: House.error !== "" ? House.error : Admin.message
                 alarm: House.error !== "" || Admin.failed
                 hints: win.hints
@@ -1319,14 +1969,52 @@ Window {
         onConfirmed: function (topic) { win.settle(topic) }
     }
 
+    Publish {
+        id: publishSheet
+        anchors.fill: parent
+        returnFocus: win.takeFocus
+        onChosen: function (machines) {
+            const args = ["profile", "publish", win.publishUser]
+            for (const machine of machines)
+                args.push("--to", machine)
+            Admin.run("publish " + win.publishUser, args)
+        }
+    }
+
+    Picker {
+        id: profilePicker
+        anchors.fill: parent
+        profiles: true
+        programs: win.people.map(function (one) {
+            return {id: one.user, name: one.name || one.user, exe: "",
+                    disagrees: false, listed: false, running: false}
+        })
+        returnFocus: win.takeFocus
+        onPicked: function (user) {
+            if (win.personNamed(user) === null) return
+            if (user !== win.subject && win.pendingRow !== null) {
+                const source = win.view === 4 ? House.snapshot.sites
+                             : win.view === 3 ? House.snapshot.today : House.snapshot.programs
+                const rows = source[user] || []
+                win.pendingRow = rows.find(function (row) {
+                    return row.id === win.pendingRow.id && row.kind === win.pendingRow.kind
+                }) || Object.assign({}, win.pendingRow, {daily: "", pot: false})
+            }
+            win.filterPeople = ""
+            win.cursorPeople = win.peopleRows.findIndex(function (one) { return one.user === user })
+            win.perform(win.pendingAction, user)
+        }
+    }
+
     Picker {
         id: picker
         anchors.fill: parent
-        programs: win.catalogue
+        recipient: win.editUser
+        programs: House.snapshot.catalog[win.editUser] || []
         returnFocus: win.takeFocus
         onPicked: function (id) {
             win.target = id
-            prompt.ask("releaseLimit", "How long a day for " + id + "?",
+            prompt.ask("releaseLimit", "How long a day for " + id + "? · Profile: " + win.editUser,
                        "45m, 2h, 1h30m — or leave it empty, and it runs with no clock of "
                        + "its own, spending the day's total like everything else.",
                        "", "", true)

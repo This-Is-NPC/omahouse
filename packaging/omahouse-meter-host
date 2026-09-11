@@ -1,0 +1,13 @@
+#!/bin/sh
+# The program Chromium starts for `com.omahouse.meter` — docs/design.md §5.2.
+#
+# Three lines, and it is a shim on purpose. A native messaging manifest names one
+# executable and Chromium runs it with the calling extension's origin as the only
+# argument, so it cannot name `omahouse meter`; and docs/design.md §3 says there
+# is one binary and the daemon is a verb of it, not a second program. This is how
+# both hold: the host is a verb of `omahouse`, and this is what turns an argv
+# Chromium chose into that verb.
+#
+# It runs as whoever opened the browser — `.temp/spike-extension.md` §1 measured
+# uid 1001, in the child's own session — and asks for nothing.
+exec /usr/bin/omahouse meter "$@"

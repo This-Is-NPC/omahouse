@@ -1,15 +1,193 @@
 # omahouse — what a package cannot do from a file list.
 #
-# Four things: the two directories of docs/design.md §4, the service of §9, and the one
-# line of PAM that makes `logout` mean anything at all (§2). The last is the only
-# one that edits a file this package does not own, and it is the reason this
-# script is longer than it looks like it should be.
+# Five things: the two directories of docs/design.md §4, the service of §9, the
+# one line of PAM that makes `logout` mean anything at all (§2), and the meter of
+# §5.2 -- which is signed here, on the machine, because the key that decides its
+# extension id is made here and did not exist when the package was built. The PAM
+# line and the meter are the two that write files this package does not own, and
+# between them they are the reason this script is longer than it looks like it
+# should be.
 #
 # Everything here is idempotent. It runs again on every upgrade, and a machine
 # that already has the line has to come out of it unchanged -- including one
 # where somebody moved the line by hand, which is theirs to have done.
+#
+# And removal is not an afterthought here, it is half the job. omahouse puts
+# things on a machine that a file list cannot take back off it, and every one of
+# them is a restriction: a restriction that outlives the program that made it is
+# worse than one that never existed, because there is no longer anything on the
+# machine that knows how to lift it. `_artifacts` below is the list of all of
+# them, and it is the only place any of those paths is written down.
 
-_pam_file=/etc/pam.d/system-login
+# -- the prefix ---------------------------------------------------------------
+#
+# Empty on a real machine, and that is the whole of what it does there.
+#
+# It is here so that this scriptlet can be *run* -- `post_install` and then
+# `post_remove` -- against a directory of its own, which is what
+# `check_the_removal_covers_what_the_install_makes` in `tests/test_cli.py` does
+# on every commit. Without it, the only way to find out whether removal is
+# complete is to install the package on a machine and take it off again, which
+# is a VM run, which is nightly and manual -- and the failure this whole half of
+# the file exists to prevent is silent and on the wrong side. It was found once
+# exactly that way, in a VM, and only because somebody thought to look.
+#
+# It is the same variable `/usr/lib/omahouse/meter-pack` reads, so a rooted run
+# of this script passes the root down to the packer through the environment
+# without either of them having to know about the other. The same seam
+# `$OMAHOUSE_CONFIG_DIR` and `$OMAHOUSE_CHROMIUM_POLICY_DIR` are for the program
+# itself, and it carries the same discipline: a run pointed at a tree of its own
+# writes where it was told to write, and it does not touch this machine's
+# services.
+_root="${OMAHOUSE_PACK_ROOT:-}"
+
+# -- the one list -------------------------------------------------------------
+#
+# **Everything the installation puts on a machine outside its own file list, and
+# what removal does about it.** Declared once, here, and read by two things: the
+# `post_remove` below, which does what the first column says; and a test in
+# `tests/test_cli.py`, which runs this whole script against a temporary root and
+# refuses a path that appeared on disk and is not named here.
+#
+# That pairing is the point, and it is a correction of something that had gone
+# wrong. The `.crx`, the update manifest, the force-install policy, the native
+# messaging manifest and the signing key are made by a scriptlet rather than
+# shipped, so `pacman -Ql` does not list them and `pacman -Qkk` does not check
+# them -- the package is no longer describable by its own file list. What stood
+# in for that was a column of hand-written `rm` lines, and the VM proved on the
+# very first run that the column was already incomplete: the meter's native
+# messaging host survived `pacman -R`, on a machine with nothing left to explain
+# or undo it. A hand-written list is not a thing to write more carefully. It is a
+# thing to stop having.
+#
+# So: adding an artefact and forgetting to remove it now breaks the gate, and
+# not somebody's machine.
+#
+# Three verbs, and the third is not tidiness:
+#
+#   take    removed, whatever else is kept. Every restriction is one of these.
+#   prune   a directory of ours: removed if it is empty, left alone if somebody
+#           put something in it. Order matters -- deepest first.
+#   borrow  a directory that belongs to another program and that this install
+#           creates if it is not there. Never removed, and the test requires
+#           that nothing of omahouse's is left inside it.
+#   keep    left on purpose, and named in the removal message with the words in
+#           the third column. A report is evidence and outlives the rules it was
+#           collected under.
+#   unlink  a file of another program's that this install writes only when it
+#           is not there. Removed only while it still says omahouse wrote it,
+#           because the other program's own installer will one day write its
+#           own at the same path, and taking that one would be taking a
+#           household's wire down on our way out.
+#
+# A `take` line may hold a glob, and is expanded against the prefix.
+_artifacts() {
+	cat <<-'LIST'
+	take    /etc/omahouse/blocked
+	take    /etc/chromium/policies/managed/omahouse.json
+	take    /etc/chromium/policies/managed/omahouse-meter.json
+	take    /etc/chromium/native-messaging-hosts/com.omahouse.meter.json
+	take    /usr/share/omahouse/chromium/omahouse-meter.crx
+	take    /usr/share/omahouse/chromium/updates.xml
+	take    /etc/omahouse/meter
+	take    /run/user/*/omahouse/focus
+	take    /etc/sudoers.d/omahouse-node
+	take    /etc/systemd/system/omakure-node.service.d/omahouse.conf
+	take    /etc/omahouse/machine.json
+	take    /etc/omahouse/machine-tokens.json
+	take    /etc/omahouse/omakure-token
+	unlink  /etc/systemd/system/omakure-node.service
+	prune   /etc/systemd/system/omakure-node.service.d
+	prune   /run/user/*/omahouse
+	prune   /usr/share/omahouse/chromium
+	prune   /usr/share/omahouse
+	borrow  /etc/chromium/policies/managed
+	borrow  /etc/chromium/native-messaging-hosts
+	keep    /etc/omahouse                 the directory the two below live in
+	keep    /etc/omahouse/profiles.json   who was under rules
+	keep    /var/lib/omahouse             the days already counted
+	LIST
+}
+
+# The five lines about a household are the ones a file list could never have
+# reached, because nothing installs them: `omahouse machine link` writes them
+# onto a machine long after the package went on it. That is exactly why they
+# were missing -- the gate below runs this scriptlet and looks at what appeared,
+# and linking is not something a scriptlet does. A VM run of the walkthrough is
+# what found them, on a machine that had taken omahouse off and kept a sudoers
+# rule, a bearer token and a running node with nothing left to explain any of
+# them.
+#
+# `machine-tokens.json` and `omakure-token` are credentials. A credential that
+# outlives the program that issued it is the sharpest form of the restriction
+# this file's own comment refuses: there is no longer anything on the machine
+# that knows it exists, and it goes on opening what it opened.
+#
+# What is deliberately NOT here is anything of Omakure's -- `/etc/omakure`,
+# `/var/lib/omakure`, the account, the group. Omakure is its own product and a
+# household that takes omahouse off has not asked to lose its wire. `_unlink`
+# below is the one place that reaches a file of Omakure's, and it reaches
+# exactly one, only when omahouse is provably the thing that wrote it.
+#
+# Why each other `take` line is a `take`, said once here rather than beside a `rm`:
+#
+# **`blocked`** is the one thing in this file that must not be left behind. A
+# machine with a name still in it and no omahouse installed is a machine where
+# nothing can ever take that name back out -- the daemon that would have done it
+# at the turn of the day is gone. Removing the package has to be a way out, not
+# a way to make the lock permanent.
+#
+# **The browser policy of §11** is the same argument with a different file. A
+# site blocked by omahouse is blocked by a file in another program's directory,
+# and Chromium goes on reading that file whether or not omahouse is installed.
+# Leaving it is a machine where a site does not open, the browser says "managed
+# by your organisation", and no program on the disk can explain it or undo it.
+#
+# **The meter's four files** are the same argument again. A force-install policy
+# left behind after the package is gone is a browser that goes on installing an
+# extension whose native host is not on the disk, reporting into nothing, with
+# nothing left that knows how to take it off.
+#
+# **The key** -- `/etc/omahouse/meter` -- is the one a file list could never have
+# removed, because a build never knew it would exist (§5.2, "The signing key").
+# It goes for a reason stronger than tidiness: the whole of what a key per
+# machine buys is that nothing anywhere can sign an extension this machine's
+# policy would accept, and a key left on the disk of a machine with no omahouse
+# on it is exactly that thing, waiting for somebody to write a policy by hand.
+# The price is stated and not hidden -- a reinstall makes a new key, so a new id,
+# so a new extension -- and it is affordable only because this extension keeps no
+# state at all.
+#
+# **The focus files** go with the session anyway, since /run/user is a tmpfs
+# systemd empties at logout, but a machine that has not been rebooted since the
+# uninstall would still have them, and they name sites somebody visited.
+#
+# And the two directories under /etc/chromium are `borrow` and not `prune`: they
+# existed before this package on any machine with a browser on it, Omarchy's own
+# `browser-policy.sh` writes `policies.json` beside our file, and they are not
+# ours to take. Everything omahouse ever put in them is on a `take` line above.
+
+_take_what_the_install_made() {
+    local verb path rest
+    while read -r verb path rest; do
+        case "$verb" in
+        take)
+            # Unquoted on purpose: `/run/user/*/omahouse/focus` is a glob, and a
+            # glob that matches nothing passes through as itself, which `rm -rf`
+            # treats as a path that is not there. Every path here is a literal in
+            # the list above and none of them has a space in it.
+            rm -rf -- $_root$path
+            ;;
+        prune)
+            rmdir $_root$path 2>/dev/null || true
+            ;;
+        esac
+    done < <(_artifacts)
+}
+
+# -- the PAM line -------------------------------------------------------------
+
+_pam_file="$_root/etc/pam.d/system-login"
 _pam_marker='pam_listfile.so.*file=/etc/omahouse/blocked'
 
 # The line poc/findings.md round 3 measured, and the only shape of it that is
@@ -27,6 +205,10 @@ _pam_marker='pam_listfile.so.*file=/etc/omahouse/blocked'
 # recoverable, and the one that leaves them hard is not. docs/design.md §2 and §4 both
 # say it, and this is the place where getting it wrong costs somebody their
 # machine rather than an afternoon.
+#
+# The path inside the line is never prefixed, and a rooted run writes the same
+# bytes a real one would: what is under test is the edit, and a PAM line
+# pointing into somebody's $TMPDIR would be a line no machine will ever have.
 _pam_line='account    required   pam_listfile.so item=user sense=deny file=/etc/omahouse/blocked onerr=succeed'
 
 _install_pam_line() {
@@ -88,13 +270,136 @@ _directories() {
     # 0644 files in 0755 directories -- docs/design.md §4. Root writes both and
     # everybody reads them, which is what lets the fiscalised user run
     # `omahouse status` and see what is left of their own day.
-    install -d -m 0755 /etc/omahouse
-    install -d -m 0755 /var/lib/omahouse
+    #
+    # Both are `keep` lines in `_artifacts`: they hold the profiles and the days
+    # already counted, and a report is evidence that outlives the rules it was
+    # collected under.
+    install -d -m 0755 "$_root/etc/omahouse"
+    install -d -m 0755 "$_root/var/lib/omahouse"
+}
+
+# The meter, signed here rather than in a build -- docs/design.md §5.2, "The
+# signing key". `/usr/lib/omahouse/meter-pack` makes this machine's own key if
+# there is not one yet, signs the extension into a `.crx` with it, and writes the
+# force-install policy and the native messaging manifest that name the id that
+# key produces. It is idempotent: on an upgrade it finds the key already there,
+# so the id does not move and the browser sees a version going up rather than a
+# second extension appearing beside the first.
+#
+# Everything it writes is on a `take` line above, and the test is what makes that
+# sentence true rather than hopeful: it runs this function for real and then
+# looks at what appeared.
+#
+# A failure here is loud and does not stop the transaction. Everything else
+# omahouse does -- the apps, the budgets, the session -- works without a browser
+# extension; what is lost is time per site, and half an install is worse than an
+# install that says which half is missing.
+_pack_meter() {
+    local said
+    if [ ! -x "$_root/usr/lib/omahouse/meter-pack" ]; then
+        return
+    fi
+    # The packer reads `$OMAHOUSE_PACK_ROOT` out of the environment, which is
+    # where this script read `$_root` from, so a rooted run reaches it without
+    # either of them naming the other.
+    if said="$("$_root/usr/lib/omahouse/meter-pack" 2>&1)"; then
+        echo ">>> omahouse: the browser meter is signed for this machine and forced" >&2
+        echo ">>>           into Chromium. Its extension id here is ${said##*$'\n'}" >&2
+        return
+    fi
+    # No unquoted heredoc here, and no backticks anywhere in the text. The
+    # comment above `post_install` is the story of a message that ran its own
+    # words; this one carries a captured error string, which is somebody else's
+    # text and the worst possible thing to hand to the shell.
+    {
+        echo ">>> omahouse: could not sign the browser meter, so there is no time per"
+        echo ">>>           site on this machine. Everything else works. It said:"
+        echo ">>>"
+        printf '>>>           %s\n' "$said"
+        echo ">>>"
+        echo ">>>           openssl and zip are what it needs. Run"
+        echo ">>>           /usr/lib/omahouse/meter-pack again once they are there."
+    } >&2
+}
+
+# The service, and only on a run that is managing this machine.
+#
+# A run pointed at a tree of its own is not; enabling a unit out of a test would
+# be the same mistake `mayTouchTheBrowserPolicy` refuses in the CLI, with a
+# longer fuse, because a leftover enabled unit on a developer's laptop starts at
+# the next boot and nothing says why.
+_service() {
+    [ -z "$_root" ] || return 0
+    systemctl "$@" >/dev/null 2>&1 || true
+}
+
+# -- the household link -------------------------------------------------------
+
+# The node's unit is the one file here that may not be ours, and telling the two
+# apart is not a guess: omahouse writes that unit only when there is none, and
+# the file it writes says so on its first line. Omakure's own installer writes a
+# different one at the same path on a later upgrade -- so the marker is checked
+# on every run rather than assumed from the fact that we once wrote it.
+#
+# A unit that is Omakure's is left running and left on disk, and only the
+# drop-in beside it goes. That leaves the node exactly as Omakure configured it:
+# on loopback, with no household console open, which is what a machine with no
+# omahouse on it should have.
+# A file at an `unlink` path is ours only while it says so on its first line.
+# Checked on every run rather than remembered: Omakure's own installer writes a
+# different unit at that same path on a later upgrade, and from then on it is
+# not ours to remove.
+_it_still_says_we_wrote_it() {
+    [ -f "$1" ] || return 1
+    head -n 1 "$1" | grep -q '^# Written by omahouse'
+}
+
+# Stopped before its file is taken, because a unit removed under a running
+# service leaves systemd holding a job for a file that is not there.
+_stop_the_node() {
+    local verb path rest
+    while read -r verb path rest; do
+        [ "$verb" = unlink ] || continue
+        _it_still_says_we_wrote_it "$_root$path" \
+            && _service disable --now "${path##*/}"
+    done < <(_artifacts)
+}
+
+# Whether this machine was ever linked, asked BEFORE the list runs, because the
+# list is what removes the evidence. It has to be asked in post_remove and
+# cannot be carried over from pre_remove: pacman runs the scriptlet once per
+# hook, so a variable set in one is gone by the other.
+#
+# Any one of the three is enough. A half-written link -- an interrupted
+# `machine link`, a manager rebuilt midway -- is exactly the machine that most
+# needs the rest taken off it, and asking for all three would leave it linked.
+_was_linked() {
+    [ -e "$_root/etc/omahouse/machine.json" ] && return 0
+    [ -e "$_root/etc/sudoers.d/omahouse-node" ] && return 0
+    [ -e "$_root/etc/systemd/system/omakure-node.service.d/omahouse.conf" ] && return 0
+    return 1
+}
+
+# And the files, after the list, because the drop-in they sat under has just
+# gone with it. `$1` is what `_was_linked` said before the list ran.
+_unlink() {
+    [ "$1" = yes ] || return 0
+    local verb path rest
+    while read -r verb path rest; do
+        [ "$verb" = unlink ] || continue
+        _it_still_says_we_wrote_it "$_root$path" && rm -f -- "$_root$path"
+    done < <(_artifacts)
+    # A node that is Omakure's is left running, and told to read its unit again:
+    # the drop-in is gone, so without this it goes on serving a household
+    # console bound to the network that nothing on this machine can explain,
+    # until the next boot.
+    _service daemon-reload
 }
 
 post_install() {
     _directories
     _install_pam_line
+    _pack_meter
 
     # Enabled, and not started. A daemon that begins counting inside a pacman
     # transaction is a daemon nobody chose to run yet, and there are no profiles
@@ -103,7 +408,7 @@ post_install() {
     #
     # Enabling at all is the deliberate part: docs/design.md §9. A stopped daemon is a
     # rule switched off, and this package exists to be a rule.
-    systemctl enable omahouse.service >/dev/null 2>&1 || true
+    _service enable omahouse.service
 
     # Quoted delimiter. The text below names verbs in backticks, and an
     # unquoted heredoc would run them: measured on a real Omarchy install, where
@@ -129,28 +434,117 @@ post_upgrade() {
     # Again on every upgrade, because a PAM file replaced by a .pacnew merge is a
     # machine where the line quietly went away and nothing else would notice.
     _install_pam_line
+    # And again for the same reason on the browser's side. The extension's source
+    # is a file this package owns, so an upgrade has just replaced it: without
+    # this line the machine would go on force-installing an archive signed from
+    # last version's source, and `chrome://extensions` would show a version the
+    # package no longer ships. The key is not touched, so the id does not move.
+    _pack_meter
 }
 
 pre_remove() {
-    systemctl disable --now omahouse.service >/dev/null 2>&1 || true
+    _service disable --now omahouse.service
+    _stop_the_node
 }
 
 post_remove() {
     _remove_pam_line
 
-    # And the list itself, always, whatever else is kept.
+    # Everything on the list, in the order the list is written. There is no
+    # column of `rm` lines here any more, and that is the change: a path that is
+    # not on the list is not removed, and a path that is not on the list and
+    # appears on a machine turns the gate red.
+    # Asked before the list, which is about to remove the answer.
+    local linked=no
+    _was_linked && linked=yes
+
+    _take_what_the_install_made
+
+    # And the household link, which is the half of this no list of the
+    # installation could name: it is written by `omahouse machine link`, long
+    # after the install, onto a machine the operator may never sit at again.
+    _unlink "$linked"
+
+    # And any meter host that is **still running**, which is not a file and is
+    # the one thing here a file list could never have suggested.
     #
-    # This is the one thing in this file that must not be left behind. A machine
-    # with a name still in /etc/omahouse/blocked and no omahouse installed is a
-    # machine where nothing can ever take that name back out -- the daemon that
-    # would have done it at the turn of the day is gone. Removing the package has
-    # to be a way out, not a way to make the lock permanent.
-    rm -f /etc/omahouse/blocked
+    # A native messaging host lives as long as the pipe the browser gave it, and
+    # a browser that was open through the removal still holds that pipe. Nothing
+    # else on the machine would end it: the process is the child's, it holds a
+    # `/usr/bin/omahouse` that no longer has a name, and it goes on appending to
+    # the focus file the list above has just deleted -- so the file comes back
+    # within five seconds, naming the sites she is visiting, on a machine with no
+    # omahouse on it and nothing left to explain either. That is precisely the
+    # failure the whole of this function refuses, and it is not a file, which is
+    # why no list of paths catches it.
+    #
+    # By exact command line and not by name: `omahouse` alone would take a
+    # `status` somebody is reading in another terminal. The native messaging
+    # manifest is gone by now, so nothing can spawn another one after this, and
+    # `/usr/bin/omahouse` is not on the disk any more either.
+    #
+    # Only on a run that is managing this machine, for the reason `_service`
+    # gives: a rooted run has no business killing processes that are nothing to
+    # do with the tree it was pointed at.
+    if [ -z "$_root" ]; then
+        pkill -f '^/usr/bin/omahouse meter' 2>/dev/null || true
+        pkill -f '^/bin/sh /usr/lib/omahouse/meter-host' 2>/dev/null || true
+        # And the same process named by the one argument only a browser ever
+        # passes it, whatever path it was reached through. Nothing but a native
+        # messaging host is ever called with an extension origin on its command
+        # line.
+        pkill -f 'omahouse meter chrome-extension://' 2>/dev/null || true
+    fi
 
     cat <<-'MESSAGE'
-	>>> omahouse: the login block was removed and everybody can log in again.
-	>>>           The profiles in /etc/omahouse and the days already counted in
-	>>>           /var/lib/omahouse were left where they are -- a report is
-	>>>           evidence, and it outlives the rules it was collected under.
+	>>> omahouse: everything omahouse put on this machine is off it.
+	>>>
+	>>>           The login block is gone and everybody can log in again, the
+	>>>           browser policy in /etc/chromium/policies/managed/omahouse.json
+	>>>           is gone and every site opens again, the meter extension is no
+	>>>           longer force-installed, its native host is gone, the key this
+	>>>           machine signed it with is gone, and the service is stopped and
+	>>>           disabled. No rule omahouse wrote is still in force.
+	>>>
+	>>>           Chromium drops a force-installed extension the next time it
+	>>>           starts without a policy naming it. If a window was open through
+	>>>           all of this, close it once.
+	>>>
+	>>>           Kept on purpose, and here is where they are:
 	MESSAGE
+    # Out of the same list `post_remove` just worked from, so the message cannot
+    # come to name a path the removal treats differently.
+    _artifacts | awk '$1 == "keep" {
+        path = $2
+        $1 = ""; $2 = ""
+        sub(/^ +/, "")
+        printf ">>>             %-29s %s\n", path, $0
+    }'
+    cat <<-'MESSAGE'
+	>>>           A report is evidence, and it outlives the rules it was
+	>>>           collected under. Nothing there does anything to the machine
+	>>>           now; `rm -rf` all three if you want the account back to nothing.
+	MESSAGE
+
+    # And the link, said only on a machine that had one. A paragraph about
+    # households on every removal is a paragraph nobody reads on the one
+    # removal where it matters.
+    if [ "$linked" = yes ]; then
+        cat <<-'MESSAGE'
+	>>>
+	>>>           This computer was linked to a household, and it is not any
+	>>>           more. The sudoers line is gone, the bearer tokens are gone,
+	>>>           and it no longer says it is managed by anybody. The console
+	>>>           this household reached it on is closed.
+	>>>
+	>>>           Omakure is left as it was: it is its own program, and taking
+	>>>           omahouse off is not a reason to take a household's wire down.
+	>>>           If its node was started by omahouse it is stopped now; if it
+	>>>           was Omakure's own it is still running, on loopback.
+	>>>
+	>>>           The manager still has this computer in its list. Run
+	>>>           `omahouse machine remove` over there, or its sums will go on
+	>>>           waiting for a day this machine will never send.
+	MESSAGE
+    fi
 }

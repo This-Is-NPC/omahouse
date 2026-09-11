@@ -37,6 +37,8 @@
 #include "Catalog.h"
 #include "House.h"
 #include "Ledger.h"
+#include "Fleet.h"
+#include "Kind.h"
 #include "Profile.h"
 #include "Theme.h"
 #include "Paths.h"
@@ -52,6 +54,7 @@
 #include <QQuickWindow>
 #include <QSignalSpy>
 #include <QStyleHints>
+#include <QDirIterator>
 #include <QTemporaryDir>
 #include <QtQml>
 #include <QtTest>
@@ -138,19 +141,31 @@ class TestStudio : public QObject
     Q_OBJECT
 
 private slots:
+    void everyQuietWordIsReadableOnEveryTheme();
     void initTestCase();
     void cleanupTestCase();
     void init();
 
     void opensOnTheFaceOfWhoeverRanIt();
+    void creationRequiresAnExplicitProfile();
     void theWholeJobOnTheKeyboard();
     void theWholeJobOnTheMouse();
+    void theWebHalfOnBothDoors();
     void everyCommandIsBothAKeyAndAChip();
     void everyKeyOnTheSheetIsAnswered();
     void aRefusalIsASentenceAndNotASilence();
     void saysWhatIsReallyInsideAShim();
     void drawsItself();
+    void fleetPanelShowsMissingMachinesAndUsesTheKeyboard();
+    void theTodayViewAddsUpTheHouse();
+    void theFilterNarrowsOnlyTheListItWasTypedOn();
     void theSubjectFaceHasNothingToPress();
+    void theWindowNeverWritesToTheMachine();
+    void publishGoesThroughTheCli();
+    void publishIsRefusedWhileUnresolved();
+    void theMachinesViewOpensWithNobodySelected();
+    void theHeaderSaysWhatThisComputerIs();
+    void theHeaderKeepsOffTheTabsWhenNarrow();
     void writesTheOperatorShots();
     void writesTheSubjectShots();
 
@@ -167,6 +182,11 @@ private:
     QQuickItem *awaitItem(const QString &objectName, int milliseconds = 4000);
     QQuickItem *awaitRow(const QString &listName, int index, int milliseconds = 4000);
     bool waitForWrite();
+    /// Every file under a directory, by path and by bytes.
+    ///
+    /// A fingerprint of a tree, so that "nothing was written" can be asserted
+    /// as one comparison rather than as a list of files somebody remembered.
+    static QByteArray treeUnder(const QString &directory);
     void emptyTheHouse();
     QString shotsDir() const;
     void shoot(const QString &name);
@@ -175,7 +195,9 @@ private:
     QVariantList people() const;
     QVariantMap personNamed(const QString &user) const;
     QVariantList programsOf(const QString &user) const;
+    QVariantList sitesOf(const QString &user) const;
     QVariantList todayOf(const QString &user) const;
+    QVariantMap siteNamed(const QString &user, const QString &domain) const;
 
     QTemporaryDir m_tree;
     QQmlApplicationEngine *m_engine = nullptr;
@@ -219,8 +241,18 @@ void TestStudio::initTestCase()
     qputenv("OMAHOUSE_CGROUP_ROOT", (root + "/cgroup").toLocal8Bit());
     qputenv("OMAHOUSE_PROC_ROOT", (root + "/proc").toLocal8Bit());
     qputenv("OMAHOUSE_DESKTOP_DIRS", (root + "/share").toLocal8Bit());
+    // The third root, and the one with the shortest fuse -- docs/design.md §11,
+    // "The refusal that protects the developer's own browser". This suite runs
+    // the real `omahouse web` verbs, and every verb that writes a profile
+    // reconciles the browser policy on its way out. Left unset, that write would
+    // be refused for the right reason and would say so on the status bar, which
+    // is a sentence in every picture `mise run shots` takes; pointed here, the
+    // file is written where it was told to write and the window is drawn at
+    // rest.
+    qputenv("OMAHOUSE_CHROMIUM_POLICY_DIR", (root + "/chromium").toLocal8Bit());
     QVERIFY(QDir().mkpath(root + "/etc"));
     QVERIFY(QDir().mkpath(root + "/var"));
+    QVERIFY(QDir().mkpath(root + "/chromium"));
     QVERIFY(QDir().mkpath(root + "/share/applications"));
 
     // The picker is fed from these. Two programs, and one of them a launcher
@@ -281,8 +313,15 @@ void TestStudio::init()
     // wrong test.
     root()->setProperty("cursorPeople", 0);
     root()->setProperty("cursorPrograms", 0);
+    root()->setProperty("cursorSites", 0);
     root()->setProperty("cursorToday", 0);
-    root()->setProperty("filter", QString());
+    // Every list's own needle, because each of them keeps it now: a case that
+    // left one typed would hand the next one a narrowed list it never asked
+    // for.
+    for (const char *needle : {"filterPeople", "filterPrograms", "filterToday",
+                               "filterSites", "filterFleet"}) {
+        root()->setProperty(needle, QString());
+    }
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
     settle();
 }
@@ -514,9 +553,25 @@ QVariantList TestStudio::programsOf(const QString &user) const
     return m_house->snapshot().value(QStringLiteral("programs")).toMap().value(user).toList();
 }
 
+QVariantList TestStudio::sitesOf(const QString &user) const
+{
+    return m_house->snapshot().value(QStringLiteral("sites")).toMap().value(user).toList();
+}
+
 QVariantList TestStudio::todayOf(const QString &user) const
 {
     return m_house->snapshot().value(QStringLiteral("today")).toMap().value(user).toList();
+}
+
+QVariantMap TestStudio::siteNamed(const QString &user, const QString &domain) const
+{
+    const QVariantList all = sitesOf(user);
+    for (const QVariant &row : all) {
+        const QVariantMap site = row.toMap();
+        if (site.value(QStringLiteral("id")).toString() == domain)
+            return site;
+    }
+    return QVariantMap();
 }
 
 // ---------------------------------------------------------------------------
@@ -534,6 +589,72 @@ void TestStudio::opensOnTheFaceOfWhoeverRanIt()
     QCOMPARE(root()->property("operating").toBool(), administers);
     if (!administers)
         QSKIP("the rest of this suite drives the operator face, and this account is not in wheel");
+}
+
+void TestStudio::creationRequiresAnExplicitProfile()
+{
+    if (!root()->property("operating").toBool())
+        QSKIP("not in wheel");
+    QString error;
+    Profile julia;
+    julia.user = QStringLiteral("tstjulia");
+    QVERIFY(writeProfiles(paths::profilesFile(), {julia}, &error));
+    m_house->reload();
+    key('3');
+    key('s');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    const int before = m_finished;
+    key(Qt::Key_Escape);
+    QCOMPARE(m_finished, before);
+    QVERIFY(!personNamed(julia.user).value(QStringLiteral("hasSessionBudget")).toBool());
+
+    Profile other;
+    other.user = QStringLiteral("nobody");
+    QVERIFY(writeProfiles(paths::profilesFile(), {julia, other}, &error));
+    m_house->reload();
+    int otherIndex = -1;
+    const QVariantList rows = root()->property("peopleRows").toList();
+    for (int i = 0; i < rows.size(); ++i) {
+        if (rows.at(i).toMap().value(QStringLiteral("user")).toString() == other.user)
+            otherIndex = i;
+    }
+    QVERIFY(otherIndex >= 0);
+    key('s');
+    typeInto(QStringLiteral("profileQuery"), QStringLiteral("tstjulia"));
+    key(Qt::Key_Return);
+    QCOMPARE(root()->property("editUser").toString(), julia.user);
+    // A reload can move the browsing cursor; the confirmed recipient stays put.
+    root()->setProperty("cursorPeople", otherIndex);
+    QCOMPARE(root()->property("subject").toString(), other.user);
+    typeInto(QStringLiteral("promptField"), QStringLiteral("50m"));
+    key(Qt::Key_Return);
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    QVERIFY(personNamed(julia.user).value(QStringLiteral("hasSessionBudget")).toBool());
+    QVERIFY(!personNamed(other.user).value(QStringLiteral("hasSessionBudget")).toBool());
+
+    key('4');
+    key('b');
+    typeInto(QStringLiteral("profileQuery"), julia.user);
+    key(Qt::Key_Return);
+    root()->setProperty("cursorPeople", otherIndex);
+    typeInto(QStringLiteral("promptField"), QStringLiteral("example.com"));
+    key(Qt::Key_Return);
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    QVERIFY(siteNamed(julia.user, QStringLiteral("example.com")).value(QStringLiteral("asked")).toBool());
+    QVERIFY(siteNamed(other.user, QStringLiteral("example.com")).isEmpty());
+
+    key('2');
+    key('a');
+    typeInto(QStringLiteral("profileQuery"), julia.user);
+    key(Qt::Key_Return);
+    typeInto(QStringLiteral("pickerQuery"), QStringLiteral("code"));
+    key(Qt::Key_Return);
+    root()->setProperty("cursorPeople", otherIndex);
+    typeInto(QStringLiteral("promptField"), QStringLiteral("20m"));
+    key(Qt::Key_Return);
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    QCOMPARE(programsOf(julia.user).size(), 1);
+    QVERIFY(programsOf(other.user).isEmpty());
 }
 
 void TestStudio::theWholeJobOnTheKeyboard()
@@ -560,6 +681,8 @@ void TestStudio::theWholeJobOnTheKeyboard()
     // the query, Enter to pick, the duration, Enter.
     key('2');
     key('a');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     typeInto(QStringLiteral("pickerQuery"), QStringLiteral("code"));
     key(Qt::Key_Return);
     typeInto(QStringLiteral("promptField"), QStringLiteral("45m"));
@@ -567,6 +690,8 @@ void TestStudio::theWholeJobOnTheKeyboard()
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
 
     key('a');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     typeInto(QStringLiteral("pickerQuery"), QStringLiteral("firefox"));
     key(Qt::Key_Return);
     typeInto(QStringLiteral("promptField"), QStringLiteral("1h"));
@@ -587,6 +712,8 @@ void TestStudio::theWholeJobOnTheKeyboard()
     // The day's total, and then ten minutes handed over on top of it.
     key('3');
     key('s');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     typeInto(QStringLiteral("promptField"), QStringLiteral("2h"));
     key(Qt::Key_Return);
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
@@ -610,6 +737,25 @@ void TestStudio::theWholeJobOnTheKeyboard()
     const QVariantMap session = julia.value(QStringLiteral("session")).toMap();
     QCOMPARE(session.value(QStringLiteral("left")).toString(), QStringLiteral("2h10m"));
     QCOMPARE(session.value(QStringLiteral("granted")).toString(), QStringLiteral("10m"));
+    QCOMPARE(session.value(QStringLiteral("resets")).toString(), QStringLiteral("daily"));
+
+    // And a pot, from the same row. `p` turns the allowance into a budget that
+    // never resets and back, through `limit --resets`, and the number written
+    // in the profile goes with it unchanged -- `2h`, not the `2h10m` today's
+    // grant has made of it, because a grant made for one day must not become
+    // the rule for every day.
+    key('p');
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    QVariantMap pot = personNamed(QStringLiteral("tstjulia")).value(QStringLiteral("session")).toMap();
+    QCOMPARE(pot.value(QStringLiteral("resets")).toString(), QStringLiteral("never"));
+    QVERIFY(pot.value(QStringLiteral("pot")).toBool());
+    QCOMPARE(pot.value(QStringLiteral("daily")).toString(), QStringLiteral("2h"));
+    key('p');
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    pot = personNamed(QStringLiteral("tstjulia")).value(QStringLiteral("session")).toMap();
+    QCOMPARE(pot.value(QStringLiteral("resets")).toString(), QStringLiteral("daily"));
+    QVERIFY(!pot.value(QStringLiteral("pot")).toBool());
+    QCOMPARE(pot.value(QStringLiteral("daily")).toString(), QStringLiteral("2h"));
 
     // Not one pointer event was sent in this test.
 }
@@ -639,6 +785,7 @@ void TestStudio::theWholeJobOnTheMouse()
         const QString id = pair.section(QLatin1Char('|'), 0, 0);
         const QString limit = pair.section(QLatin1Char('|'), 1, 1);
         click(QStringLiteral("command-release"));
+        clickItem(awaitRow(QStringLiteral("profileList"), 0));
         typeInto(QStringLiteral("pickerQuery"), id);
         // The row itself, not a key: the picker's list is walked and chosen with
         // the pointer here.
@@ -654,6 +801,7 @@ void TestStudio::theWholeJobOnTheMouse()
 
     click(QStringLiteral("viewChip3"));
     click(QStringLiteral("command-day"));
+    clickItem(awaitRow(QStringLiteral("profileList"), 0));
     typeInto(QStringLiteral("promptField"), QStringLiteral("2h"));
     click(QStringLiteral("promptOk"));
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
@@ -668,6 +816,108 @@ void TestStudio::theWholeJobOnTheMouse()
         personNamed(QStringLiteral("tstjulia")).value(QStringLiteral("session")).toMap();
     QCOMPARE(session.value(QStringLiteral("left")).toString(), QStringLiteral("2h10m"));
     QCOMPARE(session.value(QStringLiteral("granted")).toString(), QStringLiteral("10m"));
+}
+
+// The sites view, through both doors — docs/design.md §11 and §5.3.
+//
+// The three things the CLI could do and the window could not: block a site and
+// let it open again, put a clock on one, and switch incognito off. They are here
+// as a case of their own rather than folded into `theWholeJobOnTheKeyboard`
+// because what they write is a different half of the profile, and because the
+// interesting assertion is not "the profile changed" but "the window's own
+// reading of the machine changed with it" — a row that goes on saying `opens`
+// after the rule is written is exactly the failure a snapshot rebuilt from the
+// wrong list would produce.
+//
+// Both doors, in one errand rather than two: the keyboard writes the block and
+// the clock, the mouse takes the block back and switches incognito off. Every
+// one of the four is a row of the one table, so either door could have done any
+// of them, and `everyCommandIsBothAKeyAndAChip` is the general proof of that;
+// this is the proof that pressing them writes what the CLI would have written.
+void TestStudio::theWebHalfOnBothDoors()
+{
+    if (!root()->property("operating").toBool())
+        QSKIP("not in wheel");
+
+    m_admin->run(QStringLiteral("fixture"),
+                 {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("tstjulia")});
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+
+    // `4`, `b`, the domain, Enter.
+    key('4');
+    QCOMPARE(root()->property("view").toInt(), 4);
+    key('b');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
+    typeInto(QStringLiteral("promptField"), QStringLiteral("youtube.com"));
+    key(Qt::Key_Return);
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+
+    QVariantMap site = siteNamed(QStringLiteral("tstjulia"), QStringLiteral("youtube.com"));
+    QVERIFY2(!site.isEmpty(), "the site the window just blocked is not on the sites view");
+    QVERIFY2(site.value(QStringLiteral("blocked")).toBool(),
+             "the row still says the site opens");
+    QVERIFY(site.value(QStringLiteral("asked")).toBool());
+
+    // A clock on it. `m` on the row, and the verb underneath has to be
+    // `limit --site` and not `limit --budget`: the CLI refuses the second for a
+    // domain rather than guessing, so a window that sent the wrong one would
+    // fail loudly here and silently nowhere else.
+    key('m');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
+    typeInto(QStringLiteral("promptField"), QStringLiteral("30m"));
+    key(Qt::Key_Return);
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+
+    site = siteNamed(QStringLiteral("tstjulia"), QStringLiteral("youtube.com"));
+    QVERIFY2(site.value(QStringLiteral("hasBudget")).toBool(),
+             "the site has no clock, so `m` wrote something else");
+    QCOMPARE(site.value(QStringLiteral("limit")).toString(), QStringLiteral("30m"));
+    // And the sentence about running out is the site's own. `stops opening` and
+    // not `only warns`: a switch whose fourth value fell into the default arm
+    // said the second for a whole release.
+    QCOMPARE(site.value(QStringLiteral("ending")).toString(), QStringLiteral("stops opening"));
+
+    // A site budget is not a program. It used to draw a row on the programs
+    // view, with a verdict read out of the app rules and an `x` that would have
+    // written `omahouse deny tstjulia youtube.com`.
+    for (const QVariant &row : programsOf(QStringLiteral("tstjulia"))) {
+        QVERIFY2(row.toMap().value(QStringLiteral("id")).toString()
+                     != QStringLiteral("youtube.com"),
+                 "the site budget turned up on the programs view");
+    }
+
+    // The other door. The chip takes the block back, and the row says so.
+    click(QStringLiteral("command-unblock"));
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    site = siteNamed(QStringLiteral("tstjulia"), QStringLiteral("youtube.com"));
+    QVERIFY2(!site.value(QStringLiteral("blocked")).toBool(),
+             "the site is still blocked after `let it open` came back green");
+
+    // And incognito, which is the one switch with no counterpart on the app
+    // side. Three states: this asserts the two the window can move between.
+    QVERIFY(!personNamed(QStringLiteral("tstjulia"))
+                 .value(QStringLiteral("incognitoStated")).toBool());
+    click(QStringLiteral("command-incognito"));
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    QVariantMap julia = personNamed(QStringLiteral("tstjulia"));
+    QVERIFY(julia.value(QStringLiteral("incognitoStated")).toBool());
+    QVERIFY2(julia.value(QStringLiteral("incognitoDenied")).toBool(),
+             "the chip said `incognito off` and incognito is still open");
+
+    click(QStringLiteral("command-incognito"));
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    QVERIFY(!personNamed(QStringLiteral("tstjulia"))
+                 .value(QStringLiteral("incognitoDenied")).toBool());
+
+    // The reach is on the view, once, and it is the CLI's own sentence rather
+    // than a second one composed here.
+    QQuickItem *reach = itemNamed(window()->contentItem(), QStringLiteral("siteReach"));
+    QVERIFY2(reach, "the sites view does not say what a browser policy reaches");
+    QVERIFY(reach->isVisible());
+    QCOMPARE(reach->property("text").toString(), m_house->reach());
+    QVERIFY(m_house->reach().contains(QStringLiteral("including you")));
 }
 
 void TestStudio::everyCommandIsBothAKeyAndAChip()
@@ -688,10 +938,32 @@ void TestStudio::everyCommandIsBothAKeyAndAChip()
                   QStringLiteral("2h")});
     QVERIFY(waitForWrite());
 
-    // The general form of the promise. Every row of the one table, on all three
+    // Something to have site commands about, so the fourth view is not an empty
+    // list with a cursor at -1 and half its table unusable.
+    m_admin->run(QStringLiteral("fixture"),
+                 {QStringLiteral("web"), QStringLiteral("block"), QStringLiteral("tstjulia"),
+                  QStringLiteral("youtube.com")});
+    QVERIFY(waitForWrite());
+
+    // The general form of the promise. Every row of the one table, on all four
     // views: a chip on screen with that id, carrying that key on its face.
+    //
+    // The bound is four and not three since the sites view arrived, and that is
+    // the whole of what this case needed to gain: an action the CLI has and the
+    // window does not escapes this proof entirely, because there is no row in
+    // the table for it to be a row of. That is how `web block`, `limit --site`
+    // and the incognito switch went a whole release without a button.
+    // At the narrowest the window says it works. `minimumWidth` is a promise,
+    // and the chips are the part of it most likely to be broken by one more
+    // command: at the default width there is room to spare and the bar can be
+    // wrong for a year without showing it.
+    const int wasWide = window()->width();
+    window()->setWidth(window()->minimumWidth());
+    settle();
+
     QSet<QString> keysSeen;
-    for (int view = 1; view <= 3; ++view) {
+    QMap<QString, bool> reachable;
+    for (int view = 1; view <= 5; ++view) {
         QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(view)));
         settle();
         const QVariantList commands = root()->property("commands").toList();
@@ -722,6 +994,25 @@ void TestStudio::everyCommandIsBothAKeyAndAChip()
             QCOMPARE(chip->property("usable").toBool(),
                      command.value(QStringLiteral("usable")).toBool());
 
+            // Whether the pointer can reach it, which existing is not.
+            //
+            // The bar clips on purpose -- it says so where it is drawn -- and
+            // `:` lists whatever did not fit, so a chip past the right edge is
+            // not an unreachable action. What would make it one is the palette
+            // itself going the same way, and that is the thing worth holding:
+            // the door to everything clipped has to stay clickable at the
+            // narrowest width this window says it works at.
+            //
+            // Asserting instead that every chip is inside the window is what I
+            // tried first, and it fails honestly at `minimumWidth` on a layout
+            // that is behaving as designed. The omastore window hit the real
+            // version of this defect -- a bar with no palette behind it -- and
+            // that is what sent me to measure mine.
+            const QRectF box = chip->mapRectToScene(
+                    QRectF(0, 0, chip->width(), chip->height()));
+            reachable.insert(id, box.right() <= window()->width() + 0.5
+                                         && box.left() >= -0.5);
+
             // And the window agrees that the key belongs to that action.
             QVariant found;
             QMetaObject::invokeMethod(root(), "commandFor", Q_RETURN_ARG(QVariant, found),
@@ -730,16 +1021,61 @@ void TestStudio::everyCommandIsBothAKeyAndAChip()
         }
     }
 
+    // The door to whatever the bar could not fit.
+    //
+    // The first half of this is the one that keeps the second honest: at least
+    // one chip has to be clipped at this width, or the check below is a
+    // sentence about a situation that never happens. It is clipped -- measured,
+    // and the reason this case narrows the window at all.
+    //
+    // The second half guards something that is structurally safe today: the
+    // palette chip is anchored in the header and not inside the clipping row,
+    // so narrowing does not move it -- tried at 260 and it stays. What it would
+    // catch is somebody putting it in that row, which is the change that would
+    // make every clipped action unreachable by pointer at once.
+    QVERIFY2(reachable.values().contains(false),
+             "nothing was clipped at the narrowest width, so this proves nothing "
+             "about what happens when something is");
+    QQuickItem *palette = itemNamed(window()->contentItem(),
+                                    QStringLiteral("paletteChip"));
+    QVERIFY2(palette, "there is no palette chip, so a clipped action has no door");
+    const QRectF door = palette->mapRectToScene(
+            QRectF(0, 0, palette->width(), palette->height()));
+    QVERIFY2(door.right() <= window()->width() + 0.5 && door.left() >= -0.5,
+             qPrintable(QStringLiteral("the palette chip sits at %1..%2 and the "
+                                       "window is %3 wide, so everything the bar "
+                                       "clipped is out of the pointer's reach")
+                                .arg(door.left()).arg(door.right())
+                                .arg(window()->width())));
+
     // The window's own keys are not in the table, and they have chips of their
     // own in the header. Same promise, written by hand because they are about
     // the window and not about a profile.
+    //
+    // Measured here, still narrow, and that is the whole of what this loop
+    // gained. It used to run after the width was put back and it used to ask
+    // only whether each chip existed -- so the chips nobody thinks to measure,
+    // because they are always on screen, were the ones nothing measured. The
+    // omastore window had the identical hole and its `keysChip` was the one
+    // running past the edge; mine has a `keysChip` too, which is why this is
+    // being written rather than reasoned about.
     for (const QString &name : {QStringLiteral("viewChip1"), QStringLiteral("viewChip2"),
-                                QStringLiteral("viewChip3"), QStringLiteral("filterChip"),
-                                QStringLiteral("paletteChip"), QStringLiteral("keysChip")}) {
+                                QStringLiteral("viewChip3"), QStringLiteral("viewChip4"),
+                                QStringLiteral("filterChip"), QStringLiteral("paletteChip"),
+                                QStringLiteral("keysChip")}) {
         QQuickItem *chip = itemNamed(window()->contentItem(), name);
         QVERIFY2(chip, qPrintable(name));
         QVERIFY2(!chip->property("key").toString().isEmpty(), qPrintable(name));
+        const QRectF box = chip->mapRectToScene(
+                QRectF(0, 0, chip->width(), chip->height()));
+        QVERIFY2(box.left() >= -0.5 && box.right() <= window()->width() + 0.5,
+                 qPrintable(QStringLiteral("at %1px wide, %2 runs from %3 to %4")
+                                    .arg(window()->width()).arg(name)
+                                    .arg(box.left()).arg(box.right())));
     }
+
+    window()->setWidth(wasWide);
+    settle();
 }
 
 void TestStudio::everyKeyOnTheSheetIsAnswered()
@@ -772,6 +1108,13 @@ void TestStudio::everyKeyOnTheSheetIsAnswered()
                 promised << binding.value(QStringLiteral("key")).toString();
         }
     }
+    // Guarded, because the list this walks is built by matching a heading, and
+    // renaming a heading is an ordinary edit to a help sheet. Empty, the loop
+    // below does nothing and the whole claim -- every key the sheet promises is
+    // answered -- evaporates with the case still green.
+    QVERIFY2(!promised.isEmpty(),
+             "the sheet has no `here, right now` group, so nothing below is checked");
+
     for (const QString &shortcut : std::as_const(promised)) {
         QVariant found;
         QMetaObject::invokeMethod(root(), "commandFor", Q_RETURN_ARG(QVariant, found),
@@ -804,6 +1147,8 @@ void TestStudio::everyKeyOnTheSheetIsAnswered()
     QCOMPARE(root()->property("view").toInt(), 2);
     key('3');
     QCOMPARE(root()->property("view").toInt(), 3);
+    key('4');
+    QCOMPARE(root()->property("view").toInt(), 4);
     key('1');
     QCOMPARE(root()->property("view").toInt(), 1);
 
@@ -952,6 +1297,325 @@ void TestStudio::saysWhatIsReallyInsideAShim()
 // rather than four of them, and they run the same check on every frame before
 // saving it -- which is the whole reason the check is a function and not four
 // lines in this case.
+QByteArray TestStudio::treeUnder(const QString &directory)
+{
+    QByteArray fingerprint;
+    QDirIterator walk(directory, QDir::Files, QDirIterator::Subdirectories);
+    QStringList paths;
+    while (walk.hasNext())
+        paths << walk.next();
+    // Sorted, because the walk order is the filesystem's and two identical
+    // trees would otherwise fingerprint differently on the same machine.
+    paths.sort();
+    for (const QString &path : std::as_const(paths)) {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly))
+            continue;
+        fingerprint += path.toUtf8() + '\n' + file.readAll() + '\n';
+        file.close();
+    }
+    return fingerprint;
+}
+
+void TestStudio::publishGoesThroughTheCli()
+{
+    QString error;
+    Profile profile;
+    profile.user = QStringLiteral("tstjulia");
+    profile.displayName = QStringLiteral("Julia");
+    QVERIFY(writeProfiles(paths::profilesFile(), { profile }, &error));
+    ThisMachine manager;
+    manager.kind = Kind::Manager;
+    manager.since = QDateTime::currentDateTimeUtc();
+    QVERIFY(writeThisMachine(paths::thisMachineFile(), manager, &error));
+    Machine station;
+    station.name = QStringLiteral("station-02");
+    station.nodeId = QStringLiteral("omk1_abc");
+    station.endpoint = QStringLiteral("localhost:8787");
+    Machine second = station;
+    second.name = QStringLiteral("the study");
+    QVERIFY(writeMachines(paths::machinesFile(), { station, second }, &error));
+
+    const QString recorded = m_tree.path() + QStringLiteral("/publish-arguments");
+    const QString recorder = m_tree.path() + QStringLiteral("/publish-cli");
+    QFile script(recorder);
+    QVERIFY(script.open(QIODevice::WriteOnly));
+    script.write(QStringLiteral("#!/bin/sh\nprintf '%s\\n' \"$@\" > '%1'\nprintf 'MACHINE "
+                                "RESULT\\nstation-02 published\\nthe study published\\n'\n")
+            .arg(recorded)
+            .toUtf8());
+    script.close();
+    QVERIFY(script.setPermissions(
+        QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+    qputenv("OMAHOUSE_CLI", recorder.toLocal8Bit());
+    QQmlApplicationEngine engine;
+    engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+    qputenv("OMAHOUSE_CLI", m_cli.toLocal8Bit());
+    QVERIFY(!engine.rootObjects().isEmpty());
+    auto *localWindow = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+    QVERIFY(localWindow);
+    QVERIFY(QTest::qWaitForWindowExposed(localWindow));
+    auto *admin
+        = engine.singletonInstance<Admin *>(QStringLiteral("omahouse"), QStringLiteral("Admin"));
+    QCOMPARE(admin->program(), recorder);
+    QSignalSpy done(admin, &Admin::done);
+    auto *chip = itemNamed(localWindow->contentItem(), QStringLiteral("command-publish"));
+    QVERIFY2(chip, "publish has no clickable command");
+    QCOMPARE(chip->property("key").toString(), QStringLiteral("u"));
+    QVERIFY(chip->property("usable").toBool());
+    QTest::keyClick(localWindow, Qt::Key_U);
+    settle();
+    auto *opened = itemNamed(localWindow->contentItem(), QStringLiteral("publishSheet"));
+    QVERIFY2(opened, "publish sheet missing");
+    QTRY_VERIFY(opened->isVisible());
+    QTest::keyClick(localWindow, Qt::Key_Escape);
+    QVERIFY(!QFile::exists(recorded));
+    QTest::mouseClick(localWindow, Qt::LeftButton, Qt::NoModifier,
+        chip->mapToScene(QPointF(chip->width() / 2, chip->height() / 2)).toPoint());
+    settle();
+    QTest::keyClick(localWindow, Qt::Key_Space);
+    QTest::keyClick(localWindow, Qt::Key_Down);
+    QTest::keyClick(localWindow, Qt::Key_Space);
+    QTest::keyClick(localWindow, Qt::Key_Return);
+    settle();
+    QVERIFY(!QFile::exists(recorded));
+    QTest::keyClick(localWindow, Qt::Key_Space);
+    QTest::keyClick(localWindow, Qt::Key_Up);
+    QTest::keyClick(localWindow, Qt::Key_Space);
+    const QByteArray before = treeUnder(paths::configDir()) + treeUnder(paths::stateDir());
+    QTest::keyClick(localWindow, Qt::Key_Return);
+    QTRY_COMPARE(done.count(), 1);
+    QFile calls(recorded);
+    QVERIFY(calls.open(QIODevice::ReadOnly));
+    QCOMPARE(calls.readAll(),
+        QByteArray("profile\npublish\ntstjulia\n--to\nstation-02\n--to\nthe study\n"));
+    QCOMPARE(admin->property("output").toStringList(),
+        QStringList({ "MACHINE RESULT", "station-02 published", "the study published" }));
+    auto *sheet = itemNamed(localWindow->contentItem(), QStringLiteral("publishSheet"));
+    QVERIFY(sheet->property("finished").toBool());
+    QCOMPARE(sheet->property("output").toStringList().size(), 3);
+    QCOMPARE(treeUnder(paths::configDir()) + treeUnder(paths::stateDir()), before);
+    QFile::remove(paths::thisMachineFile());
+    QFile::remove(paths::machinesFile());
+    m_house->reload();
+}
+
+void TestStudio::publishIsRefusedWhileUnresolved()
+{
+    QString error;
+    Profile profile;
+    profile.user = QStringLiteral("tstjulia");
+    QVERIFY(writeProfiles(paths::profilesFile(), { profile }, &error));
+    ThisMachine manager;
+    manager.kind = Kind::Manager;
+    manager.since = QDateTime::currentDateTimeUtc();
+    QVERIFY(writeThisMachine(paths::thisMachineFile(), manager, &error));
+    Machine station;
+    station.name = QStringLiteral("station-02");
+    station.nodeId = QStringLiteral("omk1_abc");
+    station.endpoint = QStringLiteral("localhost:8787");
+    QVERIFY(writeMachines(paths::machinesFile(), { station }, &error));
+    profile.displayName = QStringLiteral("Changed there");
+    const QString path = paths::elsewhereProfileFile(station.name, profile.user);
+    QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+    QVERIFY(writeProfiles(path, { profile }, &error));
+    m_house->reload();
+    settle();
+    const QVariantList commands = root()->property("commands").toList();
+    bool found = false;
+    for (const auto &value : commands) {
+        const auto command = value.toMap();
+        if (command.value("id").toString() != QLatin1String("publish"))
+            continue;
+        found = true;
+        QVERIFY(!command.value("usable").toBool());
+        QVERIFY(command.value("label").toString().contains("station-02"));
+    }
+    QVERIFY2(found, "publish has no command");
+    key('u');
+    auto *sheet = itemNamed(window()->contentItem(), QStringLiteral("publishSheet"));
+    QVERIFY(sheet && !sheet->isVisible());
+    QVERIFY(m_admin->message().contains("station-02"));
+    QFile::remove(paths::thisMachineFile());
+    QFile::remove(paths::machinesFile());
+    m_house->reload();
+}
+
+void TestStudio::theMachinesViewOpensWithNobodySelected()
+{
+    QString error;
+    Machine machine;
+    machine.name = QStringLiteral("station-02");
+    machine.nodeId = QStringLiteral("omk1_abc");
+    machine.endpoint = QStringLiteral("localhost:8787");
+    QVERIFY(writeMachines(paths::machinesFile(), {machine}, &error));
+    m_house->reload(); settle();
+    QVERIFY(people().isEmpty());
+    key('f');
+    QCOMPARE(root()->property("view").toInt(), 5);
+    const auto rows = root()->property("fleetRows").toList();
+    QCOMPARE(rows.size(), 1);
+    QCOMPARE(rows.first().toMap().value("name").toString(), QStringLiteral("station-02"));
+    QCOMPARE(rows.first().toMap().value("state").toString(), QStringLiteral("paired"));
+    Profile profile;
+    profile.user = QStringLiteral("tstjulia");
+    QVERIFY(writeProfiles(paths::profilesFile(), { profile }, &error));
+    m_house->reload();
+    settle();
+    QCOMPARE(root()->property("fleetRows").toList().size(), 1);
+    QFile::remove(paths::machinesFile());
+    m_house->reload();
+}
+
+void TestStudio::theHeaderSaysWhatThisComputerIs()
+{
+    QString error;
+    Machine laptop;
+    laptop.name = QStringLiteral("the kid's laptop");
+    laptop.nodeId = QStringLiteral("omk1_abc");
+    laptop.endpoint = QStringLiteral("localhost:8787");
+    QVERIFY(writeMachines(paths::machinesFile(), {laptop}, &error));
+    ThisMachine machine;
+    machine.name = QStringLiteral("the study");
+    machine.kind = Kind::Manager;
+    machine.since = QDateTime::currentDateTimeUtc();
+    QVERIFY(writeThisMachine(paths::thisMachineFile(), machine, &error));
+    m_house->reload(); settle();
+    auto *header = awaitItem(QStringLiteral("faceLabel"));
+    QVERIFY(header);
+    QVERIFY2(header->property("text").toString().contains(QStringLiteral("manages 1 computer · the kid's laptop")), qPrintable(header->property("text").toString()));
+    QCOMPARE(m_house->property("household").toMap().value("machines").toList().size(), 1);
+    machine.kind = Kind::Managed; machine.managedBy = QStringLiteral("omk1_manager");
+    QVERIFY(writeThisMachine(paths::thisMachineFile(), machine, &error));
+    m_house->reload(); settle();
+    QVERIFY(header->property("text").toString().contains(QStringLiteral("managed from another computer")));
+    QFile::remove(paths::thisMachineFile());
+    QFile::remove(paths::machinesFile());
+    m_house->reload(); settle();
+    QVERIFY(!header->property("text").toString().contains(QStringLiteral("manages")));
+    QVERIFY(!header->property("text").toString().contains(QStringLiteral("managed from")));
+}
+
+void TestStudio::theHeaderKeepsOffTheTabsWhenNarrow()
+{
+    // Tiled at half a 1440 px screen the header's two halves -- who this is
+    // and what they may do on the left, the view tabs on the right -- were
+    // anchored to their own edges and drawn over each other. Measured in the
+    // showcase's frames, on both days it was filmed. The tabs keep their width
+    // and the sentence on the left gives way, because a tab strip with a word
+    // missing is a key nothing answers, and the sentence is still readable
+    // with its tail elided.
+    const int wasWide = window()->width();
+    for (int width : {700, window()->minimumWidth()}) {
+        window()->setWidth(width);
+        settle();
+        QQuickItem *face = awaitItem(QStringLiteral("faceLabel"));
+        QQuickItem *firstTab = awaitItem(QStringLiteral("viewChip1"));
+        if (QTest::currentTestFailed())
+            return;
+        const qreal faceRight = face->mapToScene(QPointF(face->width(), 0)).x();
+        const qreal tabsLeft = firstTab->mapToScene(QPointF(0, 0)).x();
+        QVERIFY2(faceRight <= tabsLeft,
+                 qPrintable(QStringLiteral("at %1 px the face line ends at %2 and the "
+                                           "tabs start at %3")
+                                .arg(width).arg(faceRight).arg(tabsLeft)));
+        QVERIFY2(face->width() > 0, "the face line vanished rather than eliding");
+    }
+    window()->setWidth(wasWide);
+    settle();
+    // Back at full width nothing is elided: the fix must cost the ordinary
+    // window nothing, or every full-width picture would change with it.
+    QQuickItem *face = awaitItem(QStringLiteral("faceLabel"));
+    QVERIFY2(!face->property("truncated").toBool(), "the face line is elided at full width");
+}
+
+void TestStudio::theWindowNeverWritesToTheMachine()
+{
+    if (!root()->property("operating").toBool())
+        QSKIP("not in wheel");
+
+    // Every command of every view, performed, with the CLI replaced by something
+    // that records and writes nothing. What is asserted afterwards is that the
+    // tree is byte for byte what it was: if any command had reached a file
+    // itself instead of going through `Admin`, that is where it would show.
+    //
+    // The window already writes only through `pkexec omahouse <verb>` -- the
+    // same CLI an operator would have typed, with the same checks and the same
+    // refusals -- and until now nothing held it to that. A second path to the
+    // machine would be a second set of refusals to keep in step, and the day it
+    // appeared no test would have noticed.
+    //
+    // The idea is not mine: the omastore window was built on this one's model
+    // and turned this argument into an assertion, which is what sent me back to
+    // write it here.
+    const QString recorder = m_tree.path() + QStringLiteral("/recording-cli");
+    const QString recorded = m_tree.path() + QStringLiteral("/recorded");
+    {
+        QFile file(recorder);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QStringLiteral("#!/bin/sh\nprintf '%s\\n' \"$*\" >> %1\nexit 0\n")
+                           .arg(recorded).toUtf8());
+        file.close();
+        QVERIFY(QFile::setPermissions(recorder,
+                                      QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                              | QFileDevice::ExeOwner));
+    }
+    qputenv("OMAHOUSE_CLI", recorder.toLocal8Bit());
+    m_admin->setProperty("program", recorder);
+
+    const QByteArray before = treeUnder(m_tree.path() + QStringLiteral("/etc"))
+            + treeUnder(m_tree.path() + QStringLiteral("/var"));
+
+    QVariantList performed;
+    for (const QVariant &view : QVariantList {0, 1, 2, 3}) {
+        QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, view));
+        settle();
+        const QVariantList commands = root()->property("commands").toList();
+        for (const QVariant &row : commands) {
+            const QVariantMap command = row.toMap();
+            if (!command.value(QStringLiteral("usable")).toBool())
+                continue;
+            QVERIFY(QMetaObject::invokeMethod(root(), "perform",
+                    Q_ARG(QVariant, command.value(QStringLiteral("id"))),
+                    Q_ARG(QVariant, QVariant(QString()))));
+            settle();
+            performed.append(command.value(QStringLiteral("id")));
+            // Anything that opened a sheet or a field is closed again, so the
+            // next command is performed from the same standing start.
+            key(Qt::Key_Escape);
+            settle();
+        }
+    }
+    QVERIFY2(performed.size() >= 4,
+             qPrintable(QStringLiteral("only %1 commands were reachable")
+                                .arg(performed.size())));
+
+    const QByteArray after = treeUnder(m_tree.path() + QStringLiteral("/etc"))
+            + treeUnder(m_tree.path() + QStringLiteral("/var"));
+    QVERIFY2(before == after,
+             "a command reached the machine without going through the CLI");
+
+    // And nothing wrote on the way in, which is not the sentence above.
+    //
+    // Performing a command opens its prompt or its confirmation; the write
+    // happens when somebody answers, and this case answers nothing -- it
+    // escapes each dialog and moves on. So no call is the correct outcome, and
+    // asserting it catches what would otherwise hide here: a command that
+    // writes before anybody confirmed.
+    //
+    // Written this way round because the first version asked whether every
+    // recorded call named a verb, and there were no recorded calls -- a loop
+    // over an empty list, green, proving nothing. Found by guarding it, which
+    // is what the omastore session had just named: what iterates and what
+    // asserts a negative do not fail on their own. That the writes which really
+    // happen go through the CLI is proved by `theWholeJobOnTheKeyboard`, which
+    // answers the dialogs.
+    QVERIFY2(!QFile::exists(recorded), "a command wrote before anybody confirmed");
+
+    qputenv("OMAHOUSE_CLI", m_cli.toLocal8Bit());
+    m_admin->setProperty("program", m_cli);
+}
+
 void TestStudio::drawsItself()
 {
     if (!root()->property("operating").toBool())
@@ -1000,6 +1664,86 @@ void TestStudio::drawsItself()
                  qPrintable(QStringLiteral("%1 is a flat rectangle").arg(frames.at(i))));
     }
     key(Qt::Key_Escape);
+}
+
+/// `/` narrows the list it was typed on, and no other.
+///
+/// The key sheet has said `filter this list` all along and one string was
+/// applied to all five at once. What that cost was not a narrower list: the
+/// profile the window is about follows the cursor of the people list, so a
+/// needle that missed the person emptied the people list -- and then the
+/// programs view had nobody to be about and drew *nobody is under rules yet*
+/// over a household that was right there.
+void TestStudio::theFilterNarrowsOnlyTheListItWasTypedOn()
+{
+    if (!root()->property("operating").toBool()) QSKIP("operator only");
+    seedTheExampleHousehold();
+    if (QTest::currentTestFailed())
+        return;
+
+    // Nothing is asserted about a narrowing until it is known there was
+    // something to narrow. Four programs and one person, or every comparison
+    // below is between two empty lists.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
+    const int programs = root()->property("programRows").toList().size();
+    QVERIFY2(programs > 1, "the fixture has fewer than two programs to tell apart");
+    QCOMPARE(root()->property("peopleRows").toList().size(), 1);
+    QCOMPARE(root()->property("subject").toString(), QStringLiteral("nobody"));
+
+    // A needle that names a program and misses the person. `firefox` is not in
+    // `nobody` and it is not in `Kid`, which is the whole point of choosing it:
+    // this is the needle the old filter could not survive.
+    key('/');
+    typeInto(QStringLiteral("filterField"), QStringLiteral("firefox"));
+    settle();
+
+    const QVariantList narrowed = root()->property("programRows").toList();
+    QCOMPARE(narrowed.size(), 1);
+    QCOMPARE(narrowed.first().toMap().value(QStringLiteral("id")).toString(),
+             QStringLiteral("firefox"));
+
+    // And the people list is untouched, so the window still has somebody to be
+    // about and the view still has rows.
+    QCOMPARE(root()->property("peopleRows").toList().size(), 1);
+    QCOMPARE(root()->property("subject").toString(), QStringLiteral("nobody"));
+    QVERIFY2(!root()->property("todayRows").toList().isEmpty(),
+             "a needle typed on the programs list emptied the day");
+    QVERIFY2(!root()->property("siteRows").toList().isEmpty(),
+             "a needle typed on the programs list emptied the sites");
+
+    key(Qt::Key_Return);
+    settle();
+    QVERIFY(!root()->property("filtering").toBool());
+
+    // Going somewhere else shows that list's own needle, which is none of it.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    QCOMPARE(root()->property("filter").toString(), QString());
+    QCOMPARE(root()->property("peopleRows").toList().size(), 1);
+
+    // And coming back finds the list as it was left. "This list" is not a
+    // thing that lasts until you look away.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
+    QCOMPARE(root()->property("filter").toString(), QStringLiteral("firefox"));
+    QCOMPARE(root()->property("programRows").toList().size(), 1);
+
+    // `Esc` clears the one in front of you, which is what the key sheet says
+    // and the only way back to the whole list without a view change.
+    key(Qt::Key_Escape);
+    settle();
+    QCOMPARE(root()->property("filter").toString(), QString());
+    QCOMPARE(root()->property("programRows").toList().size(), programs);
+
+    // The other direction, and the one the defect was written about: a needle
+    // on the people list narrows the people list, and that is allowed to leave
+    // the window with nobody to be about -- because that is what was asked for.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    key('/');
+    typeInto(QStringLiteral("filterField"), QStringLiteral("zzz"));
+    settle();
+    QCOMPARE(root()->property("peopleRows").toList().size(), 0);
+    key(Qt::Key_Escape);
+    settle();
+    QCOMPARE(root()->property("peopleRows").toList().size(), 1);
 }
 
 void TestStudio::theSubjectFaceHasNothingToPress()
@@ -1092,6 +1836,39 @@ void TestStudio::shoot(const QString &name)
     // no inventory: the blank ones look like screens that exist.
     QVERIFY2(moreThanOneColour(frame),
              qPrintable(QStringLiteral("%1 is a flat rectangle").arg(name)));
+
+    // And the two questions a flat rectangle does not ask, because the picture
+    // that got past this was neither blank nor flat.
+    //
+    // `shots-check.sh` compares bytes, so it knows how to notice a picture that
+    // is *stale* and has no way at all to notice one that is *wrong*: regenerate
+    // and it agrees with whatever came out. A fixture writing a document in a
+    // shape the reader had stopped accepting made profiles.json fail to parse,
+    // the whole household vanished, and `31-operator-machines.png` became a
+    // colourful picture of the words `nobody is under rules yet` -- with the
+    // gate green, because the file on disk matched the file just written.
+    //
+    // So the refusal is here, where the window can still be asked what it
+    // thinks. `House.error` is the red line for a file that would not read; a
+    // refusal from a *verb* is `Admin.message` and is a thing some pictures are
+    // deliberately of, so this never touches those.
+    QVERIFY2(m_house->error().isEmpty(),
+             qPrintable(QStringLiteral("%1 was taken of a window that could not read the "
+                                       "machine: %2").arg(name, m_house->error())));
+
+    // And the quieter half: a household that is on disk and not on screen. The
+    // failure above showed up as an empty list, which is a legitimate picture
+    // for the *empty* screens and a broken one for every other, and only the
+    // file can tell the two apart.
+    QVector<Profile> onDisk;
+    QString why;
+    bool absent = false;
+    if (readProfiles(paths::profilesFile(), &onDisk, &why, &absent) && !absent
+        && !onDisk.isEmpty()) {
+        QVERIFY2(!people().isEmpty(),
+                 qPrintable(QStringLiteral("%1 was taken with %2 profiles on disk and none "
+                                           "on screen").arg(name).arg(onDisk.size())));
+    }
     QVERIFY2(frame.save(directory + QLatin1Char('/') + name + QStringLiteral(".png")),
              qPrintable(name));
 }
@@ -1131,6 +1908,16 @@ void TestStudio::seedTheExampleHousehold()
         {QStringLiteral("allow"), QStringLiteral("nobody"), QStringLiteral("gtk-launch")},
         // Named and refused, so the list has a row that is not released.
         {QStringLiteral("deny"), QStringLiteral("nobody"), QStringLiteral("steam")},
+        // The web half — docs/design.md §11 and §5.3. Three rows and three
+        // different things: a site that does not open at all, a site with a
+        // clock on it that is nearly spent, and a site with neither that the
+        // day counted minutes against anyway.
+        {QStringLiteral("web"), QStringLiteral("block"), QStringLiteral("nobody"),
+         QStringLiteral("tiktok.com")},
+        {QStringLiteral("limit"), QStringLiteral("nobody"), QStringLiteral("--site"),
+         QStringLiteral("youtube.com=30m")},
+        {QStringLiteral("web"), QStringLiteral("incognito"), QStringLiteral("nobody"),
+         QStringLiteral("--deny")},
     };
     for (const QStringList &verb : verbs) {
         m_admin->run(QStringLiteral("fixture"), verb);
@@ -1146,17 +1933,19 @@ void TestStudio::seedTheExampleHousehold()
     QString error;
     QVERIFY2(readProfiles(paths::profilesFile(), &profiles, &error), qPrintable(error));
     QCOMPARE(profiles.size(), 1);
-    QString session, code, firefox;
+    QString session, code, firefox, youtube;
     for (const Budget &budget : profiles.first().budgets) {
-        if (budget.match == QLatin1String("*"))
+        if (budget.isSession())
             session = budget.id;
-        else if (budget.match == QLatin1String("code"))
+        else if (budget.match.contains(QLatin1String("code")))
             code = budget.id;
-        else if (budget.match == QLatin1String("firefox"))
+        else if (budget.match.contains(QLatin1String("firefox")))
             firefox = budget.id;
+        else if (budget.isSite() && budget.match.contains(QLatin1String("youtube.com")))
+            youtube = budget.id;
     }
-    QVERIFY2(!session.isEmpty() && !code.isEmpty() && !firefox.isEmpty(),
-             "the verbs above did not write the three budgets the day is drawn from");
+    QVERIFY2(!session.isEmpty() && !code.isEmpty() && !firefox.isEmpty() && !youtube.isEmpty(),
+             "the verbs above did not write the four budgets the day is drawn from");
 
     const QDate today = QDate::currentDate();
     const auto at = [today](int hour, int minute) {
@@ -1171,6 +1960,20 @@ void TestStudio::seedTheExampleHousehold()
     // Exactly its limit, so one row is drawn in the colour of a budget that has
     // run out. Nothing else in this window looks like that.
     ledger.seconds.insert(firefox, 60 * 60);
+    // The site's clock and the site's minutes, and they agree because on a real
+    // machine one statement writes both -- docs/design.md §5.2. `wikipedia.org`
+    // has no budget and no rule and is here anyway: the sites view is the day's
+    // browsing as much as it is the rules, and a domain nobody has an opinion
+    // about is the ordinary case.
+    ledger.seconds.insert(youtube, 25 * 60);
+    ledger.sites.insert(QStringLiteral("youtube.com"), 25 * 60);
+    ledger.sites.insert(QStringLiteral("wikipedia.org"), 8 * 60);
+    // And the presence beside them, never inside them. Two thirds of the day in
+    // front of the screen and one third with it dark, which is what makes the
+    // line over the sites view worth reading: 25m on youtube.com out of an
+    // afternoon somebody remembers as longer is answered by the 40m below.
+    ledger.presence.insert(QStringLiteral("using"), 70 * 60);
+    ledger.presence.insert(QStringLiteral("screen-off"), 40 * 60);
     ledger.grants.append({at(9, 12), QStringLiteral("root"), session, 10});
     ledger.events.append({at(9, 40), EventKind::Warn, firefox, QString(), 5});
     ledger.events.append({at(9, 45), EventKind::Exhausted, firefox, QString(), -1});
@@ -1215,6 +2018,297 @@ void TestStudio::seedTheExampleSession(uid_t uid)
         makeProcess(procRoot, pid, QStringLiteral("/usr/share/code/code"));
 }
 
+void TestStudio::fleetPanelShowsMissingMachinesAndUsesTheKeyboard()
+{
+    if (!root()->property("operating").toBool()) QSKIP("operator only");
+    seedTheExampleHousehold();
+    m_admin->run("fixture", {"machine", "add", "station-02"});
+    QVERIFY(waitForWrite());
+    key('f');
+    QCOMPARE(root()->property("view").toInt(), 5);
+    const auto rows = root()->property("rows").toList();
+    QVERIFY(rows.size() >= 2);
+    bool missing = false;
+    for (const auto &row : rows) {
+        const auto item = row.toMap();
+        if (item.value("name").toString() == "station-02") {
+            missing = true;
+            QCOMPARE(item.value("state").toString(), QStringLiteral("no report today"));
+            QCOMPARE(item.value("used").toString(), QStringLiteral("?"));
+        }
+    }
+    QVERIFY(missing);
+    QVERIFY(awaitItem("fleetColumns"));
+    QMetaObject::invokeMethod(root(), "setFilter",
+                              Q_ARG(QVariant, QVariant(QStringLiteral("station-02"))));
+    settle();
+    QVERIFY(!root()->property("rows").toList().isEmpty());
+    for (const auto &row : root()->property("rows").toList())
+        QCOMPARE(row.toMap().value("name").toString(), QStringLiteral("station-02"));
+    QMetaObject::invokeMethod(root(), "setFilter", Q_ARG(QVariant, QVariant(QString())));
+    settle();
+    key('j');
+    QCOMPARE(root()->property("cursor").toInt(), 1);
+    key('+');
+    QVERIFY(root()->property("blocked").toBool());
+    key(Qt::Key_Escape);
+    key('h');
+    QCOMPARE(root()->property("view").toInt(), 1);
+    // The two views say the same thing about this computer, and they did not.
+    // The panel worked its own row out of the household's two numbers, and a
+    // grant typed here is in neither of them until the manager next plans -- so
+    // the today view said one figure for what was left and the panel beside it
+    // said another, about the same machine, on the same screen.
+    QString error;
+    QVector<Profile> profiles;
+    QVERIFY2(readProfiles(paths::profilesFile(), &profiles, &error), qPrintable(error));
+    QCOMPARE(profiles.size(), 1);
+    QString session;
+    for (const Budget &budget : profiles.first().budgets)
+        if (budget.isSession()) session = budget.id;
+    QVERIFY(!session.isEmpty());
+
+    const QString who = profiles.first().user;
+    const QDate today = QDate::currentDate();
+    QJsonObject statement{{"credit", 7200}, {"elsewhere", 1200}, {"counted", 0}};
+    QJsonObject house;
+    for (const Budget &budget : profiles.first().budgets)
+        if (budget.hasLimit()) house.insert(budget.id, statement);
+    profiles.first().allocation = QJsonObject{{"authority", "manager"}, {"machine", "here"},
+        {"user", who}, {"date", today.toString(Qt::ISODate)}, {"revision", 1},
+        {"house", house}};
+    QVERIFY2(writeProfiles(paths::profilesFile(), profiles, &error), qPrintable(error));
+    m_house->reload();
+    settle();
+
+    const auto leftOnThisMachine = [&](const QString &budgetId) {
+        key('f');
+        for (const auto &row : root()->property("rows").toList()) {
+            const auto item = row.toMap();
+            if (item.value("name").toString() == QLatin1String("here")
+                    && item.value("id").toString() == budgetId)
+                return item.value("left").toString();
+        }
+        return QString();
+    };
+    const QString panel = leftOnThisMachine(session);
+    QVERIFY2(!panel.isEmpty(), "this computer has no row of its own in the fleet panel");
+
+    // Ten minutes handed over here, with the manager none the wiser. Both
+    // numbers move, and they move together.
+    m_admin->run("fixture", {"grant", who, "--budget", session + "=10m"});
+    QVERIFY(waitForWrite());
+    m_house->reload();
+    settle();
+    const QString afterPanel = leftOnThisMachine(session);
+    key('t');
+    QString afterToday;
+    for (const auto &entry : todayOf(who)) {
+        const auto item = entry.toMap();
+        if (item.value("id").toString() == session)
+            afterToday = item.value("left").toString();
+    }
+    QVERIFY2(!afterToday.isEmpty(), "the today view has no row for the session");
+    QCOMPARE(afterPanel, afterToday);
+    QVERIFY2(afterPanel != panel,
+             "ten minutes were handed over on this machine and the panel did not move");
+
+    // And a budget that never resets is drawn out of the counter it really
+    // spends. Every pot on every computer showed nothing spent and its whole
+    // limit left, because the panel read the daily counter for all of them --
+    // and a collected day is a whole ledger, so the number was there to read
+    // the entire time.
+    //
+    // Its row is also the one that proves a pot does not go through the
+    // household at all: this statement has no entry for it, and the row is
+    // right anyway.
+    QVector<Profile> withPot;
+    QVERIFY2(readProfiles(paths::profilesFile(), &withPot, &error), qPrintable(error));
+    Budget jar;
+    jar.id = QStringLiteral("pot");
+    jar.match = {QStringLiteral("chromium")};
+    jar.dailyMinutes = 120;
+    jar.resets = Resets::Never;
+    jar.onExhausted = OnExhausted::Close;
+    withPot.first().budgets.append(jar);
+    QVERIFY2(writeProfiles(paths::profilesFile(), withPot, &error), qPrintable(error));
+
+    Ledger spent;
+    bool noDay = false;
+    QVERIFY2(readLedger(paths::ledgerFile(who, today), &spent, &error, &noDay),
+             qPrintable(error));
+    spent.user = who;
+    spent.date = today;
+    spent.addKeptSeconds(QStringLiteral("pot"), 1800);
+    QVERIFY2(writeLedger(paths::ledgerFile(who, today), spent, &error), qPrintable(error));
+    m_house->reload();
+    settle();
+
+    key('f');
+    QString potUsed, potLeft;
+    for (const auto &row : root()->property("rows").toList()) {
+        const auto item = row.toMap();
+        if (item.value("name").toString() == QLatin1String("here")
+                && item.value("id").toString() == QLatin1String("pot")) {
+            potUsed = item.value("used").toString();
+            potLeft = item.value("left").toString();
+        }
+    }
+    QCOMPARE(potUsed, QStringLiteral("30m"));
+    QCOMPARE(potLeft, QStringLiteral("1h30m"));
+
+    key('f');
+    // A subject cannot enter the operator's fleet view through its public go.
+    m_admin->run("fixture", {"machine", "remove", "station-02"});
+    QVERIFY(waitForWrite());
+}
+
+/// The day of the *house*, on the view that says today.
+///
+/// `session: 2h` is two hours in the household and not two hours per computer
+/// — Fleet.h says so and `omahouse house` in a terminal is where it was said.
+/// A manager that drew only the machine it is sitting at was a window showing a
+/// third of somebody's evening as the whole of it.
+///
+/// Three things at once, because separately each of them passes on a bug: the
+/// total adds the collected day in, the machine that has sent nothing today is
+/// named rather than quietly left out of the sum, and a machine that is not a
+/// manager says nothing at all.
+void TestStudio::theTodayViewAddsUpTheHouse()
+{
+    if (!root()->property("operating").toBool()) QSKIP("operator only");
+    seedTheExampleHousehold();
+    if (QTest::currentTestFailed())
+        return;
+
+    const QString who = QStringLiteral("nobody");
+    const QDate today = QDate::currentDate();
+
+    // This case's own household. An earlier case that failed before its own
+    // clean-up would otherwise leave a computer in the list, and the sum below
+    // would be about a machine this one never wrote down.
+    QString fleetError;
+    QVERIFY2(writeMachines(paths::machinesFile(), {}, &fleetError), qPrintable(fleetError));
+    QDir(paths::elsewhereDir()).removeRecursively();
+    m_house->reload();
+    settle();
+
+    // The session budget's id, out of what the verbs wrote. Not a literal: the
+    // id is the CLI's to choose and a test that hard-codes it is a test that
+    // goes green against a profile nobody has.
+    QVector<Profile> profiles;
+    QString error;
+    QVERIFY2(readProfiles(paths::profilesFile(), &profiles, &error), qPrintable(error));
+    QCOMPARE(profiles.size(), 1);
+    QString session;
+    for (const Budget &budget : profiles.first().budgets) {
+        if (budget.isSession())
+            session = budget.id;
+    }
+    QVERIFY2(!session.isEmpty(), "the fixture has no session budget to add up");
+
+    // What the fixture spent here: 70 minutes against a 2h limit with 10
+    // minutes handed over, so 2h10m of allowance and 60 minutes left *on this
+    // machine*. Read rather than assumed, so that the arithmetic below is
+    // about the numbers the window is actually holding.
+    const auto sessionRow = [&]() {
+        for (const QVariant &row : todayOf(who)) {
+            const QVariantMap map = row.toMap();
+            if (map.value(QStringLiteral("session")).toBool())
+                return map;
+        }
+        return QVariantMap();
+    };
+    QVariantMap row = sessionRow();
+    QVERIFY2(!row.isEmpty(), "the today view has no session row to add up");
+    const int hereSeconds = row.value(QStringLiteral("spentSeconds")).toInt();
+    const int allowance = row.value(QStringLiteral("allowanceSeconds")).toInt();
+    QCOMPARE(hereSeconds, 70 * 60);
+    QCOMPARE(allowance, 130 * 60);
+
+    // Before anything else: a machine that is not a manager says nothing about
+    // a house. Asserted first and against the same row the rest of this case
+    // reads, so `house` being true later is a change and not a constant.
+    QCOMPARE(row.value(QStringLiteral("house")).toBool(), false);
+
+    // Two other computers, one of which has sent a day and one of which has
+    // not. The second is the case Fleet.h and `omahouse house` both insist on
+    // saying out loud: a total quietly missing a computer is worse than none.
+    m_admin->run("fixture", {"machine", "add", "the kitchen laptop"});
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    m_admin->run("fixture", {"machine", "add", "the study"});
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+
+    Ledger theirs;
+    theirs.user = who;
+    theirs.date = today;
+    theirs.seconds.insert(session, 30 * 60);
+    const QString collected = paths::elsewhereLedgerFile(QStringLiteral("the kitchen laptop"),
+                                                         who, today);
+    QVERIFY(QDir().mkpath(QFileInfo(collected).absolutePath()));
+    QVERIFY2(writeLedger(collected, theirs, &error), qPrintable(error));
+
+    // The machines exist and one of them has a day, and the window still says
+    // nothing: what turns this on is this machine being the household's
+    // console, which is `machine.json` and not the length of `machines.json`.
+    m_house->reload();
+    settle();
+    row = sessionRow();
+    QVERIFY(!row.isEmpty());
+    QCOMPARE(row.value(QStringLiteral("house")).toBool(), false);
+
+    ThisMachine mine;
+    mine.kind = Kind::Manager;
+    mine.name = QStringLiteral("the desk");
+    mine.since = QDateTime::currentDateTime();
+    QVERIFY2(writeThisMachine(paths::thisMachineFile(), mine, &error), qPrintable(error));
+    m_house->reload();
+    settle();
+
+    row = sessionRow();
+    QVERIFY(!row.isEmpty());
+    QVERIFY2(row.value(QStringLiteral("house")).toBool(),
+             "this machine manages the household and the day is still only its own");
+    QCOMPARE(row.value(QStringLiteral("houseSpentSeconds")).toInt(), (70 + 30) * 60);
+    QCOMPARE(row.value(QStringLiteral("houseLeftSeconds")).toInt(), 30 * 60);
+    QCOMPARE(row.value(QStringLiteral("houseSpent")).toString(), QStringLiteral("1h40m"));
+    QCOMPARE(row.value(QStringLiteral("houseLeft")).toString(), QStringLiteral("30m"));
+    // What is left here is untouched. The machine goes on enforcing its own
+    // number; adding the house up is a thing the window says and not a thing
+    // this machine does differently because it was said.
+    QCOMPARE(row.value(QStringLiteral("spentSeconds")).toInt(), hereSeconds);
+    QCOMPARE(row.value(QStringLiteral("leftSeconds")).toInt(), 60 * 60);
+
+    // Every machine that contributed, named, and the one that did not, named
+    // separately. A sum whose parts cannot be read back is a number nobody can
+    // check against `omahouse house`.
+    const QString where = row.value(QStringLiteral("houseWhere")).toString();
+    QVERIFY2(where.contains(QStringLiteral("the kitchen laptop 30m")), qPrintable(where));
+    QVERIFY2(where.contains(QStringLiteral("here 1h10m")), qPrintable(where));
+    QVERIFY2(!where.contains(QStringLiteral("the study")), qPrintable(where));
+    QCOMPARE(row.value(QStringLiteral("notHeardFrom")).toString(),
+             QStringLiteral("the study"));
+
+    // And it is on screen, not only in the snapshot.
+    key('3');
+    QCOMPARE(root()->property("view").toInt(), 3);
+    QQuickItem *drawn = awaitItem("todayHouse");
+    QVERIFY2(drawn, "the today view draws no household line");
+    const QString said = drawn->property("text").toString();
+    QVERIFY2(said.contains(QStringLiteral("1h40m")), qPrintable(said));
+    QVERIFY2(said.contains(QStringLiteral("the study")), qPrintable(said));
+
+    // Put back, or every case after this one runs on a manager.
+    QVERIFY(QFile::remove(paths::thisMachineFile()));
+    m_admin->run("fixture", {"machine", "remove", "the kitchen laptop"});
+    QVERIFY(waitForWrite());
+    m_admin->run("fixture", {"machine", "remove", "the study"});
+    QVERIFY(waitForWrite());
+    QDir(paths::elsewhereDir()).removeRecursively();
+    m_house->reload();
+    settle();
+}
+
 void TestStudio::writesTheOperatorShots()
 {
     if (shotsDir().isEmpty())
@@ -1234,6 +2328,76 @@ void TestStudio::writesTheOperatorShots()
     shoot(QStringLiteral("02-operator-programs"));
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(3)));
     shoot(QStringLiteral("03-operator-today"));
+    // The machines picture uses the same local day plus an explicitly stale
+    // remote observation. A fixed timestamp keeps the generated image stable.
+    QVector<Profile> originalProfiles;
+    QString fleetError;
+    QVERIFY(readProfiles(paths::profilesFile(), &originalProfiles, &fleetError));
+    auto enrolledProfiles = originalProfiles;
+    const QString date = QDate::currentDate().toString(Qt::ISODate);
+    // The household's credit, what the other computer has spent of it, and how
+    // much of this machine's own credit is already inside the first number.
+    // `station-02` has spent 40 minutes of the session, so this machine is told
+    // `elsewhere: 2400` and works out the same balance station-02 does.
+    //
+    // The session's credit is 7800 and not 7200 because the fixture's own day
+    // has ten minutes handed over in it, and the household has folded them in.
+    // So `counted` is 600 there and zero everywhere else -- a statement saying
+    // it had counted none of them while carrying them inside `credit` is the
+    // one shape that pays a grant twice, and a fixture that held it would put
+    // that number in a picture the documentation ships.
+    const auto statement = [](int credit, int elsewhere, int counted = 0) {
+        return QJsonObject{{"credit", credit}, {"elsewhere", elsewhere},
+                           {"counted", counted}};
+    };
+    QJsonObject document{{"authority", "example"}, {"machine", "here"},
+        {"user", "nobody"}, {"date", date}, {"revision", 1},
+        {"house", QJsonObject{{"session", statement(7800, 2400, 600)},
+                              {"code", statement(2700, 0)},
+                              {"firefox", statement(3600, 0)},
+                              {"youtube.com", statement(1800, 0)}}}};
+    for (auto &profile : enrolledProfiles)
+        if (profile.user == QLatin1String("nobody")) profile.allocation = document;
+    QVERIFY(writeProfiles(paths::profilesFile(), enrolledProfiles, &fleetError));
+    Machine station; station.name = QStringLiteral("station-02");
+    station.nodeId = QStringLiteral("omk1_station02");
+    station.endpoint = QStringLiteral("station-02:8787");
+    QVERIFY(writeMachines(paths::machinesFile(), {station}, &fleetError));
+    Ledger remote;
+    remote.user = QStringLiteral("nobody"); remote.date = QDate::currentDate();
+    remote.addSeconds(QStringLiteral("session"), 2400);
+    document.insert("machine", "station-02");
+    // station-02's own statement: the same credit, its own `elsewhere`, and
+    // nothing counted from it -- the ten minutes were handed over here.
+    document.insert("house", QJsonObject{{"session", statement(7800, 4200)},
+                                         {"code", statement(2700, 1500)},
+                                         {"firefox", statement(3600, 3600)},
+                                         {"youtube.com", statement(1800, 1500)}});
+    remote.allocation = document;
+    remote.observedAt = QDateTime::fromString(QStringLiteral("2026-09-01T09:30:00"), Qt::ISODate);
+    QVERIFY(writeLedger(paths::elsewhereLedgerFile(station.name, remote.user, remote.date), remote, &fleetError));
+    m_house->reload();
+    key('f');
+    QMetaObject::invokeMethod(root(), "setFilter",
+                              Q_ARG(QVariant, QVariant(QStringLiteral("session"))));
+    ThisMachine shotManager;
+    shotManager.kind = Kind::Manager;
+    shotManager.name = QStringLiteral("the study");
+    shotManager.since = QDateTime::currentDateTimeUtc();
+    QVERIFY(writeThisMachine(paths::thisMachineFile(), shotManager, &fleetError));
+    m_house->reload();
+    shoot(QStringLiteral("31-operator-machines"));
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
+    key('u');
+    QVERIFY(awaitItem(QStringLiteral("publishSheet")));
+    shoot(QStringLiteral("32-operator-publish"));
+    key(Qt::Key_Escape);
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(5)));
+    QFile::remove(paths::thisMachineFile());
+    QMetaObject::invokeMethod(root(), "setFilter", Q_ARG(QVariant, QVariant(QString())));
+    QVERIFY(writeProfiles(paths::profilesFile(), originalProfiles, &fleetError));
+    QVERIFY(writeMachines(paths::machinesFile(), {}, &fleetError));
+    m_house->reload();
 
     // The window's own three sheets.
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
@@ -1246,13 +2410,10 @@ void TestStudio::writesTheOperatorShots()
     shoot(QStringLiteral("05-operator-commands"));
     key(Qt::Key_Escape);
 
-    // Filtered on `o`, which is a needle that also matches the profile's own
-    // name -- and it has to be, which is worth knowing before reading this
-    // picture. One `filter` is applied to all three lists at once, so a needle
-    // that misses the person under the cursor on the people list empties the
-    // people list, and then the programs list has nobody to be about and draws
-    // "nobody is under rules yet" over a household that is right there. The key
-    // sheet says `/ filter this list`; this is not that.
+    // Filtered on `o`, which narrows the programs list and nothing else: each
+    // list keeps a needle of its own now, so this one leaves the people list
+    // whole and the window still has somebody to be about. The needle is kept
+    // as it was so the picture is comparable with the ones before it.
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
     key('/');
     typeInto(QStringLiteral("filterField"), QStringLiteral("o"));
@@ -1267,6 +2428,9 @@ void TestStudio::writesTheOperatorShots()
 
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
     key('a');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    shoot(QStringLiteral("33-operator-choose-profile"));
+    key(Qt::Key_Return);
     shoot(QStringLiteral("08-operator-choose-program"));
     typeInto(QStringLiteral("pickerQuery"), QStringLiteral("fire"));
     key(Qt::Key_Return);
@@ -1275,6 +2439,8 @@ void TestStudio::writesTheOperatorShots()
 
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
     key('m');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     shoot(QStringLiteral("10-operator-minutes"));
     key(Qt::Key_Escape);
 
@@ -1284,6 +2450,8 @@ void TestStudio::writesTheOperatorShots()
 
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(3)));
     key('s');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     shoot(QStringLiteral("12-operator-day-total"));
     key(Qt::Key_Escape);
 
@@ -1298,6 +2466,35 @@ void TestStudio::writesTheOperatorShots()
     shoot(QStringLiteral("14-operator-drop-program"));
     key(Qt::Key_Escape);
 
+    // The sites, and the two questions they ask. The view carries the reach of a
+    // browser policy on its own face, once -- which is the whole of where this
+    // window says it, so the two sheets below deliberately do not repeat it.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(4)));
+    shoot(QStringLiteral("15-operator-sites"));
+
+    // The palette over it, because that is where the six site commands are read
+    // by name with their keys beside them: the visible half of the promise that
+    // nothing new arrived on only one of the two doors.
+    key(':');
+    shoot(QStringLiteral("16-operator-site-commands"));
+    key(Qt::Key_Escape);
+
+    // On `tiktok.com`, which this profile already blocks, so the field opens
+    // empty. On a row that is not blocked it opens with that row's domain in it.
+    key('b');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
+    shoot(QStringLiteral("17-operator-block-site"));
+    key(Qt::Key_Escape);
+
+    // And on `youtube.com`, which has a clock, so the field opens with it.
+    key('j');
+    key('m');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
+    shoot(QStringLiteral("18-operator-site-minutes"));
+    key(Qt::Key_Escape);
+
     // A refusal, out of the CLI and not made up here: `root` is in wheel on
     // every machine, and a profile for one of them is the program's one hard
     // refusal. It has to be a sentence on the status bar and not a silence.
@@ -1306,14 +2503,14 @@ void TestStudio::writesTheOperatorShots()
     typeInto(QStringLiteral("promptField"), QStringLiteral("root"));
     key(Qt::Key_Return);
     QVERIFY2(!waitForWrite(), "the CLI wrote a profile for root");
-    shoot(QStringLiteral("15-operator-refusal"));
+    shoot(QStringLiteral("19-operator-refusal"));
 
-    // And the three ways this window can be empty, which are three different
+    // And the four ways this window can be empty, which are four different
     // sentences and not one.
     m_admin->clear();
     emptyTheHouse();
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
-    shoot(QStringLiteral("16-operator-people-empty"));
+    shoot(QStringLiteral("20-operator-people-empty"));
 
     m_admin->run(QStringLiteral("fixture"),
                  {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("nobody"),
@@ -1322,9 +2519,11 @@ void TestStudio::writesTheOperatorShots()
     m_admin->clear();
     settle();
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
-    shoot(QStringLiteral("17-operator-programs-empty"));
+    shoot(QStringLiteral("21-operator-programs-empty"));
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(3)));
-    shoot(QStringLiteral("18-operator-today-empty"));
+    shoot(QStringLiteral("22-operator-today-empty"));
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(4)));
+    shoot(QStringLiteral("23-operator-sites-empty"));
 }
 
 void TestStudio::writesTheSubjectShots()
@@ -1339,27 +2538,98 @@ void TestStudio::writesTheSubjectShots()
     if (QTest::currentTestFailed())
         return;
 
-    // The same three views, the same household, and nothing to press.
+    // The same four views, the same household, and nothing to press.
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
-    shoot(QStringLiteral("19-subject-people"));
+    shoot(QStringLiteral("24-subject-people"));
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
-    shoot(QStringLiteral("20-subject-programs"));
+    shoot(QStringLiteral("25-subject-programs"));
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(3)));
-    shoot(QStringLiteral("21-subject-today"));
+    shoot(QStringLiteral("26-subject-today"));
+    // The sites view on this face is the one screen in the window that is
+    // addressed to the person being measured rather than about them: what does
+    // not open, what is left of the half hour, and why the number is smaller
+    // than the afternoon felt.
+    QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(4)));
+    shoot(QStringLiteral("27-subject-sites"));
 
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
     key('?');
-    shoot(QStringLiteral("22-subject-keys"));
+    shoot(QStringLiteral("28-subject-keys"));
     key(Qt::Key_Escape);
 
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
     key(':');
-    shoot(QStringLiteral("23-subject-commands"));
+    shoot(QStringLiteral("29-subject-commands"));
     key(Qt::Key_Escape);
 
     emptyTheHouse();
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(1)));
-    shoot(QStringLiteral("24-subject-nothing"));
+    shoot(QStringLiteral("30-subject-nothing"));
+}
+
+// The quietest text in the window is still text somebody has to read.
+//
+// `dim` comes from the theme's `muted`, and `muted` is not a colour for text.
+// Measured against the twenty-two themes Omarchy ships on this machine, twenty
+// put it under 4.5:1 on that theme's own background; `matte-black` is 1.48:1,
+// and `last-horizon` sets it to the same value as `selection` -- a colour whose
+// job is to sit behind a word rather than to be one. omahouse's own fallback is
+// 2.91:1, so this is our defect and not somebody else's.
+//
+// Real themes, by their real numbers, and the assertion is the ratio and never
+// a hex: a colour a household can read is a property, and an expected colour
+// would be a copy of the implementation, rewritten every time a theme moves.
+void TestStudio::everyQuietWordIsReadableOnEveryTheme()
+{
+    struct Case { const char *name, *background, *foreground, *muted; };
+    static const Case themes[] = {
+        {"matte-black",      "#121212", "#bebebe", "#333333"},  // 1.48:1
+        {"everforest",       "#2d353b", "#d3c6aa", "#475258"},  // 1.55:1
+        {"nord",             "#2e3440", "#d8dee9", "#4c566a"},  // 1.69:1
+        {"catppuccin-latte", "#eff1f5", "#4c4f69", "#acb0be"},  // 1.91:1, a light theme
+        {"tokyo-night",      "#1a1b26", "#a9b1d6", "#414868"},  // 1.91:1
+        {"last-horizon",     "#0c0b0c", "#FAFCFB", "#584e51"},  // 2.45:1, muted == selection
+        {"omahouse's own",   "#16161e", "#c0caf5", "#565f89"},  // 2.91:1
+    };
+
+    int wereUnreadable = 0;
+    for (const Case &theme : themes) {
+        const QColor background(QLatin1String(theme.background));
+        const QColor foreground(QLatin1String(theme.foreground));
+        const QColor muted(QLatin1String(theme.muted));
+        QVERIFY2(background.isValid() && foreground.isValid() && muted.isValid(),
+                 theme.name);
+
+        if (Theme::contrast(muted, background) < Theme::kReadable)
+            ++wereUnreadable;
+
+        const QColor quiet = Theme::quietOn(muted, background, foreground);
+        const qreal given = Theme::contrast(quiet, background);
+        QVERIFY2(given >= Theme::kReadable,
+                 qPrintable(QStringLiteral("%1: the quietest word is %2:1 on its "
+                                           "own background")
+                                    .arg(QLatin1String(theme.name))
+                                    .arg(given, 0, 'f', 2)));
+
+        // And it is still the quietest thing on the screen.
+        // Strictly quieter, and not merely no louder: a floor that answered
+        // `foreground` for everything would satisfy the line above and would
+        // have taken the whole distinction away.
+        QVERIFY2(Theme::contrast(quiet, background)
+                         < Theme::contrast(foreground, background),
+                 qPrintable(QStringLiteral("%1: dim is the foreground, so nothing "
+                                           "on this screen is quiet any more")
+                                    .arg(QLatin1String(theme.name))));
+    }
+
+    // Every theme passing because every theme was already fine would be a case
+    // that never reaches the floor it exists to measure.
+    QCOMPARE(wereUnreadable, int(std::size(themes)));
+
+    // And a theme that asks for something readable is left exactly alone.
+    const QColor plain(QStringLiteral("#c0caf5"));
+    const QColor dark(QStringLiteral("#16161e"));
+    QCOMPARE(Theme::quietOn(plain, dark, plain), plain);
 }
 
 QTEST_MAIN(TestStudio)

@@ -31,18 +31,32 @@ INCLUDEPATH += $$PWD/../core
 
 HEADERS += \
     Blocked.h \
+    Chromium.h \
+    Day.h \
     Enforce.h \
+    FocusFile.h \
+    FurnitureFile.h \
     Notify.h \
+    Omakure.h \
     Paths.h \
+    PublicationStore.h \
+    Presence.h \
     Proc.h \
     Users.h \
     Watch.h
 
 SOURCES += \
     Blocked.cpp \
+    Chromium.cpp \
+    Day.cpp \
     Enforce.cpp \
+    FocusFile.cpp \
+    FurnitureFile.cpp \
     Notify.cpp \
+    Omakure.cpp \
     Paths.cpp \
+    PublicationStore.cpp \
+    Presence.cpp \
     Proc.cpp \
     Users.cpp \
     Watch.cpp

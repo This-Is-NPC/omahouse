@@ -53,6 +53,28 @@ public:
     QColor line() const;
     QColor dim() const;
 
+    /// The WCAG contrast between two colours, 1.0 to 21.0.
+    ///
+    /// Public because the thing worth testing about `dim()` is a number and not
+    /// a colour: a case that compared it to an expected hex would be a case
+    /// rewritten every time a theme moves, proving nothing about whether
+    /// anybody can read the screen.
+    static qreal contrast(const QColor &a, const QColor &b);
+
+    /// The least contrast a word is allowed to have against what is behind it.
+    /// WCAG AA for body text.
+    static constexpr qreal kReadable = 4.5;
+
+    /// The quietest colour on the way from `muted` to `foreground` that can
+    /// still be read on `background`.
+    ///
+    /// A free function of three colours, so the property worth having -- that
+    /// nothing in this window is written in a colour nobody can read -- is
+    /// checkable against any theme at all without a window, a file or a
+    /// desktop.
+    static QColor quietOn(const QColor &muted, const QColor &background,
+                          const QColor &foreground);
+
     QString fontFamily() const { return QStringLiteral("monospace"); }
     Q_INVOKABLE QColor fill(const QColor &role, qreal alpha) const;
 

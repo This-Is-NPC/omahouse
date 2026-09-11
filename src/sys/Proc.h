@@ -76,6 +76,24 @@ public:
     /// is a user who is not logged in, and there is nothing to count for them.
     bool hasSession(uid_t uid) const;
 
+    /// Every account with a session on this machine right now, by uid.
+    ///
+    /// The other direction from everything else here, and it exists for one
+    /// reason: a profile that names no account cannot be found by asking about
+    /// an account. `watch` goes from profiles to accounts -- a profile, its
+    /// user, its uid -- and a fallback has no user to start from, so the cycle
+    /// has to be able to ask the machine who is sitting at it.
+    ///
+    /// Read from the cgroup tree and not from `/etc/passwd`, deliberately. The
+    /// question is who is *here*, not who could be: an account that has never
+    /// logged in has nothing to count and nothing to close, and enumerating
+    /// every human on the machine would mean a minimum-uid rule, which is a
+    /// guess about somebody else's naming.
+    ///
+    /// Sorted, so a cycle's answer does not depend on the order a directory
+    /// happened to be read in.
+    QVector<uid_t> accountsWithSessions() const;
+
     /// Every scope under `app.slice`, recursively -- they sit under
     /// `app-graphical.slice` when uwsm launched them and directly under
     /// `app.slice` when a `.desktop` did.

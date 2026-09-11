@@ -14,3 +14,16 @@ __pycache__/
 
 # Working notes, drafts and anything not meant for a reader of this repository.
 .temp/
+
+# The extension's signing key, and the signed archive it makes.
+#
+# There is no longer a key this repository could leak: the meter is signed on the
+# machine it is installed on, by `packaging/omahouse-meter-pack` from
+# `post_install`, with a key that lives at /etc/omahouse/meter/key.pem and dies
+# with `pacman -R` -- docs/design.md §5.2, "The signing key, and why there is not
+# one". These two lines stay anyway, because the failure they guard against is
+# silent and the cost of keeping them is nothing: a key committed once is a key
+# somebody else can sign a force-installed extension with, on every machine that
+# has the policy.
+*.pem
+*.crx

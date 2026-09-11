@@ -1,8 +1,10 @@
 #pragma once
 
 #include "Enforce.h"
+#include "FocusFile.h"
 #include "Notify.h"
 #include "Policy.h"
+#include "Presence.h"
 #include "Proc.h"
 
 #include <QDateTime>
@@ -73,15 +75,25 @@ struct Done {
         Unblock,
         /// `loginctl terminate-user`.
         EndSession,
+        /// The domain written into the browser's `URLBlocklist`, because a site
+        /// budget ran out. Its own word and not `Block`: one of them is a name
+        /// in a file PAM reads and the other is a domain in a file Chromium
+        /// reads, and a journal that called them the same thing would be a
+        /// journal that could not tell an evening ending from a site closing.
+        BlockSite,
+        /// And out of it again, by the same path and for the same four reasons.
+        UnblockSite,
     };
 
     What what = What::Terminate;
-    /// The decision this came of. Absent for `Unblock`, which is nobody's
-    /// decision: it is the block no longer standing.
+    /// The decision this came of. Absent for `Unblock` and `UnblockSite`, which
+    /// are nobody's decision: they are the block no longer standing.
     Decision decision;
     /// The id of the scope, where there is one, and its unit either way.
     QString app;
     QString unit;
+    /// The domain, for `BlockSite` and `UnblockSite`. Empty otherwise.
+    QString site;
     bool carriedOut = false;
     /// Why it was not done, when it was not. A refusal from `Enforce.h` and a
     /// failure of the act itself both land here, and the sentence says which.
@@ -113,6 +125,30 @@ struct Watched {
     bool account = false;
     bool enabled = false;
     bool session = false;
+    /// Whether anybody is in front of the machine, and why -- `Presence.h`.
+    ///
+    /// Measured and reported, and it decides nothing. It does not change what an
+    /// app is billed: docs/design.md §5 bills running time, that is published
+    /// behaviour, and a day counted differently because a screen went dark is
+    /// not this step's to hand out. The seconds land in the day's ledger beside
+    /// the budgets, and `status` says the state out loud, and that is all -- what
+    /// will use it is the time per site.
+    Presence presence;
+    /// The site the browser last said was in the front tab, or empty.
+    ///
+    /// Read out of the file the native messaging host writes -- docs/design.md
+    /// §5.2 -- and carried here whether or not it was billed, because the line
+    /// that says `youtube.com, not counted: screen-off` is the whole point of
+    /// crossing the two. A browser reporting a site into an empty room is
+    /// exactly what the browser spike measured, and the journal is
+    /// where somebody can see that omahouse knows the difference.
+    QString site;
+    /// Whether that site really gained the tick.
+    ///
+    /// False for a site reported with nobody in front of the screen, which is
+    /// the crossing that keeps the number honest, and false for a cycle with no
+    /// site at all.
+    bool siteCounted = false;
     /// The ids of the live scopes, sorted and without repeats. Only the ones
     /// that have an id: a scope nothing could name has no word to put in a
     /// sentence, and an empty string in this list would print as a gap between
@@ -146,6 +182,21 @@ struct Watched {
     /// what left them without one: a loop that stopped asking here would take
     /// the name back out on the very next cycle and let them straight back in.
     QVector<Decision> logouts;
+    /// The `Block` decisions that stand right now: the sites whose budget is out
+    /// of time today.
+    ///
+    /// Re-derived every cycle from today's ledger, exactly as `logouts` is, and
+    /// for exactly the same payoff: nothing has to remember to let a site back
+    /// through. The turn of the day resets the balance, so no site is out of
+    /// time, so no domain is written -- and the same goes for a grant, for
+    /// `enforce --off`, and for the profile being removed. None of those verbs
+    /// has to know the browser's policy file exists.
+    ///
+    /// Asked even of a user with no session, for a weaker version of the reason
+    /// `logouts` is: the block belongs to the day and not to whether anybody is
+    /// at the keyboard, and a browser opened by somebody else on this machine is
+    /// reading the same one file -- docs/design.md §11.
+    QVector<Decision> blocks;
     /// Whether the name really is in the file, after the cycle reconciled it.
     /// The session is only ended once this is true -- the lock goes on the door
     /// before anybody is put outside it.
@@ -172,6 +223,19 @@ struct Cycle {
     /// but it is the one thing about it worth saying out loud.
     QStringList blocked;
     QString blockedError;
+    /// The domains in the browser's `URLBlocklist` because a budget ran out,
+    /// after this cycle reconciled the policy file, and a sentence when the file
+    /// could not be written or the run was not allowed to touch it.
+    ///
+    /// The sites only. What the profiles' own web rules put in that file is
+    /// `chromiumPolicyFor`'s business and does not change from one cycle to the
+    /// next; what is worth reporting here is the part that is about today.
+    QStringList blockedSites;
+    QString blockedSitesError;
+    /// The one look at the seat and the screens this cycle took, shared by every
+    /// user in it. One machine, one seat, one set of monitors: asking per profile
+    /// would be paying per profile for an answer that does not vary by profile.
+    SeatReading seat;
 };
 
 class Watch {
@@ -189,8 +253,13 @@ public:
 
     /// None of the pointers is owned. `enforcer` may be null, and then nothing
     /// is ever closed and nobody is ever logged out -- which is what a caller
-    /// that only wants the accounting hands in.
-    Watch(const Proc *proc, Notifier *notifier, Enforcer *enforcer, const Options &options);
+    /// that only wants the accounting hands in. `presence` may be null too, and
+    /// then every user's presence is `Unknown` and nothing about it is written:
+    /// a loop that was never given eyes must say it cannot see, not that nobody
+    /// is there. `focus` may be null, and then no day gains a site -- which is
+    /// every machine with no browser extension on it, and is not a failure.
+    Watch(const Proc *proc, Notifier *notifier, Enforcer *enforcer, PresenceSource *presence,
+          FocusSource *focus, const Options &options);
 
     const Options &options() const { return m_options; }
 
@@ -201,21 +270,35 @@ public:
     /// operator be able to hand over ten minutes with the game still running,
     /// and a daemon holding a copy of the rules from when it started cannot
     /// honour that.
-    Cycle tick(const QVector<Profile> &profiles, const QDateTime &now);
+    /// `alsoFurniture` is what this machine starts for itself beyond the
+    /// built-in list, read fresh by the caller every cycle -- `src/sys/Furniture.h`
+    /// says why it is read there and not held here.
+    Cycle tick(const QVector<Profile> &profiles, const QDateTime &now,
+               const QStringList &alsoFurniture = QStringList());
 
 private:
-    void observe(const Profile &profile, Watched *watched, const QDateTime &now);
+    void observe(const Profile &profile, Watched *watched, const SeatReading &seat,
+                 const QDateTime &now, const QStringList &alsoFurniture);
     /// The sequence of docs/design.md §5 for one scope, spread across ticks: SIGTERM
     /// the first time, `cgroup.kill` once the window has gone by.
     void closeScope(const Profile &profile, Watched *watched, const Decision &decision,
                     const AppScope &scope, const QDateTime &now);
     void reconcileBlocked(Cycle *cycle);
+    /// The browser's managed policy, made to say what the profiles say **and**
+    /// what today says -- docs/design.md §11 and §5.2 joined.
+    ///
+    /// The same shape as `reconcileBlocked`, and it is the same shape on
+    /// purpose: the content of the file is the answer and never a change to it,
+    /// so no verb has to remember to take a site back out.
+    void reconcileWebPolicy(const QVector<Profile> &profiles, Cycle *cycle);
     void endSessions(Cycle *cycle);
     bool worthSaying(const Watched &watched);
 
     const Proc *m_proc;
     Notifier *m_notifier;
     Enforcer *m_enforcer;
+    PresenceSource *m_presence;
+    FocusSource *m_focus;
     Options m_options;
     /// What each user's cycle looked like last time, so that a cycle that says
     /// the same thing says nothing at all.
