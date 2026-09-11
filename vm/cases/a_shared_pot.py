@@ -1,6 +1,6 @@
 """Two real machines spend one pot, asked for with a verb and shared by the scheduler.
 
-The case `docs/not-built/profiles-across-a-network.md` §3 exists for, and the
+The case `docs/design.md` §3 exists for, and the
 one nothing could run until a verb could write `resets`: a credit that belongs
 to the person, spent wherever they sit, with the turn of the date giving none
 of it back.

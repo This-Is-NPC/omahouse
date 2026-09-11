@@ -20,7 +20,7 @@ def run(vm):
     Failed = vm.Failed
     # A clean slate on the notification daemon, so what is read afterwards is
     # what this case caused.
-    vm.julia("makoctl dismiss --all", check=False)
+    vm.kid("makoctl dismiss --all", check=False)
 
     app = "omahouse-polite"
     unit = vm.launch(app)
@@ -43,10 +43,10 @@ def run(vm):
     # The mark of `warnAt: [1]` is crossed on the first tick, because there are
     # seconds left of a budget two minutes wide.
     def warned():
-        return "left" in vm.julia("makoctl list", check=False)[1]
+        return "left" in vm.kid("makoctl list", check=False)[1]
 
     vm.wait_for(warned, patience, "the warning to reach the session")
-    listed = vm.julia("makoctl list", check=False)[1]
+    listed = vm.kid("makoctl list", check=False)[1]
     if unit not in vm.scopes():
         raise Failed(f"{unit} was already closed when the warning arrived:\n{listed}")
 
@@ -62,7 +62,7 @@ def run(vm):
     seen = {}
 
     def told_the_window():
-        rc, out = vm.julia(
+        rc, out = vm.kid(
             "makoctl list; echo '--- scopes ---'; "
             f"find {vm.app_slice} -maxdepth 2 -name '*.scope' -printf '%p\n' "
             "2>/dev/null || true", check=False)
@@ -94,7 +94,7 @@ def run(vm):
     for line in journal.splitlines():
         for what, mark in (("grace", "grace: Time is up"), ("term", "SIGTERM into")):
             if mark in line and what not in said:
-                stamp = line.split(" julia:")[0].rsplit(" ", 1)[-1]
+                stamp = line.split(" kid:")[0].rsplit(" ", 1)[-1]
                 said[what] = stamp
     if len(said) != 2:
         raise Failed("the journal does not carry both moments of the window:\n"

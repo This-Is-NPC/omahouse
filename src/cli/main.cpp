@@ -64,8 +64,8 @@ namespace {
 //
 // The split between 1 and 2 is the one `omafiles` draws: a file that is there
 // and will not parse is a failure, and an account or a profile that does not
-// exist is an answer. A script that asks `omahouse profile show julia` to find
-// out whether julia has a profile has to be able to tell those apart.
+// exist is an answer. A script that asks `omahouse profile show kid` to find
+// out whether kid has a profile has to be able to tell those apart.
 constexpr int kOk = 0;
 constexpr int kUsage = 1;
 constexpr int kMissing = 2;
@@ -87,12 +87,12 @@ struct Globals {
 // asked for.
 //
 // Parsed in one place and not per verb, because the word after an option that
-// takes one is that option's value and not a positional -- `--name Júlia` is one
+// takes one is that option's value and not a positional -- `--name Kid` is one
 // thing -- and a verb that has to know that before it can find its own user
 // argument is a verb that has to parse the whole line anyway.
 //
 // `given` is what keeps an option from being quietly ignored by a verb that has
-// no use for it: `omahouse deny julia code --limit 45m` reads as a limit
+// no use for it: `omahouse deny kid code --limit 45m` reads as a limit
 // somebody asked for and did not get, so it is a usage error rather than a
 // silently dropped word.
 struct Options {
@@ -224,7 +224,7 @@ bool envFlag(const char *name)
 
 /// Splits the arguments into the options they contain and everything else.
 ///
-/// `--name Júlia` and `--name=Júlia` are the same thing, because both are typed.
+/// `--name Kid` and `--name=Kid` are the same thing, because both are typed.
 /// An option with no value left on the line is a usage error naming what it
 /// wanted, rather than an empty string that would go on to mean "no name".
 bool parseOptions(const QStringList &args, Options *options, QStringList *positionals)
@@ -236,7 +236,7 @@ bool parseOptions(const QStringList &args, Options *options, QStringList *positi
     };
     static const Value values[] = {
         {"--since", &Options::since, "a date like 2026-09-01"},
-        {"--name", &Options::name, "a name, like \"Júlia\""},
+        {"--name", &Options::name, "a name, like \"Kid\""},
         {"--as", &Options::asName, "what to call this computer, like \"the study\""},
         {"--limit", &Options::limit, "a length of time, like 45m"},
         {"--session", &Options::session, "a length of time, like 2h"},
@@ -3038,7 +3038,7 @@ void refreshWebPolicy(const QString &verb, const QVector<Profile> &profiles)
     // An unchanged decision is not written again: this file is read by every
     // Chromium that starts, and rewriting it for a verb that had nothing to do
     // with the web would be a modification time that means nothing. Asked first,
-    // and not after the refusal below, so that `omahouse allow julia code` in a
+    // and not after the refusal below, so that `omahouse allow kid code` in a
     // tree of its own is silent instead of explaining a browser it was never
     // going to touch.
     if (chromiumPolicyIsAlready(path, policy))
@@ -3882,7 +3882,7 @@ int cmdRule(const Globals &g, const QString &verb, const QStringList &positional
 // a scope id would be, and one extra switch that has no counterpart: incognito.
 //
 // The verbs are `block` and `allow` rather than `deny` and `allow` on purpose.
-// `omahouse deny julia chromium` and `omahouse web block julia youtube.com` are
+// `omahouse deny kid chromium` and `omahouse web block kid youtube.com` are
 // different enough acts that they should not be one word: the first takes a
 // program off somebody's list, the second changes what every browser on the
 // machine will open.
@@ -4112,7 +4112,7 @@ int cmdWebIncognito(const Globals &g, const QStringList &positionals, const Opti
     if (options.deny)
         sayTheReach();
 
-    // An incognito window is not extra screen time -- docs/the-browser-half.md
+    // An incognito window is not extra screen time -- docs/design.md
     // §4.3. It is the same browser in the same scope under the same session
     // budget, so what it buys is anonymity about which site and not a minute of
     // anybody's day. Said here because it is the reason `--allow` is a
@@ -4151,7 +4151,7 @@ int cmdWeb(const Globals &g, const QStringList &positionals, const Options &opti
             return kUsage;
         return cmdWebIncognito(g, positionals.mid(1), options);
     }
-    // Not a subcommand, so it is a user -- `omahouse web julia --only-listed`.
+    // Not a subcommand, so it is a user -- `omahouse web kid --only-listed`.
     // The three words above are reserved by being tried first, which is the
     // whole of the ambiguity: an account really named `block` cannot be reached
     // this way, and `profile default` is the shape that already had this
@@ -5886,7 +5886,7 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
 // what a budget is, does not accumulate, and never touches the ledger -- which
 // it could not write anyway, since /var/lib/omahouse is root's.
 //
-// `docs/the-browser-half.md` §8.1 reached instead for a socket in the root
+// `docs/design.md` §8.1 reached instead for a socket in the root
 // daemon, and called the framing and the second writer's worth of validation
 // "the largest single piece of unplanned work on this page". This is what
 // replaced it. The accumulation stays in `watch`, which is already root, already
@@ -5894,7 +5894,7 @@ QJsonObject cycleToJson(const Cycle &cycle, const Profiles &profiles)
 // screen; there is no new endpoint and nothing listening.
 //
 // It revalidates what the extension sent rather than trusting it -- the one
-// thing `docs/the-browser-half.md` §2 says is worth stealing from the prior art:
+// thing `docs/design.md` §2 says is worth stealing from the prior art:
 // a compromised extension must not be able to push a whole URL through the wire
 // by putting one in the field. Anything that is not a plausible registrable
 // domain is written as `-`, which is the same thing the browser says when there
@@ -6396,7 +6396,7 @@ Reading, and no privilege needed:
 
 Writing, and root needed — the studio gets there by pkexec:
   profile add <user>       a new profile: observing, and allowing everything
-              [--name "Júlia"] [--create-user]
+              [--name "Kid"] [--create-user]
   day <user> [--date YYYY-MM-DD]
                            what this computer spent, as a document another one
                            can read. Exit 2 when there is no such day
@@ -6423,7 +6423,7 @@ Writing, and root needed — the studio gets there by pkexec:
                            bearer that opens it. Two lines, for the thing that
                            fetches its days
   collect <machine> <user> take in a day another computer spent, on stdin:
-                           omahouse day julia | ssh study omahouse collect …
+                           omahouse day kid | ssh study omahouse collect …
   profile add '*'          rules for whoever sits here without their own.
                            Quote it: bare, the shell eats it
   profile publish <user> --to <machine>... | --all

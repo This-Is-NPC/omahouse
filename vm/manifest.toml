@@ -25,7 +25,7 @@ key = "~/.ssh/id_vms"
 # an administrator would.
 operator = "arch"
 # The account under rules. No privilege, autologin on tty1, Hyprland under uwsm.
-subject = "julia"
+subject = "kid"
 uid = 1001
 # Disposable. Every case resets it to a machine with no rules on it and nobody
 # shut out, and that is what makes it safe to close processes and end logins on.
@@ -46,9 +46,9 @@ disk = "/var/lib/libvirt/images/omahouse-dad.qcow2"
 hostname = "omahouse-dad"
 key = "~/.ssh/id_vms"
 operator = "arch"
-# It inherited the clone's `julia`, who has no session and no rules here. The
+# It inherited the clone's `kid`, who has no session and no rules here. The
 # field is required by the harness and names nobody who matters on this machine.
-subject = "julia"
+subject = "kid"
 uid = 1001
 disposable = true
 
@@ -95,7 +95,7 @@ disposable = true
 # autologin on tty1, a `bochs` framebuffer the VNC can see, and a real Chromium.
 # The browser case needs all three and the `poc` has none of them.
 #
-# **It is not disposable.** The julia profile on it is the one
+# **It is not disposable.** The kid profile on it is the one
 # `vm/OMARCHY-VM.md` §4 describes and the one the owner demonstrates from, so
 # nothing here empties /var/lib/omahouse or rewrites profiles.json: the harness
 # takes a copy of the state before it starts and puts it back byte for byte
@@ -106,12 +106,12 @@ disk = "/var/lib/libvirt/images/omahouse-omarchy.qcow2"
 hostname = "omahouse-omarchy"
 key = "~/.ssh/id_vms"
 operator = "howl"
-subject = "julia"
+subject = "kid"
 uid = 1001
 # The password SDDM is typed at through the virtual keyboard. It is a
 # demonstration VM and this is written down in `.temp/docs/vm-runbook.md`
 # already; there is no secret here to keep.
-password = "julia"
+password = "kid"
 # The operator's, for the walkthrough that films `docs/screens.md` §1 to §7 --
 # those are about the face somebody in wheel gets, and the subject's face has
 # nothing to press. Written down here for the same reason the one above is:

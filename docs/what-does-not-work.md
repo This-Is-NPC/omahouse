@@ -6,9 +6,7 @@ nothing here has a fix in omahouse today.
 
 The first two were measured on a real Omarchy 4.0.2, driven by keyboard and
 captured frame by frame; the pictures come from that run, where the account
-under rules was called `julia`. The rest are in the code as written, and the
-last one was found by running the shipped binary while this page was being
-assembled.
+under rules was called `kid`. The rest are in the code as written.
 
 ---
 
@@ -69,23 +67,6 @@ What the status bar does show is the other number, the processes in
 `session.slice`, which is a different fact.
 
 **What to do in the meantime.** Use `omahouse status` for that number.
-
-## 5. The key that opens more time today lands in the field
-
-**What happens.** Pressing `+` on a program opens the *more time today* sheet
-and the same keystroke arrives in the field it opened, so the field starts with
-a lone `+` in it and `ok` is born greyed out:
-
-![The "More time today for foot" dialogue with a lone + in the field and the "Enter ok" button greyed out.](../vm/shots/39-studio-mais-tempo-hoje.png)
-
-**What to do in the meantime.** Clear the `+` before typing the number.
-
-## 6. In a narrow window the header overlaps the tabs
-
-**What happens.** The header draws over the subtitle and the tabs, and the
-result is unreadable.
-
-**What to do in the meantime.** Maximise the window.
 
 ---
 

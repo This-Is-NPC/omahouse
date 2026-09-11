@@ -9,8 +9,8 @@ when the credit does.
 ![the day, live](docs/img/03-operator-today.png)
 ![the sites, and the minutes on them](docs/img/15-operator-sites.png)
 
-A household can share one daily allowance across computers using
-[exclusive portions and an Omakure Battery schedule](docs/how-to-schedule-household.md).
+A household can share one daily allowance across paired computers through a
+[shared balance and an Omakure Battery schedule](docs/how-to-schedule-household.md).
 The operator's window shows each machine with **f**. Omakure runs automation;
 omahouse owns the credit and local enforcement. One-machine use needs no
 scheduler, and Omastore remains an independent application.
@@ -156,7 +156,7 @@ logout, the counting and the daemon.
 ## What is broken
 
 A sample. None of them has a fix here yet, and
-[what does not work yet](docs/what-does-not-work.md) is the whole list — six of
+[what does not work yet](docs/what-does-not-work.md) is the whole list — four
 them, each with what to do in the meantime.
 
 - The idle lock takes the screen, and the last warnings go out behind it.

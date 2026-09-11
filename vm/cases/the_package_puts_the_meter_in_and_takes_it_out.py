@@ -19,7 +19,7 @@ The browser spike proved a `.crx` we signed installs off-store under
 on a machine somebody had prepared. What was never measured is whether a key born
 minutes earlier, whose id nothing in the tree can name, is different in any way
 Chromium can see. The equality asserted below is the whole answer: the directory
-Chromium creates in julia's profile is named with the id derived from the key in
+Chromium creates in kid's profile is named with the id derived from the key in
 `/etc/omahouse/meter/key.pem`, and the host runs.
 
 **And removal is half the case, not an afterthought.** A machine with no omahouse
@@ -107,9 +107,9 @@ PUT_ON_THE_MACHINE = [
 
 def run(vm):
     Failed = vm.Failed
-    julia = vm.subject
+    kid = vm.subject
     seconds = vm.pace["site_seconds"]
-    profile = f"/home/{julia}/.config/chromium/Default"
+    profile = f"/home/{kid}/.config/chromium/Default"
 
     def there(path):
         return vm.root(f"test -e {path}", check=False)[0] == 0
@@ -184,9 +184,9 @@ def run(vm):
     # The whole chain in one fact: the policy was read, the `file:` update URL was
     # fetched, the `.crx` verified against an id derived from a key made during a
     # pacman transaction, the extension installed, its service worker started, and
-    # Chromium spawned the shim as julia.
+    # Chromium spawned the shim as kid.
     #
-    # Asked as `pgrep -u julia -x omahouse` and **never** as
+    # Asked as `pgrep -u kid -x omahouse` and **never** as
     # `pgrep -f 'omahouse meter'`. The first version of this case used the second
     # and it is an assertion that cannot fail: the harness reaches the guest over
     # ssh, sshd runs the command inside a shell, and that shell's own command line
@@ -195,14 +195,14 @@ def run(vm):
     # removal, reporting a host that had never existed. `-x` matches the process
     # name and `-u` the account, and neither can be satisfied by the question.
     def host_pids():
-        return vm.root(f"pgrep -u {julia} -x omahouse || true", check=False)[1].split()
+        return vm.root(f"pgrep -u {kid} -x omahouse || true", check=False)[1].split()
 
     vm.wait_for(lambda: bool(host_pids()), vm.pace["patience_seconds"],
                 "the meter's native messaging host to be spawned by the browser")
     running = vm.root(f"ps -o user=,args= -p {' -p '.join(host_pids())}",
                       check=False)[1].strip()
-    if julia not in running or "meter" not in running:
-        raise Failed(f"what is running as {julia} is not the meter: {running!r}")
+    if kid not in running or "meter" not in running:
+        raise Failed(f"what is running as {kid} is not the meter: {running!r}")
     print(f"      the host Chromium spawned     {running}")
 
     # The directory Chromium made for it, named with the id it worked out of the
@@ -216,7 +216,7 @@ def run(vm):
 
     # -- 3. and the site is counted -------------------------------------------
 
-    day = f"/var/lib/omahouse/{julia}/{vm.today()}.json"
+    day = f"/var/lib/omahouse/{kid}/{vm.today()}.json"
     go("about:blank")
     time.sleep(3)
     vm.stop_daemon()
@@ -224,7 +224,7 @@ def run(vm):
     # One budget covers both of Chromium's ids -- `vm/provision-omarchy.sh`
     # writes it with one `allow` -- so there is one to hand more of.
     for what in ("--session 180m", "--budget chromium=180m"):
-        vm.root(f"omahouse grant {julia} {what}")
+        vm.root(f"omahouse grant {kid} {what}")
     vm.start_daemon()
     time.sleep(1)
 
@@ -243,7 +243,7 @@ def run(vm):
     if counted < watched - 6:
         raise Failed(f"{name} was in front for {watched:.0f}s and the day counted "
                      f"{counted}s of it. The whole day: {written.get('sites')}")
-    report = vm.root(f"omahouse report {julia}")
+    report = vm.root(f"omahouse report {kid}")
     print(f"      {name} was in front for {watched:.0f}s and the report says {counted}s")
     print("      " + report.replace("\n", "\n      "))
 
@@ -315,7 +315,7 @@ def run(vm):
     # The host the browser had spawned, ended by the removal itself and not by
     # anything this case did. Chromium was still running at that moment -- checked
     # before the pid is -- so the pipe was still open and nothing but `post_remove`
-    # could have closed it. Without that kill it is julia's process, holding a
+    # could have closed it. Without that kill it is kid's process, holding a
     # deleted binary, appending sites she visits to a file the same `post_remove`
     # had just deleted, on a machine with nothing left on it to explain either.
     if not vm.pid_of("chromium"):
@@ -331,7 +331,7 @@ def run(vm):
     # A force-installed extension is removed when the policy stops naming it; if
     # this ever changed, a household would be left with an extension the child
     # cannot remove and the parent has no program to take off.
-    vm.root(f"pkill -u {julia} -x chromium || true", check=False)
+    vm.root(f"pkill -u {kid} -x chromium || true", check=False)
     time.sleep(3)
     vm.press("125:1 42:1 48:1 48:0 42:0 125:0")
     vm.wait_for(lambda: bool(vm.pid_of("chromium")), vm.pace["patience_seconds"],
@@ -340,18 +340,18 @@ def run(vm):
     still = vm.root(f"ls {profile}/Extensions 2>/dev/null || true", check=False)[1].split()
     left_hosting = host_pids()
     print(f"      Chromium's extensions now     {still or '(none)'}")
-    print(f"      hosts as {julia} now        {left_hosting or '(none)'}")
+    print(f"      hosts as {kid} now        {left_hosting or '(none)'}")
     if identifier in still:
-        raise Failed(f"{identifier} is still installed in {julia}'s profile after the "
+        raise Failed(f"{identifier} is still installed in {kid}'s profile after the "
                      "policy that forced it was removed")
     if left_hosting:
         raise Failed(f"something is still running as the meter's host: {left_hosting}\n"
-                     "      It is julia's process, it holds a deleted binary, and it "
+                     "      It is kid's process, it holds a deleted binary, and it "
                      "goes on writing the file that names the sites she visits.")
 
     # -- 6. and the machine put back, which prices the reinstall ---------------
 
-    vm.root(f"pkill -u {julia} -x chromium || true", check=False)
+    vm.root(f"pkill -u {kid} -x chromium || true", check=False)
     vm.install_the_package()
     again = vm.root("cat /etc/omahouse/meter/id").strip()
     if not again or len(again) != 32:

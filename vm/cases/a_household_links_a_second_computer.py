@@ -60,7 +60,7 @@ def walked(vm, dad):
     # And no rules on it yet. `reset()` reaches the machine a run is *about*
     # and reaches a borrowed one only on the way out, so a case that borrowed
     # this machine earlier can still have a profile on it -- and step 3 would
-    # then fail on `julia already has a profile`, which is the right refusal to
+    # then fail on `kid already has a profile`, which is the right refusal to
     # the wrong question.
     dad.root("rm -f /etc/omahouse/profiles.json /etc/omahouse/machines.json "
              "/etc/omahouse/machine.json /etc/omahouse/machine-tokens.json")

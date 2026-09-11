@@ -311,7 +311,7 @@ shapes, and `--resets daily` is what a budget means when it says nothing — so 
 is never written into the file, a new budget that says nothing is daily, and a
 budget that is already there keeps what it was, the way it keeps what it does
 when it runs out. The rest of what a pot is across a household is written down
-in [`not-built/profiles-across-a-network.md`](not-built/profiles-across-a-network.md).
+in [`design.md`](design.md).
 
 A profile whose `user` is `*` applies to anybody who logs in without one of
 their own — `Profile::anybody`. It is how a machine carries rules for whoever
@@ -470,7 +470,7 @@ which is the one number in this program that a dark screen does change.
 
 ### 5.2 Time per site, and the budget on it
 
-`the-browser-half.md` proposed a Chromium extension that reports the site in
+`design.md` proposed a Chromium extension that reports the site in
 the front tab, and the browser spike measured its whole chain on real
 Omarchy. This is what shipped of it. It counts the number, and — since §5.3 — a
 number that runs out acts.
@@ -495,7 +495,7 @@ omahouse watch        reads that file every cycle, crosses it with §5.1's
                       presence, and debits the tick to the site in the ledger.
 ```
 
-**Why a file and not a socket.** `the-browser-half.md` §8.1 called this "the
+**Why a file and not a socket.** `design.md` §8.1 called this "the
 largest single piece of unplanned work": the host is spawned by the browser as
 the child (the browser spike measured uid 1001, in her session, with
 her bus in the environment) and the ledger is root's, so the argument there reached for
@@ -601,7 +601,7 @@ close every one of them when it ran out.
 
 ### The signing key, and why there is not one
 
-`the-browser-half.md` §6.3 named the custody of the key as a new problem and did
+`design.md` §6.3 named the custody of the key as a new problem and did
 not decide it. It is decided here: **there is no key to keep, because the key is
 made on the machine during `pacman -U` and dies with `pacman -R`.**
 
@@ -616,7 +616,7 @@ what that key produced. `packaging/omahouse-meter-pack` does exactly that, from
 `post_install`, and is the whole of the mechanism.
 
 **What it buys.** Nothing to hold, nothing to rotate, nothing to lose, nothing
-whose leak reaches a second machine. The key that signs julia's meter cannot sign
+whose leak reaches a second machine. The key that signs kid's meter cannot sign
 anything her neighbour's Chromium would accept, and anybody who can read it is
 already root on the only machine it means anything on.
 
@@ -1050,8 +1050,8 @@ about a site. `omahouse web kid --only-listed` is `profile default --deny`
 said in the words §8 asks the studio to use. There is no second model here, and
 that is the point: **site filtering is a `Rule` with a different selector**, and
 `§2`'s three nouns carried it without a structural change, which is what
-[`not-built/network-control-per-account.md`](not-built/network-control-per-account.md) and
-[`the-browser-half.md`](the-browser-half.md) both predicted.
+[`design.md`](design.md) and
+[`design.md`](design.md) both predicted.
 
 A `web` that says nothing is not written into the file at all. That keeps *never
 had web rules* and *had them taken away* one state, which is what the whole of
@@ -1062,7 +1062,7 @@ shows Chromium's page, which says an administrator blocked it and nothing about
 who or why, and omahouse never learns the attempt happened at all: policy blocks
 inside the browser and reports nothing out. So there is no message to carry, and
 no count of tries for the day's report either. Both wait on the extension of
-[`the-browser-half.md`](the-browser-half.md), and until it exists this half
+[`design.md`](design.md), and until it exists this half
 blocks well and explains nothing.
 
 ### The mechanism is one Chromium managed policy
@@ -1097,12 +1097,12 @@ tie and that would turn the block into its opposite.
 ### The policy is per machine, and that was decided
 
 Chromium's policy directory is a compile-time constant —
-`the-browser-half.md` §3.1 reads it out of `policy_paths.cc` — so there is no
+`design.md` §3.1 reads it out of `policy_paths.cc` — so there is no
 per-account browser policy on Linux short of a managed cloud account, which is
 exactly what this project is not. **One file therefore decides for every account
 that opens Chromium on the machine, the operator's included.**
 
-That was weighed and taken, not overlooked. `the-browser-half.md` §3.2 offers
+That was weighed and taken, not overlooked. `design.md` §3.2 offers
 the way round it — the child on Chromium, the operator on Brave — and §3.4 the
 heavier one, a `bwrap` bind mount per session, which is refused there for the
 same reason §5 refuses eBPF. Neither is built. What is built says the truth once:
@@ -1127,7 +1127,7 @@ happening, with nothing in that file to tell them why. Being more restrictive
 than one profile asked for is visible the moment somebody opens the site, and the
 verb names the profile that overruled them. The surprise is put where it will be
 noticed. Same choice as `onerr=succeed` in §2, made in the other direction and
-for the same reason: §4.3 of `the-browser-half.md` shows that the restriction
+for the same reason: §4.3 of `design.md` shows that the restriction
 here cannot lock anybody out of anything, because an incognito window and a
 blocked site both leave the session budget running exactly as it was.
 
@@ -1181,7 +1181,7 @@ somebody's browser taken away in the middle of an afternoon.
 
 Everything §10 says. Nothing in the browser stops a child opening a different
 browser; what stops them is the app allowlist, with the same hole — a released
-terminal launches anything. `the-browser-half.md` §3.5 is the honest reading:
+terminal launches anything. `design.md` §3.5 is the honest reading:
 an account allowed to run two browsers is filtered in one of them, and the other
 is a door with no lock on it.
 
@@ -1248,7 +1248,7 @@ special case.
 
 The PAM line of §2 was then measured: with the name in
 `/etc/omahouse/blocked` and after `terminate-user`, tty1 logged
-`pam_listfile(login:account): Refused user julia for service login` and there
+`pam_listfile(login:account): Refused user kid for service login` and there
 were no sessions 25 seconds later. Taking the name out brought the session back
 on its own in 20 seconds.
 
@@ -1294,12 +1294,12 @@ rule with. `status` reports them separately.
 ### Round 5 — the meter, against what was on the screen
 
 `omahouse-omarchy`, real Omarchy, `Chromium 152.0.7977.82`, 2026-09-04 between
-21:26 and 21:28. julia's real session through the SDDM greeter, the meter
+21:26 and 21:28. kid's real session through the SDDM greeter, the meter
 force-installed off-store by `ExtensionSettings` with a `file:` update URL, three
 sites in a known order, and the screen turned off with the last one still in the
 front tab. The whole chain crossed on the first attempt: the `.crx` installed,
-the service worker opened the port, Chromium spawned `omahouse meter` as julia,
-and the file appeared at `/run/user/1001/omahouse/focus`, `0600 julia:julia`.
+the service worker opened the port, Chromium spawned `omahouse meter` as kid,
+and the file appeared at `/run/user/1001/omahouse/focus`, `0600 kid:kid`.
 
 | | the screen | the report |
 |---|---|---|
@@ -1309,12 +1309,12 @@ and the file appeared at `/run/user/1001/omahouse/focus`, `0600 julia:julia`.
 | `archlinux.org`, screen off | 22s | **0s** |
 
 ```
-2026-09-04T21:27:12 julia: 3 apps (chromium, org.chromium.Chromium, udiskie),
+2026-09-04T21:27:12 kid: 3 apps (chromium, org.chromium.Chromium, udiskie),
                     counting chromium, org.chromium.Chromium, session, using, archlinux.org
-2026-09-04T21:27:32 julia: 3 apps (chromium, org.chromium.Chromium, udiskie),
+2026-09-04T21:27:32 kid: 3 apps (chromium, org.chromium.Chromium, udiskie),
                     counting chromium, org.chromium.Chromium, session, screen-off,
                     archlinux.org not counted
-2026-09-04T21:27:54 julia: 3 apps (chromium, org.chromium.Chromium, udiskie),
+2026-09-04T21:27:54 kid: 3 apps (chromium, org.chromium.Chromium, udiskie),
                     counting chromium, org.chromium.Chromium, session, using, archlinux.org
 ```
 
@@ -1332,7 +1332,7 @@ old form fails with a parse error and an exit code nobody was checking, which
 would have turned the screen off in the log and not on the machine.
 
 **What this round did not answer.** A suspend and resume
-(`the-browser-half.md` §9, question 9) was not exercised, and neither was an
+(`design.md` §9, question 9) was not exercised, and neither was an
 incognito window nor a second browser profile. The keepalive over minutes of
 silence was measured by the spike and not again here: the quick regime's windows
 are seconds, which is what `mise run test:vm:long` exists for.
@@ -1343,7 +1343,7 @@ Round 5's comparison was hand-driven, and a measurement that only exists as pros
 is what the old `testing.md` was. So the case was run: `vm/e2e.py --machine
 omarchy --case sites`, quick pace, on the same machine. Every claim it makes held
 the first time it was asked automatically — the `.crx` installed under policy, the
-service worker opened the port, Chromium spawned `omahouse meter` as julia, three
+service worker opened the port, Chromium spawned `omahouse meter` as kid, three
 sites came back as three rows within a tick of the wall clock, and the dark
 window billed nothing.
 
@@ -1398,7 +1398,7 @@ that already existed — and it is answered:
 >>> omahouse: the browser meter is signed for this machine and forced
 >>>           into Chromium. Its extension id here is ahdeiepgabnoenfnoebeomaoipdfgkpl
       the archive itself            written by the scriptlet, owned by no package
-      the host Chromium spawned     julia  /usr/bin/omahouse meter \
+      the host Chromium spawned     kid  /usr/bin/omahouse meter \
                                     chrome-extension://ahdeiepgabnoenfnoebeomaoipdfgkpl/
       Chromium installed            ahdeiepgabnoenfnoebeomaoipdfgkpl 1.0.0_0
       example.com was in front for 12s and the report says 10s
@@ -1407,12 +1407,12 @@ that already existed — and it is answered:
 The id in `/etc/omahouse/meter/id`, the id derived again from the key, the id in
 the policy, the id in `allowed_origins`, the id in `updates.xml`, the id in the
 argument Chromium passed the host and the name of the directory Chromium made in
-julia's profile are one id, and no file in this repository contains it.
+kid's profile are one id, and no file in this repository contains it.
 
 **Removal, which is the other half.** `pacman -R`: the nine things the package
 and its scriptlet put on the machine are gone, `/etc/chromium` holds nothing at
 all, the PAM line went from one to zero, `omahouse.service` is `not-found`, and
-the extension directory left julia's profile the next time Chromium started.
+the extension directory left kid's profile the next time Chromium started.
 
 **And one thing that is not a file, found by this round.** A native messaging
 host lives as long as the pipe the browser gave it, so a `pacman -R` while a
@@ -1445,7 +1445,7 @@ sshd runs the command inside a shell whose *own* command line holds those words.
 It answered a pid every time, its own, whether or not a host existed. It is a
 green light nobody earned, and `sites_are_counted_only_with_somebody_there` had
 been carrying it since round 6; only the second assertion under it kept that case
-honest. Both now ask `pgrep -u julia -x omahouse`, which the question cannot
+honest. Both now ask `pgrep -u kid -x omahouse`, which the question cannot
 satisfy. The failure that exposed it was the removal half asserting the *absence*
 of a host and being told there was one: an assertion that cannot fail is
 invisible until somebody writes down its negation.
@@ -1622,7 +1622,7 @@ a structural change when the time comes.
 - **Focus time** instead of running time. Fairer, and it needs IPC from Hyprland
   inside the fiscalised session, which that session can kill.
 - **Site filtering by DNS or proxy** — another problem, another program.
-  [`not-built/network-control-per-account.md`](not-built/network-control-per-account.md) argues that way, per account
+  [`design.md`](design.md) argues that way, per account
   through `nft meta skuid`. It is a **proposal**: none of it is built. What *is*
   built is §11, which blocks sites through the browser's own managed policy
   instead, and pays for it by being per machine rather than per account.

@@ -212,7 +212,7 @@ names the budget and the clock time the cut happens at:
 ![A terminal on the left, Chromium on the right, and in the top right corner the notification `1 minute left / chromium closes at 08:34.` The clock on the bar reads 08:33.](../vm/shots/10-aviso-chromium-1min.png)
 
 *(These pictures are from one run on a live Omarchy, where the account under
-rules was called `julia`. The commands here say `kid`; it is the same
+rules was called `kid`. The commands here say `kid`; it is the same
 placeholder.)*
 
 **The grace window.** Once the budget is spent, twenty seconds open between

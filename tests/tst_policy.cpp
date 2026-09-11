@@ -55,7 +55,7 @@ QDateTime at(int hour, int minute, int second = 0)
     return QDateTime(QDate(2026, 9, 3), QTime(hour, minute, second));
 }
 
-Ledger startOfDay(const QString &user = QStringLiteral("julia"))
+Ledger startOfDay(const QString &user = QStringLiteral("kid"))
 {
     Ledger ledger;
     ledger.user = user;
@@ -93,7 +93,7 @@ Budget siteBudget(const QString &domain, int dailyMinutes,
     return entry;
 }
 
-Profile profileOf(const QString &user = QStringLiteral("julia"))
+Profile profileOf(const QString &user = QStringLiteral("kid"))
 {
     Profile profile;
     profile.user = user;

@@ -218,11 +218,11 @@ private slots:
         QVERIFY(missing);
         QVERIFY(error.isEmpty());
 
-        QVERIFY2(writeBlocked(path, {QStringLiteral("julia"), QStringLiteral("theo")}, &error),
+        QVERIFY2(writeBlocked(path, {QStringLiteral("kid"), QStringLiteral("theo")}, &error),
                  qPrintable(error));
         QFile file(path);
         QVERIFY(file.open(QIODevice::ReadOnly));
-        QCOMPARE(file.readAll(), QByteArray("julia\ntheo\n"));
+        QCOMPARE(file.readAll(), QByteArray("kid\ntheo\n"));
         file.close();
 
         // 0644: PAM opens this in the process that is authenticating, and a mode
@@ -237,7 +237,7 @@ private slots:
         QVERIFY(!mode.testFlag(QFileDevice::ExeOwner));
 
         QCOMPARE(readBlocked(path, &error, &missing),
-                 QStringList({QStringLiteral("julia"), QStringLiteral("theo")}));
+                 QStringList({QStringLiteral("kid"), QStringLiteral("theo")}));
         QVERIFY(!missing);
 
         // The whole set every time, never a change to it. An empty set is an
@@ -257,12 +257,12 @@ private slots:
         QFile file(path);
         QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
         QVERIFY(file.open(QIODevice::WriteOnly));
-        file.write("\njulia \n\n  theo\n\n");
+        file.write("\nkid \n\n  theo\n\n");
         file.close();
 
         QString error;
         QCOMPARE(readBlocked(path, &error, nullptr),
-                 QStringList({QStringLiteral("julia"), QStringLiteral("theo")}));
+                 QStringList({QStringLiteral("kid"), QStringLiteral("theo")}));
     }
 
     // -- the command ---------------------------------------------------------
@@ -272,13 +272,13 @@ private slots:
     // anybody's session ending.
     void theCommandIsTheOneThePocMeasured()
     {
-        QCOMPARE(terminateUserCommand(QStringLiteral("julia")),
+        QCOMPARE(terminateUserCommand(QStringLiteral("kid")),
                  QStringList({QStringLiteral("loginctl"), QStringLiteral("terminate-user"),
-                              QStringLiteral("julia")}));
+                              QStringLiteral("kid")}));
 
         qputenv("OMAHOUSE_LOGINCTL", "/tmp/omahouse-ended");
         QCOMPARE(loginctlProgram(), QStringLiteral("/tmp/omahouse-ended"));
-        QCOMPARE(terminateUserCommand(QStringLiteral("julia")).first(),
+        QCOMPARE(terminateUserCommand(QStringLiteral("kid")).first(),
                  QStringLiteral("/tmp/omahouse-ended"));
         qunsetenv("OMAHOUSE_LOGINCTL");
         QCOMPARE(loginctlProgram(), QStringLiteral("loginctl"));

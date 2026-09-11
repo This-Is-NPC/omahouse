@@ -18,7 +18,7 @@ on 2026-09-04 between 21:26 and 21:28 and the numbers it produced are in
 docs/design.md §5.2. It has since been run by `vm/e2e.py --machine omarchy
 --case sites` at the quick pace, and every claim it makes held the first time it
 was asked automatically: the `.crx` installed under policy, the service worker
-opened the port, Chromium spawned `omahouse meter` as julia, three sites came
+opened the port, Chromium spawned `omahouse meter` as kid, three sites came
 back as three rows within a tick of the wall clock, and the dark window billed
 nothing.
 
@@ -62,8 +62,8 @@ def run(vm):
     Failed = vm.Failed
     seconds = vm.pace["site_seconds"]
 
-    julia = vm.subject
-    day = f"/var/lib/omahouse/{julia}/{vm.today()}.json"
+    kid = vm.subject
+    day = f"/var/lib/omahouse/{kid}/{vm.today()}.json"
 
     def screen():
         # Every connected connector, the way `screenStateFromDrm` reads them:
@@ -89,7 +89,7 @@ def run(vm):
         # trusting the exit status -- a screen turned off in the log and not on
         # the machine is the expensive kind of green.
         said = vm.root(
-            f"-u {julia} env XDG_RUNTIME_DIR=/run/user/{vm.uid} WAYLAND_DISPLAY=wayland-1 "
+            f"-u {kid} env XDG_RUNTIME_DIR=/run/user/{vm.uid} WAYLAND_DISPLAY=wayland-1 "
             f"HYPRLAND_INSTANCE_SIGNATURE={listed[0]} hyprctl {command}", check=False)[1]
         if "ok" not in said.lower():
             raise Failed(f"hyprctl {command} said {said.strip()!r} rather than ok")
@@ -113,9 +113,9 @@ def run(vm):
 
     # The native messaging host, which is the whole chain in one fact: the
     # extension installed off-store under policy, its service worker started, it
-    # opened the port, and Chromium spawned `omahouse meter` as julia.
+    # opened the port, and Chromium spawned `omahouse meter` as kid.
     #
-    # Asked as `pgrep -u julia -x omahouse`. It used to be
+    # Asked as `pgrep -u kid -x omahouse`. It used to be
     # `pgrep -f 'omahouse meter'`, which is an assertion that cannot fail: the
     # harness reaches the guest over ssh, sshd runs the command inside a shell,
     # and that shell's own command line holds the words being searched for -- so
@@ -123,13 +123,13 @@ def run(vm):
     # line below it saved this case from being green on nothing;
     # `the_package_puts_the_meter_in_and_takes_it_out` is where the same mistake
     # was caught, by failing on a host that had never been there.
-    vm.wait_for(lambda: bool(vm.root(f"pgrep -u {julia} -x omahouse || true",
+    vm.wait_for(lambda: bool(vm.root(f"pgrep -u {kid} -x omahouse || true",
                                      check=False)[1].split()),
                 vm.pace["patience_seconds"],
                 "the meter's native messaging host to be spawned by the browser")
     who = vm.ssh("ps -o user= -C omahouse | sort -u", check=False)[1]
-    if julia not in who:
-        raise Failed(f"the host is not running as {julia}: {who!r}")
+    if kid not in who:
+        raise Failed(f"the host is not running as {kid}: {who!r}")
 
     # A page that is none of the three, so the first site's clock starts when it
     # is asked for and not before.
@@ -143,7 +143,7 @@ def run(vm):
     # One budget covers both of Chromium's ids -- `vm/provision-omarchy.sh`
     # writes it with one `allow` -- so there is one to hand more of.
     for what in ("--session 180m", "--budget chromium=180m"):
-        vm.root(f"omahouse grant {julia} {what}")
+        vm.root(f"omahouse grant {kid} {what}")
     vm.start_daemon()
     time.sleep(1)
 
@@ -296,4 +296,4 @@ def run(vm):
                          "session with a browser open, so something stopped counting when "
                          "the screen went dark")
     print(f"      budgets untouched by the dark window: {written['budgets']}")
-    print("      " + vm.root(f"omahouse report {julia}").replace("\n", "\n      "))
+    print("      " + vm.root(f"omahouse report {kid}").replace("\n", "\n      "))

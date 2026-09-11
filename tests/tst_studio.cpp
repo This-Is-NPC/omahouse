@@ -596,9 +596,9 @@ void TestStudio::creationRequiresAnExplicitProfile()
     if (!root()->property("operating").toBool())
         QSKIP("not in wheel");
     QString error;
-    Profile julia;
-    julia.user = QStringLiteral("tstjulia");
-    QVERIFY(writeProfiles(paths::profilesFile(), {julia}, &error));
+    Profile kid;
+    kid.user = QStringLiteral("tstkid");
+    QVERIFY(writeProfiles(paths::profilesFile(), {kid}, &error));
     m_house->reload();
     key('3');
     key('s');
@@ -606,11 +606,11 @@ void TestStudio::creationRequiresAnExplicitProfile()
     const int before = m_finished;
     key(Qt::Key_Escape);
     QCOMPARE(m_finished, before);
-    QVERIFY(!personNamed(julia.user).value(QStringLiteral("hasSessionBudget")).toBool());
+    QVERIFY(!personNamed(kid.user).value(QStringLiteral("hasSessionBudget")).toBool());
 
     Profile other;
     other.user = QStringLiteral("nobody");
-    QVERIFY(writeProfiles(paths::profilesFile(), {julia, other}, &error));
+    QVERIFY(writeProfiles(paths::profilesFile(), {kid, other}, &error));
     m_house->reload();
     int otherIndex = -1;
     const QVariantList rows = root()->property("peopleRows").toList();
@@ -620,32 +620,32 @@ void TestStudio::creationRequiresAnExplicitProfile()
     }
     QVERIFY(otherIndex >= 0);
     key('s');
-    typeInto(QStringLiteral("profileQuery"), QStringLiteral("tstjulia"));
+    typeInto(QStringLiteral("profileQuery"), QStringLiteral("tstkid"));
     key(Qt::Key_Return);
-    QCOMPARE(root()->property("editUser").toString(), julia.user);
+    QCOMPARE(root()->property("editUser").toString(), kid.user);
     // A reload can move the browsing cursor; the confirmed recipient stays put.
     root()->setProperty("cursorPeople", otherIndex);
     QCOMPARE(root()->property("subject").toString(), other.user);
     typeInto(QStringLiteral("promptField"), QStringLiteral("50m"));
     key(Qt::Key_Return);
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
-    QVERIFY(personNamed(julia.user).value(QStringLiteral("hasSessionBudget")).toBool());
+    QVERIFY(personNamed(kid.user).value(QStringLiteral("hasSessionBudget")).toBool());
     QVERIFY(!personNamed(other.user).value(QStringLiteral("hasSessionBudget")).toBool());
 
     key('4');
     key('b');
-    typeInto(QStringLiteral("profileQuery"), julia.user);
+    typeInto(QStringLiteral("profileQuery"), kid.user);
     key(Qt::Key_Return);
     root()->setProperty("cursorPeople", otherIndex);
     typeInto(QStringLiteral("promptField"), QStringLiteral("example.com"));
     key(Qt::Key_Return);
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
-    QVERIFY(siteNamed(julia.user, QStringLiteral("example.com")).value(QStringLiteral("asked")).toBool());
+    QVERIFY(siteNamed(kid.user, QStringLiteral("example.com")).value(QStringLiteral("asked")).toBool());
     QVERIFY(siteNamed(other.user, QStringLiteral("example.com")).isEmpty());
 
     key('2');
     key('a');
-    typeInto(QStringLiteral("profileQuery"), julia.user);
+    typeInto(QStringLiteral("profileQuery"), kid.user);
     key(Qt::Key_Return);
     typeInto(QStringLiteral("pickerQuery"), QStringLiteral("code"));
     key(Qt::Key_Return);
@@ -653,7 +653,7 @@ void TestStudio::creationRequiresAnExplicitProfile()
     typeInto(QStringLiteral("promptField"), QStringLiteral("20m"));
     key(Qt::Key_Return);
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
-    QCOMPARE(programsOf(julia.user).size(), 1);
+    QCOMPARE(programsOf(kid.user).size(), 1);
     QVERIFY(programsOf(other.user).isEmpty());
 }
 
@@ -664,18 +664,18 @@ void TestStudio::theWholeJobOnTheKeyboard()
 
     // Put an account under rules. `n`, the name, Enter.
     key('n');
-    typeInto(QStringLiteral("promptField"), QStringLiteral("tstjulia"));
+    typeInto(QStringLiteral("promptField"), QStringLiteral("tstkid"));
     key(Qt::Key_Return);
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
     QCOMPARE(people().size(), 1);
-    QCOMPARE(personNamed(QStringLiteral("tstjulia")).value(QStringLiteral("user")).toString(),
-             QStringLiteral("tstjulia"));
+    QCOMPARE(personNamed(QStringLiteral("tstkid")).value(QStringLiteral("user")).toString(),
+             QStringLiteral("tstkid"));
 
     // Only what is listed runs. `d` flips the profile from a denylist to an
     // allowlist, which is what "released programs" means.
     key('d');
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
-    QVERIFY(personNamed(QStringLiteral("tstjulia")).value(QStringLiteral("allowlist")).toBool());
+    QVERIFY(personNamed(QStringLiteral("tstkid")).value(QStringLiteral("allowlist")).toBool());
 
     // Two programs, each with a limit. `2` for the programs, `a` to release,
     // the query, Enter to pick, the duration, Enter.
@@ -698,7 +698,7 @@ void TestStudio::theWholeJobOnTheKeyboard()
     key(Qt::Key_Return);
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
 
-    const QVariantList programs = programsOf(QStringLiteral("tstjulia"));
+    const QVariantList programs = programsOf(QStringLiteral("tstkid"));
     QCOMPARE(programs.size(), 2);
     QSet<QString> released;
     for (const QVariant &row : programs) {
@@ -718,13 +718,13 @@ void TestStudio::theWholeJobOnTheKeyboard()
     key(Qt::Key_Return);
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
 
-    QVariantMap julia = personNamed(QStringLiteral("tstjulia"));
-    QVERIFY(julia.value(QStringLiteral("hasSessionBudget")).toBool());
-    QCOMPARE(julia.value(QStringLiteral("session")).toMap().value(QStringLiteral("left")).toString(),
+    QVariantMap kid = personNamed(QStringLiteral("tstkid"));
+    QVERIFY(kid.value(QStringLiteral("hasSessionBudget")).toBool());
+    QCOMPARE(kid.value(QStringLiteral("session")).toMap().value(QStringLiteral("left")).toString(),
              QStringLiteral("2h"));
 
     // The cursor is on the session, which the day's list puts first.
-    QCOMPARE(todayOf(QStringLiteral("tstjulia")).first().toMap().value(QStringLiteral("session")).toBool(),
+    QCOMPARE(todayOf(QStringLiteral("tstkid")).first().toMap().value(QStringLiteral("session")).toBool(),
              true);
     key('+');
     typeInto(QStringLiteral("promptField"), QStringLiteral("10m"));
@@ -733,8 +733,8 @@ void TestStudio::theWholeJobOnTheKeyboard()
 
     // And the balance says so, which is the whole errand: a grant that did not
     // show up here would read as though it had gone nowhere.
-    julia = personNamed(QStringLiteral("tstjulia"));
-    const QVariantMap session = julia.value(QStringLiteral("session")).toMap();
+    kid = personNamed(QStringLiteral("tstkid"));
+    const QVariantMap session = kid.value(QStringLiteral("session")).toMap();
     QCOMPARE(session.value(QStringLiteral("left")).toString(), QStringLiteral("2h10m"));
     QCOMPARE(session.value(QStringLiteral("granted")).toString(), QStringLiteral("10m"));
     QCOMPARE(session.value(QStringLiteral("resets")).toString(), QStringLiteral("daily"));
@@ -746,13 +746,13 @@ void TestStudio::theWholeJobOnTheKeyboard()
     // the rule for every day.
     key('p');
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
-    QVariantMap pot = personNamed(QStringLiteral("tstjulia")).value(QStringLiteral("session")).toMap();
+    QVariantMap pot = personNamed(QStringLiteral("tstkid")).value(QStringLiteral("session")).toMap();
     QCOMPARE(pot.value(QStringLiteral("resets")).toString(), QStringLiteral("never"));
     QVERIFY(pot.value(QStringLiteral("pot")).toBool());
     QCOMPARE(pot.value(QStringLiteral("daily")).toString(), QStringLiteral("2h"));
     key('p');
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
-    pot = personNamed(QStringLiteral("tstjulia")).value(QStringLiteral("session")).toMap();
+    pot = personNamed(QStringLiteral("tstkid")).value(QStringLiteral("session")).toMap();
     QCOMPARE(pot.value(QStringLiteral("resets")).toString(), QStringLiteral("daily"));
     QVERIFY(!pot.value(QStringLiteral("pot")).toBool());
     QCOMPARE(pot.value(QStringLiteral("daily")).toString(), QStringLiteral("2h"));
@@ -769,14 +769,14 @@ void TestStudio::theWholeJobOnTheMouse()
     // keyboard, because a name and a duration are typed by anybody on any
     // machine -- what is under test is that every *action* has a target to click.
     click(QStringLiteral("command-new"));
-    typeInto(QStringLiteral("promptField"), QStringLiteral("tstjulia"));
+    typeInto(QStringLiteral("promptField"), QStringLiteral("tstkid"));
     click(QStringLiteral("promptOk"));
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
     QCOMPARE(people().size(), 1);
 
     click(QStringLiteral("command-policy"));
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
-    QVERIFY(personNamed(QStringLiteral("tstjulia")).value(QStringLiteral("allowlist")).toBool());
+    QVERIFY(personNamed(QStringLiteral("tstkid")).value(QStringLiteral("allowlist")).toBool());
 
     click(QStringLiteral("viewChip2"));
     QCOMPARE(root()->property("view").toInt(), 2);
@@ -797,7 +797,7 @@ void TestStudio::theWholeJobOnTheMouse()
         QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
     }
 
-    QCOMPARE(programsOf(QStringLiteral("tstjulia")).size(), 2);
+    QCOMPARE(programsOf(QStringLiteral("tstkid")).size(), 2);
 
     click(QStringLiteral("viewChip3"));
     click(QStringLiteral("command-day"));
@@ -813,7 +813,7 @@ void TestStudio::theWholeJobOnTheMouse()
 
     // The same profile the keyboard wrote, from the other door.
     const QVariantMap session =
-        personNamed(QStringLiteral("tstjulia")).value(QStringLiteral("session")).toMap();
+        personNamed(QStringLiteral("tstkid")).value(QStringLiteral("session")).toMap();
     QCOMPARE(session.value(QStringLiteral("left")).toString(), QStringLiteral("2h10m"));
     QCOMPARE(session.value(QStringLiteral("granted")).toString(), QStringLiteral("10m"));
 }
@@ -840,7 +840,7 @@ void TestStudio::theWebHalfOnBothDoors()
         QSKIP("not in wheel");
 
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("tstjulia")});
+                 {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("tstkid")});
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
 
     // `4`, `b`, the domain, Enter.
@@ -853,7 +853,7 @@ void TestStudio::theWebHalfOnBothDoors()
     key(Qt::Key_Return);
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
 
-    QVariantMap site = siteNamed(QStringLiteral("tstjulia"), QStringLiteral("youtube.com"));
+    QVariantMap site = siteNamed(QStringLiteral("tstkid"), QStringLiteral("youtube.com"));
     QVERIFY2(!site.isEmpty(), "the site the window just blocked is not on the sites view");
     QVERIFY2(site.value(QStringLiteral("blocked")).toBool(),
              "the row still says the site opens");
@@ -870,7 +870,7 @@ void TestStudio::theWebHalfOnBothDoors()
     key(Qt::Key_Return);
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
 
-    site = siteNamed(QStringLiteral("tstjulia"), QStringLiteral("youtube.com"));
+    site = siteNamed(QStringLiteral("tstkid"), QStringLiteral("youtube.com"));
     QVERIFY2(site.value(QStringLiteral("hasBudget")).toBool(),
              "the site has no clock, so `m` wrote something else");
     QCOMPARE(site.value(QStringLiteral("limit")).toString(), QStringLiteral("30m"));
@@ -881,8 +881,8 @@ void TestStudio::theWebHalfOnBothDoors()
 
     // A site budget is not a program. It used to draw a row on the programs
     // view, with a verdict read out of the app rules and an `x` that would have
-    // written `omahouse deny tstjulia youtube.com`.
-    for (const QVariant &row : programsOf(QStringLiteral("tstjulia"))) {
+    // written `omahouse deny tstkid youtube.com`.
+    for (const QVariant &row : programsOf(QStringLiteral("tstkid"))) {
         QVERIFY2(row.toMap().value(QStringLiteral("id")).toString()
                      != QStringLiteral("youtube.com"),
                  "the site budget turned up on the programs view");
@@ -891,24 +891,24 @@ void TestStudio::theWebHalfOnBothDoors()
     // The other door. The chip takes the block back, and the row says so.
     click(QStringLiteral("command-unblock"));
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
-    site = siteNamed(QStringLiteral("tstjulia"), QStringLiteral("youtube.com"));
+    site = siteNamed(QStringLiteral("tstkid"), QStringLiteral("youtube.com"));
     QVERIFY2(!site.value(QStringLiteral("blocked")).toBool(),
              "the site is still blocked after `let it open` came back green");
 
     // And incognito, which is the one switch with no counterpart on the app
     // side. Three states: this asserts the two the window can move between.
-    QVERIFY(!personNamed(QStringLiteral("tstjulia"))
+    QVERIFY(!personNamed(QStringLiteral("tstkid"))
                  .value(QStringLiteral("incognitoStated")).toBool());
     click(QStringLiteral("command-incognito"));
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
-    QVariantMap julia = personNamed(QStringLiteral("tstjulia"));
-    QVERIFY(julia.value(QStringLiteral("incognitoStated")).toBool());
-    QVERIFY2(julia.value(QStringLiteral("incognitoDenied")).toBool(),
+    QVariantMap kid = personNamed(QStringLiteral("tstkid"));
+    QVERIFY(kid.value(QStringLiteral("incognitoStated")).toBool());
+    QVERIFY2(kid.value(QStringLiteral("incognitoDenied")).toBool(),
              "the chip said `incognito off` and incognito is still open");
 
     click(QStringLiteral("command-incognito"));
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
-    QVERIFY(!personNamed(QStringLiteral("tstjulia"))
+    QVERIFY(!personNamed(QStringLiteral("tstkid"))
                  .value(QStringLiteral("incognitoDenied")).toBool());
 
     // The reach is on the view, once, and it is the CLI's own sentence rather
@@ -927,21 +927,21 @@ void TestStudio::everyCommandIsBothAKeyAndAChip()
 
     // Something to have commands about.
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("tstjulia")});
+                 {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("tstkid")});
     QVERIFY(waitForWrite());
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("allow"), QStringLiteral("tstjulia"), QStringLiteral("code"),
+                 {QStringLiteral("allow"), QStringLiteral("tstkid"), QStringLiteral("code"),
                   QStringLiteral("--limit"), QStringLiteral("45m")});
     QVERIFY(waitForWrite());
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("limit"), QStringLiteral("tstjulia"), QStringLiteral("--session"),
+                 {QStringLiteral("limit"), QStringLiteral("tstkid"), QStringLiteral("--session"),
                   QStringLiteral("2h")});
     QVERIFY(waitForWrite());
 
     // Something to have site commands about, so the fourth view is not an empty
     // list with a cursor at -1 and half its table unusable.
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("web"), QStringLiteral("block"), QStringLiteral("tstjulia"),
+                 {QStringLiteral("web"), QStringLiteral("block"), QStringLiteral("tstkid"),
                   QStringLiteral("youtube.com")});
     QVERIFY(waitForWrite());
 
@@ -1084,7 +1084,7 @@ void TestStudio::everyKeyOnTheSheetIsAnswered()
         QSKIP("not in wheel");
 
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("tstjulia")});
+                 {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("tstkid")});
     QVERIFY(waitForWrite());
 
     // Every key the sheet promises, and what it takes to keep the promise.
@@ -1164,15 +1164,15 @@ void TestStudio::everyKeyOnTheSheetIsAnswered()
     // The cursor keys, on a list long enough to have somewhere to go: the day
     // of a profile with three budgets on it.
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("limit"), QStringLiteral("tstjulia"), QStringLiteral("--session"),
+                 {QStringLiteral("limit"), QStringLiteral("tstkid"), QStringLiteral("--session"),
                   QStringLiteral("2h")});
     QVERIFY(waitForWrite());
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("allow"), QStringLiteral("tstjulia"), QStringLiteral("code"),
+                 {QStringLiteral("allow"), QStringLiteral("tstkid"), QStringLiteral("code"),
                   QStringLiteral("--limit"), QStringLiteral("45m")});
     QVERIFY(waitForWrite());
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("allow"), QStringLiteral("tstjulia"), QStringLiteral("firefox"),
+                 {QStringLiteral("allow"), QStringLiteral("tstkid"), QStringLiteral("firefox"),
                   QStringLiteral("--limit"), QStringLiteral("1h")});
     QVERIFY(waitForWrite());
 
@@ -1321,8 +1321,8 @@ void TestStudio::publishGoesThroughTheCli()
 {
     QString error;
     Profile profile;
-    profile.user = QStringLiteral("tstjulia");
-    profile.displayName = QStringLiteral("Julia");
+    profile.user = QStringLiteral("tstkid");
+    profile.displayName = QStringLiteral("Kid");
     QVERIFY(writeProfiles(paths::profilesFile(), { profile }, &error));
     ThisMachine manager;
     manager.kind = Kind::Manager;
@@ -1388,7 +1388,7 @@ void TestStudio::publishGoesThroughTheCli()
     QFile calls(recorded);
     QVERIFY(calls.open(QIODevice::ReadOnly));
     QCOMPARE(calls.readAll(),
-        QByteArray("profile\npublish\ntstjulia\n--to\nstation-02\n--to\nthe study\n"));
+        QByteArray("profile\npublish\ntstkid\n--to\nstation-02\n--to\nthe study\n"));
     QCOMPARE(admin->property("output").toStringList(),
         QStringList({ "MACHINE RESULT", "station-02 published", "the study published" }));
     auto *sheet = itemNamed(localWindow->contentItem(), QStringLiteral("publishSheet"));
@@ -1404,7 +1404,7 @@ void TestStudio::publishIsRefusedWhileUnresolved()
 {
     QString error;
     Profile profile;
-    profile.user = QStringLiteral("tstjulia");
+    profile.user = QStringLiteral("tstkid");
     QVERIFY(writeProfiles(paths::profilesFile(), { profile }, &error));
     ThisMachine manager;
     manager.kind = Kind::Manager;
@@ -1458,7 +1458,7 @@ void TestStudio::theMachinesViewOpensWithNobodySelected()
     QCOMPARE(rows.first().toMap().value("name").toString(), QStringLiteral("station-02"));
     QCOMPARE(rows.first().toMap().value("state").toString(), QStringLiteral("paired"));
     Profile profile;
-    profile.user = QStringLiteral("tstjulia");
+    profile.user = QStringLiteral("tstkid");
     QVERIFY(writeProfiles(paths::profilesFile(), { profile }, &error));
     m_house->reload();
     settle();
@@ -1622,27 +1622,27 @@ void TestStudio::drawsItself()
         QSKIP("not in wheel");
 
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("tstjulia"),
-                  QStringLiteral("--name"), QStringLiteral("Julia")});
+                 {QStringLiteral("profile"), QStringLiteral("add"), QStringLiteral("tstkid"),
+                  QStringLiteral("--name"), QStringLiteral("Kid")});
     QVERIFY(waitForWrite());
     m_admin->run(QStringLiteral("fixture"),
                  {QStringLiteral("profile"), QStringLiteral("default"),
-                  QStringLiteral("tstjulia"), QStringLiteral("--deny")});
+                  QStringLiteral("tstkid"), QStringLiteral("--deny")});
     QVERIFY(waitForWrite());
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("limit"), QStringLiteral("tstjulia"), QStringLiteral("--session"),
+                 {QStringLiteral("limit"), QStringLiteral("tstkid"), QStringLiteral("--session"),
                   QStringLiteral("2h")});
     QVERIFY(waitForWrite());
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("allow"), QStringLiteral("tstjulia"), QStringLiteral("code"),
+                 {QStringLiteral("allow"), QStringLiteral("tstkid"), QStringLiteral("code"),
                   QStringLiteral("--limit"), QStringLiteral("45m")});
     QVERIFY(waitForWrite());
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("allow"), QStringLiteral("tstjulia"), QStringLiteral("firefox"),
+                 {QStringLiteral("allow"), QStringLiteral("tstkid"), QStringLiteral("firefox"),
                   QStringLiteral("--limit"), QStringLiteral("1h")});
     QVERIFY(waitForWrite());
     m_admin->run(QStringLiteral("fixture"),
-                 {QStringLiteral("grant"), QStringLiteral("tstjulia"), QStringLiteral("--session"),
+                 {QStringLiteral("grant"), QStringLiteral("tstkid"), QStringLiteral("--session"),
                   QStringLiteral("10m")});
     QVERIFY(waitForWrite());
 
