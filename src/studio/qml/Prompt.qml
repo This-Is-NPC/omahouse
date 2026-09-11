@@ -143,6 +143,8 @@ Rectangle {
                 Label {
                     width: parent.width
                     text: sheet.title
+                    elide: Text.ElideNone
+                    wrapMode: Text.Wrap
                     font.bold: true
                 }
                 Label {

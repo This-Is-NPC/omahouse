@@ -195,6 +195,11 @@ Chromium merges every file it finds there and Omarchy's own
 
 ## In the window
 
+Before adding a rule or setting a limit, choose the profile in **Who is this
+for?** Click the profile or filter its name and press Enter. This choice is
+required even with one profile; Escape cancels. The following form names the
+chosen account, and an automatic list refresh cannot change the recipient.
+
 The **sites** view is `4`, or the *sites* chip:
 
 ![The sites view: a line about presence, under it the reach of a browser policy, then three rows — tiktok.com "does not open" in red with "blocked here, and so are its subdomains"; youtube.com "stops opening when the time is up" and "5m left of 30m"; wikipedia.org "no rule and no clock — the minutes are counted and nothing else" and "8m today".](img/15-operator-sites.png)

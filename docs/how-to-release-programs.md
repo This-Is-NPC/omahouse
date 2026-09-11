@@ -192,8 +192,14 @@ app wins.
 
 ## In the window
 
-On the **programs** view (`2`), `a` opens a picker fed from what is open right
-now and from the installed `.desktop` entries. **It marks the shim**, which is
+On the **programs** view (`2`), `a` first asks **Who is this for?** Choose the
+profile by clicking it or filtering its name and pressing Enter, even if there
+is only one. Escape cancels without writing a rule.
+
+![Choose the profile before adding a program.](img/33-operator-choose-profile.png)
+
+The program picker then names that profile and lists what is open right now
+and the installed `.desktop` entries. **It marks the shim**, which is
 what stops anybody releasing blind:
 
 ![The program picker: a query field reading "which program", then Code · code (already listed, open now) with /usr/share/code/code under it; gtk-launch, in red, "that name is the launcher — inside it: /usr/share/code/code"; and Firefox · firefox with /usr/lib/firefox/firefox.](img/08-operator-choose-program.png)
@@ -202,7 +208,8 @@ Against a real catalogue, on the live machine, most of it is shims:
 
 ![The studio's "which program" picker: "Basecamp" and "Discord" say in red `that name is the launcher — inside it: omarchy-launch-webapp`, "Disk Usage" and "Docker" say `xdg-terminal-exec`, and "Chromium · chromium" comes up `already listed`.](../vm/shots/34-studio-escolher-programa.png)
 
-Choosing a row asks how long a day for it, and then polkit. The list that comes
+Choosing a row asks how long a day for it, with the selected profile in the
+heading, and then polkit. The list that comes
 out reads like this:
 
 ![The programs view: Code with "open now · 5 processes" and "20m left of 45m"; Firefox with "0m left of 1h" and a full red bar; gtk-launch with the red line "that name is not what is running: /usr/share/code/code — 3 of 3"; steam marked "not released".](img/02-operator-programs.png)

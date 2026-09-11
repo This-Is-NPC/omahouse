@@ -104,10 +104,18 @@ Window {
     /// by then.
     property string target: ""
     property string targetKind: ""
+    property bool targetSession: false
     property string publishUser: ""
+    property string editUser: ""
+    property string pendingAction: ""
+    property var pendingRow: null
+
+    function personNamed(user) {
+        return win.people.find(function (one) { return one.user === user }) || null
+    }
 
     readonly property bool blocked: helpSheet.visible || commandPalette.visible
-                                    || prompt.visible || confirm.visible || picker.visible || publishSheet.visible
+                                    || prompt.visible || confirm.visible || picker.visible || profilePicker.visible || publishSheet.visible
                                     || win.filtering
 
     // Where a cursor really is, as opposed to where it was last put.
@@ -476,10 +484,22 @@ Window {
     }
 
     // ---------------------------------------------------------------- actions
-    function perform(id) {
+    function perform(id, selectedUser) {
+        if (!win.operating && ["open", "back", "fleet"].indexOf(id) < 0) return
         Admin.clear()
-        const person = win.person
-        const row = win.currentRow
+        if (!selectedUser && ["release", "minutes", "block", "day"].indexOf(id) >= 0) {
+            if (win.people.length === 0) return
+            win.pendingAction = id
+            win.pendingRow = win.currentRow
+            profilePicker.purpose = id === "release" ? "Add a program"
+                                  : id === "block" ? "Block a site"
+                                  : id === "day" ? "Set the day's limit" : "Set a limit"
+            profilePicker.open()
+            return
+        }
+        const person = selectedUser ? win.personNamed(selectedUser) : win.person
+        const row = selectedUser ? win.pendingRow : win.currentRow
+        win.editUser = person ? person.user : ""
 
         if (id === "publish") {
             if (win.household.kind !== "manager" || person === null
@@ -514,10 +534,7 @@ Window {
             return
         }
 
-        // Everything below is about the profile under the cursor, and every one
-        // of them is marked unusable in the table when there is none -- so this
-        // is a second lock on a door already bolted, and it stays because the
-        // cost of being wrong is a TypeError in a window somebody is using.
+        // Creation uses the explicitly chosen profile; row actions use the visible profile.
         if (person === null)
             return
 
@@ -539,14 +556,16 @@ Window {
             if (row === null)
                 return
             win.target = row.id
-            win.targetKind = row.kind
+            win.targetKind = row.site === true ? "site" : row.kind
+            win.targetSession = row.session === true
             const aSite = row.kind === "site" || row.site === true
             // A pot is not a day. The title and the words change with the
             // shape, and the number written keeps the shape: `limit` leaves
             // `resets` alone unless it is said.
             prompt.ask("minutes",
                        (row.pot === true ? "Minutes in all for "
-                        : aSite ? "Minutes a day on " : "Minutes a day for ") + win.target,
+                        : aSite ? "Minutes a day on " : "Minutes a day for ") + win.target
+                       + " · Profile: " + person.user,
                        row.pot === true
                        ? "45m, 2h. This budget never resets, so this is everything it "
                          + "has until somebody hands over more; a new number keeps it "
@@ -604,7 +623,7 @@ Window {
             // wants it: said once per screen and never per rule, because a tool
             // that re-argues a settled decision every time it is used is a tool
             // people stop reading.
-            prompt.ask("block", "Which site should stop opening?",
+            prompt.ask("block", "Which site should stop opening? · Profile: " + person.user,
                        "The site's name on its own, like youtube.com — not a whole "
                        + "address. A bare domain covers its subdomains too.",
                        "", row !== null && row.asked !== true ? row.id : "", false)
@@ -642,7 +661,7 @@ Window {
             Admin.run("put " + text + " under rules", ["profile", "add", text])
             return
         }
-        const person = win.person
+        const person = win.personNamed(win.editUser)
         if (person === null)
             return
         if (topic === "day") {
@@ -653,6 +672,10 @@ Window {
             // a scope id with dots in it from a domain with dots in it, so which
             // namespace an id is in has to be carried and not inferred. That is
             // what `targetKind` and the row's own `site` are for.
+            if (win.targetSession) {
+                Admin.run("the day's total", ["limit", person.user, "--session", text])
+                return
+            }
             if (win.targetKind === "site") {
                 Admin.run("minutes a day",
                           ["limit", person.user, "--site", win.target + "=" + text])
@@ -662,8 +685,8 @@ Window {
             // gets its rule and its clock in one verb -- `allow --limit` is
             // sugar for exactly this, because they are one thought at the moment
             // somebody is configuring.
-            const budget = win.targetKind === "budget" ? win.budgetNamed(win.target) : null
-            const program = win.targetKind === "budget" ? null : win.programNamed(win.target)
+            const budget = win.targetKind === "budget" ? win.budgetNamed(win.target, win.editUser) : null
+            const program = win.targetKind === "budget" ? null : win.programNamed(win.target, win.editUser)
             if (budget !== null)
                 Admin.run("minutes a day", budget.session
                           ? ["limit", person.user, "--session", text]
@@ -677,7 +700,7 @@ Window {
                 Admin.run("minutes a day",
                           ["allow", person.user, win.target, "--limit", text])
         } else if (topic === "grant") {
-            const budget = win.budgetNamed(win.target)
+            const budget = win.budgetNamed(win.target, win.editUser)
             const session = budget !== null && budget.session === true
             Admin.run("more time today", session
                       ? ["grant", person.user, "--session", text]
@@ -701,18 +724,20 @@ Window {
     /// budget called `code` about the program called `code`, which is the
     /// ordinary case -- and one lookup that searched both would answer with
     /// whichever list it happened to look in first.
-    function budgetNamed(id) {
-        for (let i = 0; i < win.allToday.length; i++) {
-            if (win.allToday[i].kind === "budget" && win.allToday[i].id === id)
-                return win.allToday[i]
+    function budgetNamed(id, user) {
+        const rows = House.snapshot.today[user || win.subject] || []
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i].kind === "budget" && rows[i].id === id)
+                return rows[i]
         }
         return null
     }
 
-    function programNamed(id) {
-        for (let i = 0; i < win.allPrograms.length; i++) {
-            if (win.allPrograms[i].id === id)
-                return win.allPrograms[i]
+    function programNamed(id, user) {
+        const rows = House.snapshot.programs[user || win.subject] || []
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i].id === id)
+                return rows[i]
         }
         return null
     }
@@ -1957,13 +1982,39 @@ Window {
     }
 
     Picker {
+        id: profilePicker
+        anchors.fill: parent
+        profiles: true
+        programs: win.people.map(function (one) {
+            return {id: one.user, name: one.name || one.user, exe: "",
+                    disagrees: false, listed: false, running: false}
+        })
+        returnFocus: win.takeFocus
+        onPicked: function (user) {
+            if (win.personNamed(user) === null) return
+            if (user !== win.subject && win.pendingRow !== null) {
+                const source = win.view === 4 ? House.snapshot.sites
+                             : win.view === 3 ? House.snapshot.today : House.snapshot.programs
+                const rows = source[user] || []
+                win.pendingRow = rows.find(function (row) {
+                    return row.id === win.pendingRow.id && row.kind === win.pendingRow.kind
+                }) || Object.assign({}, win.pendingRow, {daily: "", pot: false})
+            }
+            win.filterPeople = ""
+            win.cursorPeople = win.peopleRows.findIndex(function (one) { return one.user === user })
+            win.perform(win.pendingAction, user)
+        }
+    }
+
+    Picker {
         id: picker
         anchors.fill: parent
-        programs: win.catalogue
+        recipient: win.editUser
+        programs: House.snapshot.catalog[win.editUser] || []
         returnFocus: win.takeFocus
         onPicked: function (id) {
             win.target = id
-            prompt.ask("releaseLimit", "How long a day for " + id + "?",
+            prompt.ask("releaseLimit", "How long a day for " + id + "? · Profile: " + win.editUser,
                        "45m, 2h, 1h30m — or leave it empty, and it runs with no clock of "
                        + "its own, spending the day's total like everything else.",
                        "", "", true)

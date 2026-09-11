@@ -147,6 +147,7 @@ private slots:
     void init();
 
     void opensOnTheFaceOfWhoeverRanIt();
+    void creationRequiresAnExplicitProfile();
     void theWholeJobOnTheKeyboard();
     void theWholeJobOnTheMouse();
     void theWebHalfOnBothDoors();
@@ -590,6 +591,72 @@ void TestStudio::opensOnTheFaceOfWhoeverRanIt()
         QSKIP("the rest of this suite drives the operator face, and this account is not in wheel");
 }
 
+void TestStudio::creationRequiresAnExplicitProfile()
+{
+    if (!root()->property("operating").toBool())
+        QSKIP("not in wheel");
+    QString error;
+    Profile julia;
+    julia.user = QStringLiteral("tstjulia");
+    QVERIFY(writeProfiles(paths::profilesFile(), {julia}, &error));
+    m_house->reload();
+    key('3');
+    key('s');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    const int before = m_finished;
+    key(Qt::Key_Escape);
+    QCOMPARE(m_finished, before);
+    QVERIFY(!personNamed(julia.user).value(QStringLiteral("hasSessionBudget")).toBool());
+
+    Profile other;
+    other.user = QStringLiteral("nobody");
+    QVERIFY(writeProfiles(paths::profilesFile(), {julia, other}, &error));
+    m_house->reload();
+    int otherIndex = -1;
+    const QVariantList rows = root()->property("peopleRows").toList();
+    for (int i = 0; i < rows.size(); ++i) {
+        if (rows.at(i).toMap().value(QStringLiteral("user")).toString() == other.user)
+            otherIndex = i;
+    }
+    QVERIFY(otherIndex >= 0);
+    key('s');
+    typeInto(QStringLiteral("profileQuery"), QStringLiteral("tstjulia"));
+    key(Qt::Key_Return);
+    QCOMPARE(root()->property("editUser").toString(), julia.user);
+    // A reload can move the browsing cursor; the confirmed recipient stays put.
+    root()->setProperty("cursorPeople", otherIndex);
+    QCOMPARE(root()->property("subject").toString(), other.user);
+    typeInto(QStringLiteral("promptField"), QStringLiteral("50m"));
+    key(Qt::Key_Return);
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    QVERIFY(personNamed(julia.user).value(QStringLiteral("hasSessionBudget")).toBool());
+    QVERIFY(!personNamed(other.user).value(QStringLiteral("hasSessionBudget")).toBool());
+
+    key('4');
+    key('b');
+    typeInto(QStringLiteral("profileQuery"), julia.user);
+    key(Qt::Key_Return);
+    root()->setProperty("cursorPeople", otherIndex);
+    typeInto(QStringLiteral("promptField"), QStringLiteral("example.com"));
+    key(Qt::Key_Return);
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    QVERIFY(siteNamed(julia.user, QStringLiteral("example.com")).value(QStringLiteral("asked")).toBool());
+    QVERIFY(siteNamed(other.user, QStringLiteral("example.com")).isEmpty());
+
+    key('2');
+    key('a');
+    typeInto(QStringLiteral("profileQuery"), julia.user);
+    key(Qt::Key_Return);
+    typeInto(QStringLiteral("pickerQuery"), QStringLiteral("code"));
+    key(Qt::Key_Return);
+    root()->setProperty("cursorPeople", otherIndex);
+    typeInto(QStringLiteral("promptField"), QStringLiteral("20m"));
+    key(Qt::Key_Return);
+    QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
+    QCOMPARE(programsOf(julia.user).size(), 1);
+    QVERIFY(programsOf(other.user).isEmpty());
+}
+
 void TestStudio::theWholeJobOnTheKeyboard()
 {
     if (!root()->property("operating").toBool())
@@ -614,6 +681,8 @@ void TestStudio::theWholeJobOnTheKeyboard()
     // the query, Enter to pick, the duration, Enter.
     key('2');
     key('a');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     typeInto(QStringLiteral("pickerQuery"), QStringLiteral("code"));
     key(Qt::Key_Return);
     typeInto(QStringLiteral("promptField"), QStringLiteral("45m"));
@@ -621,6 +690,8 @@ void TestStudio::theWholeJobOnTheKeyboard()
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
 
     key('a');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     typeInto(QStringLiteral("pickerQuery"), QStringLiteral("firefox"));
     key(Qt::Key_Return);
     typeInto(QStringLiteral("promptField"), QStringLiteral("1h"));
@@ -641,6 +712,8 @@ void TestStudio::theWholeJobOnTheKeyboard()
     // The day's total, and then ten minutes handed over on top of it.
     key('3');
     key('s');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     typeInto(QStringLiteral("promptField"), QStringLiteral("2h"));
     key(Qt::Key_Return);
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
@@ -712,6 +785,7 @@ void TestStudio::theWholeJobOnTheMouse()
         const QString id = pair.section(QLatin1Char('|'), 0, 0);
         const QString limit = pair.section(QLatin1Char('|'), 1, 1);
         click(QStringLiteral("command-release"));
+        clickItem(awaitRow(QStringLiteral("profileList"), 0));
         typeInto(QStringLiteral("pickerQuery"), id);
         // The row itself, not a key: the picker's list is walked and chosen with
         // the pointer here.
@@ -727,6 +801,7 @@ void TestStudio::theWholeJobOnTheMouse()
 
     click(QStringLiteral("viewChip3"));
     click(QStringLiteral("command-day"));
+    clickItem(awaitRow(QStringLiteral("profileList"), 0));
     typeInto(QStringLiteral("promptField"), QStringLiteral("2h"));
     click(QStringLiteral("promptOk"));
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
@@ -772,6 +847,8 @@ void TestStudio::theWebHalfOnBothDoors()
     key('4');
     QCOMPARE(root()->property("view").toInt(), 4);
     key('b');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     typeInto(QStringLiteral("promptField"), QStringLiteral("youtube.com"));
     key(Qt::Key_Return);
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
@@ -787,6 +864,8 @@ void TestStudio::theWebHalfOnBothDoors()
     // domain rather than guessing, so a window that sent the wrong one would
     // fail loudly here and silently nowhere else.
     key('m');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     typeInto(QStringLiteral("promptField"), QStringLiteral("30m"));
     key(Qt::Key_Return);
     QVERIFY2(waitForWrite(), qPrintable(m_admin->message()));
@@ -1496,7 +1575,9 @@ void TestStudio::theWindowNeverWritesToTheMachine()
             const QVariantMap command = row.toMap();
             if (!command.value(QStringLiteral("usable")).toBool())
                 continue;
-            QMetaObject::invokeMethod(root(), "perform", Q_ARG(QVariant, row));
+            QVERIFY(QMetaObject::invokeMethod(root(), "perform",
+                    Q_ARG(QVariant, command.value(QStringLiteral("id"))),
+                    Q_ARG(QVariant, QVariant(QString()))));
             settle();
             performed.append(command.value(QStringLiteral("id")));
             // Anything that opened a sheet or a field is closed again, so the
@@ -2347,6 +2428,9 @@ void TestStudio::writesTheOperatorShots()
 
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
     key('a');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    shoot(QStringLiteral("33-operator-choose-profile"));
+    key(Qt::Key_Return);
     shoot(QStringLiteral("08-operator-choose-program"));
     typeInto(QStringLiteral("pickerQuery"), QStringLiteral("fire"));
     key(Qt::Key_Return);
@@ -2355,6 +2439,8 @@ void TestStudio::writesTheOperatorShots()
 
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(2)));
     key('m');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     shoot(QStringLiteral("10-operator-minutes"));
     key(Qt::Key_Escape);
 
@@ -2364,6 +2450,8 @@ void TestStudio::writesTheOperatorShots()
 
     QMetaObject::invokeMethod(root(), "go", Q_ARG(QVariant, QVariant(3)));
     key('s');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     shoot(QStringLiteral("12-operator-day-total"));
     key(Qt::Key_Escape);
 
@@ -2394,12 +2482,16 @@ void TestStudio::writesTheOperatorShots()
     // On `tiktok.com`, which this profile already blocks, so the field opens
     // empty. On a row that is not blocked it opens with that row's domain in it.
     key('b');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     shoot(QStringLiteral("17-operator-block-site"));
     key(Qt::Key_Escape);
 
     // And on `youtube.com`, which has a clock, so the field opens with it.
     key('j');
     key('m');
+    QVERIFY(awaitItem(QStringLiteral("profileQuery")));
+    key(Qt::Key_Return);
     shoot(QStringLiteral("18-operator-site-minutes"));
     key(Qt::Key_Escape);
 

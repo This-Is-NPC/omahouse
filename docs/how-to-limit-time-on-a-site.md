@@ -161,6 +161,11 @@ own runtime directory — and that asymmetry is deliberate.
 
 ## In the window
 
+Before adding a rule or setting a limit, choose the profile in **Who is this
+for?** Click the profile or filter its name and press Enter. This choice is
+required even with one profile; Escape cancels. The following form names the
+chosen account, and an automatic list refresh cannot change the recipient.
+
 `m` on the **sites** view (`4`) is minutes a day on the row under the cursor:
 
 ![The "Minutes a day on youtube.com" dialogue, pre-filled with 30m selected: "30m, 1h. Counted only while somebody is in front of the screen, and the site stops opening once it is spent — until the turn of the day, or until more time is handed over."](img/18-operator-site-minutes.png)

@@ -262,6 +262,11 @@ of.
 
 ## In the window
 
+Before adding a rule or setting a limit, choose the profile in **Who is this
+for?** Click the profile or filter its name and press Enter. This choice is
+required even with one profile; Escape cancels. The following form names the
+chosen account, and an automatic list refresh cannot change the recipient.
+
 `m` on the **programs** view is one program's day. It opens with what is written
 in the profile, not with what today's grants have made of it — folding a grant
 made for one day into the rule for every day is the mistake that avoids:

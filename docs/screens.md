@@ -551,3 +551,13 @@ needs a merge decision. The people row says `unpublished`, `1 behind`, or
 `unresolved · changed on …`. Not-paired and changed-there rows cannot be selected.
 
 ![The manager selecting station-02 to receive the draft, with its publication state shown.](img/32-operator-publish.png)
+
+## Choosing who a new rule is for
+
+Adding a program, blocking a site or setting a limit opens an explicit profile
+selector, even when there is only one profile. Click the account or filter it
+and press Enter. Escape leaves the rules unchanged. The program picker and
+following form keep the chosen account visible; refreshing the people list
+cannot redirect a submitted rule.
+
+![An explicit profile choice before adding a program.](img/33-operator-choose-profile.png)
