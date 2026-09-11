@@ -17,7 +17,7 @@ namespace omahouse {
 //
 // -- why a file, and not a socket ---------------------------------------------
 //
-// `docs/the-browser-half.md` §8.1 called the alternative "the largest single
+// `docs/design.md` §8.1 called the alternative "the largest single
 // piece of unplanned work on this page": the host runs as the child
 // (the browser spike measured uid 1001, inside her session, with her
 // bus in the environment) and the ledger is root's, so the two have to meet

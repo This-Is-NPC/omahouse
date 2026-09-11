@@ -85,7 +85,7 @@ That covers the menu, `uwsm app --`, and a terminal, because all three end up
 running the same executable inside whatever scope launched them.
 
 *(The pictures from the live machine were taken with the account under rules
-called `julia`; the commands here say `kid`. They are the same placeholder.)*
+called `kid`; the commands here say `kid`. They are the same placeholder.)*
 
 **`gtk-launch` is still not a name to write.** Allowing it allows the whole
 menu — an unknown set of programs that changes with every `.desktop` file

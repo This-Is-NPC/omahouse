@@ -26,7 +26,7 @@ the same machine. omahouse says so every time it writes:
 ```
 omahouse: the browser policy is one file for the whole machine. A site blocked here is
           blocked for everyone who opens Chromium on it, including you. Chromium has no
-          per-account policy on Linux (docs/the-browser-half.md §3.1), and that was accepted.
+          per-account policy on Linux (docs/design.md §3.1), and that was accepted.
 ```
 
 That cost was weighed and taken rather than worked around.
@@ -53,7 +53,7 @@ this:
 ![Chromium in the child's session with the site refused by the managed policy.](../vm/shots/44-chromium-site-bloqueado.png)
 
 *(The pictures on this page are from one run on a live Omarchy, where the
-account under rules was called `julia`.)*
+account under rules was called `kid`.)*
 
 **A whole address is refused rather than quietly turned into a rule about its
 host:**

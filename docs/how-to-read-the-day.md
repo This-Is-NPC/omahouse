@@ -192,10 +192,10 @@ with nothing to press:
 
 And on the live machine, with a real day behind it:
 
-![julia's studio on the today tab: at the top "the whole day · session · running now", "12m spent", "52m left of 1h5m" and "+55m handed over today"; below it Chromium and org.chromium.Chromium, both "3m spent · 0m left of 3m"; and the day's list newest first, down to a red line at 08:32 reading "app-Hyprland-gtk\x2dlaunch-c5075ae6.scope: not on the list, and was closed".](../vm/shots/24-studio-julia-hoje.png)
+![kid's studio on the today tab: at the top "the whole day · session · running now", "12m spent", "52m left of 1h5m" and "+55m handed over today"; below it Chromium and org.chromium.Chromium, both "3m spent · 0m left of 3m"; and the day's list newest first, down to a red line at 08:32 reading "app-Hyprland-gtk\x2dlaunch-c5075ae6.scope: not on the list, and was closed".](../vm/shots/24-studio-kid-hoje.png)
 
 *(The pictures from the live machine were taken with the account under rules
-called `julia`; the commands here say `kid`.)*
+called `kid`; the commands here say `kid`.)*
 
 The **sites** view is `4`, and it is the one that answers *where did the half
 hour go* — the rule, the clock, and the screen-off time that explains why the
@@ -210,9 +210,9 @@ What arrives is notifications — the warnings, the grace, the refusals — and 
 can be looked up is `omahouse status` or the window, which for them is read
 only:
 
-![julia's studio, programs tab: xdg-terminal-exec open now with a red warning that the name is not what is running, House Rules · omahouse, Chromium with "0m left of 3m" and the red bar full, and udiskie with the same red warning.](../vm/shots/23-studio-julia-programas.png)
+![kid's studio, programs tab: xdg-terminal-exec open now with a red warning that the name is not what is running, House Rules · omahouse, Chromium with "0m left of 3m" and the red bar full, and udiskie with the same red warning.](../vm/shots/23-studio-kid-programas.png)
 
-The header says what they are: `julia · subject · under rules · writes through
+The header says what they are: `kid · subject · under rules · writes through
 pkexec`.
 
 ---
