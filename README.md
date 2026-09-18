@@ -17,7 +17,17 @@ scheduler, and Omastore remains an independent application.
 
 ## Install
 
-Not published as an Omarchy default yet. From a checkout:
+Not published as an Omarchy default yet. From the latest GitHub release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/This-Is-NPC/omahouse/master/install.sh | bash
+```
+
+It downloads the release's Arch package, checks it against the release's
+`SHA256SUMS` and installs it with `pacman -U`; `sudo pacman -R omahouse` takes it
+off again. `VERSION=0.1.0` picks a release other than the latest.
+
+From a checkout:
 
 ```bash
 mise run deps      # Qt 6 + qmake
@@ -27,7 +37,7 @@ mise run studio    # open the window
 
 `packaging/` holds the unit, the polkit policy and its rule, the desktop entry
 and the icon.
-The Arch recipe lives in the sibling `omarchy-pkgs` repository. Released under
+The Arch recipe is `vm/PKGBUILD`. Released under
 the MIT license. **A checkout is not an installation** — no PAM line, no
 service, and no browser meter;
 [how to install it, and how to take it off again](docs/how-to-install-and-remove.md)
