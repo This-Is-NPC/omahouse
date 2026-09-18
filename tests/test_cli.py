@@ -443,6 +443,12 @@ def check_version_is_said_once(box):
     assert declared, "omahouse.usage.kdl declares no version"
     assert declared.group(1) == version, (declared.group(1), version)
 
+    # And the package, which is the copy pacman compares. release-please moves
+    # all of them in one pull request; this is what notices one it missed.
+    packaged = re.search(r"^pkgver=(\S+)", (ROOT / "vm" / "PKGBUILD").read_text(), re.M)
+    assert packaged, "vm/PKGBUILD declares no pkgver"
+    assert packaged.group(1) == version, (packaged.group(1), version)
+
     # And the help agrees, which is the copy a reader sees.
     assert box.run("--help").stdout.splitlines()[0].split()[1] == version
 

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "9b4acd6baec64676515aab8ff098cc772ee49d7c",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "omahouse",
+      "include-component-in-tag": false,
+      "include-v-in-tag": true,
+      "draft": false,
+      "prerelease": false,
+      "bump-minor-pre-major": true,
+      "extra-files": [
+        "qmake/version.pri",
+        "omahouse.usage.kdl",
+        "docs/cli.md",
+        "vm/PKGBUILD"
+      ]
+    }
+  }
+}

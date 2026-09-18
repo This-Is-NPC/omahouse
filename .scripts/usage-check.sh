@@ -32,7 +32,7 @@ fi
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
-mise exec -- usage g markdown -f "$kdl" --out-file "$tmp"
+"$root/.scripts/usage-markdown.sh" "$tmp"
 
 if ! cmp -s "$out" "$tmp"; then
   echo "usage-check: $out is stale (run mise run usage:gen)" >&2
