@@ -11,9 +11,9 @@ to lift it.
 ---
 
 Linking another computer also installs the runtime adapters from the public
-`omahouse-battery` master automatically on both computers. The package declares
-Git, Python, curl and jq alongside Omakure, so there is no separate dependency
-or Battery preparation step for the client. See
+`omahouse-battery` master automatically on both computers. The package carries
+its own Omakure, as `/usr/bin/omakure`, and declares Git, Python, curl and jq,
+so there is no separate dependency or Battery preparation step for the client. See
 [how to link another computer](how-to-link-another-computer.md).
 
 ## What it needs

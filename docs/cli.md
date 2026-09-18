@@ -369,7 +369,7 @@ and that computer is installed, linked, and in the list. What it does is the thr
 
 **Only ssh access is needed on the far side**, which is the one thing the operator was promised would be enough. ssh is not wrapped or replaced and is given no options of its own beyond a destination: whatever their ssh already does — their keys, their config, their agent — is what this uses. The terminal is kept, so a sudo password on the far side can be typed.
 
-**One install, and nothing to go and find.** The omahouse package depends on omakure, so putting omahouse on that computer puts the wire on it too, and the browser's meter with it. It installs only when omahouse is not already there: re-linking a computer is an ordinary thing to do — an address changed, a manager was rebuilt — and it must not reinstall the package underneath somebody.
+**One install, and nothing to go and find.** The omahouse package carries omakure inside it, so putting omahouse on that computer puts the wire on it too, and the browser's meter with it. It installs only when omahouse is not already there: re-linking a computer is an ordinary thing to do — an address changed, a manager was rebuilt — and it must not reinstall the package underneath somebody.
 
 **The far computer gets the whole of omahouse, not an agent.** That is the point of it. If this computer can never reach it again, whoever has root there sits at it and reads the day, hands over time, or switches the teeth off. A computer that could only be administered from somewhere else is a computer that is unadministrable exactly when something has gone wrong.
 
