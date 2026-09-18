@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The VM suite, from a clean build.
 #
-# Not in `mise run verify` and not in the pre-commit hook, on purpose. This
+# Not in `mise run verify` and not in the pre-push hook, on purpose. This
 # starts a virtual machine, waits for a graphical session, closes processes and
 # ends somebody's login; it takes minutes, and the kind of regression it catches
 # does not arrive once an hour. It is manual and nightly, which is what

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# omahouse local gate — the pre-commit hook execs this script.
+# omahouse local gate — the pre-push hook runs this script, through local-check.sh.
 #
 # Idempotent: same tree, same result. The hook must not go through `mise run`,
 # because a hook that depends on a task file is a hook that changes meaning when
@@ -17,7 +17,7 @@
 #
 # `shots-check.sh` is the third, and it is here for the same reason
 # `usage-check.sh` is: a document generated from the program is only worth
-# reading if something refuses a commit where the two have come apart. It says
+# reading if something refuses a push where the two have come apart. It says
 # in its own head what it costs and the one thing it cannot pin.
 set -euo pipefail
 

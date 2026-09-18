@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Push gate — installed by `mise run hooks:install`.
+#
+# Runs `.scripts/local-check.sh --pre-push` once for the commit being pushed: a
+# red gate refuses the push, and a green one posts the `local-check` status that
+# `master` requires before a merge. Tags and deletions carry no new tree and are
+# let through. Skip with OMAHOUSE_SKIP_LOCAL_CHECK=1, or `git push --no-verify`.
+set -uo pipefail
+
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root" || exit 1
+
+if [ ! -x ".scripts/local-check.sh" ]; then
+  echo "pre-push: .scripts/local-check.sh is missing or not executable — cannot run the gate." >&2
+  exit 1
+fi
+
+zero="0000000000000000000000000000000000000000"
+checked=""
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  case "$remote_ref" in refs/tags/*) continue ;; esac
+  case " $checked " in *" $local_sha "*) continue ;; esac
+  OMAHOUSE_LOCAL_CHECK_SHA="$local_sha" .scripts/local-check.sh --pre-push </dev/null || exit $?
+  checked="$checked $local_sha"
+done

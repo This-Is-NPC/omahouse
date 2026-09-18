@@ -55,7 +55,7 @@ it is for.
 
 | the page | what it holds |
 |---|---|
-| [the command line](cli.md) | every verb, every flag, in full. **Generated** from `omahouse.usage.kdl`; `mise run verify` refuses a commit where the two have come apart, so it is never out of date and never edited by hand. |
+| [the command line](cli.md) | every verb, every flag, in full. **Generated** from `omahouse.usage.kdl`; `mise run verify` refuses a push where the two have come apart, so it is never out of date and never edited by hand. |
 | [the window, in the order somebody meets it](screens.md) | every screen `omahouse-studio` draws, as a walk from opening it to running a profile day to day — with the keys, the chips, and the four things that have no screen. |
 | [what does not work yet](what-does-not-work.md) | every defect, in one place, each with what to do in the meantime. Nothing else here names a defect that is not on that page. |
 | [how it is built](design.md) | for contributors: the model, the eight rounds of measurement that changed it, the packaging, and the gate. Its section numbers are cited from comments throughout `src/`, so they do not move. |
@@ -73,7 +73,7 @@ root, and the window gets there through `pkexec`.
 
 **Two kinds of picture, and the pages say which.** Anything under `docs/img/` is
 drawn by the studio itself, offscreen, by `mise run shots`, and
-`mise run verify` refuses a commit where it is not what the window draws today.
+`mise run verify` refuses a push where it is not what the window draws today.
 Anything under `vm/shots/` is one run through a live Omarchy desktop on
 2026-09-04 and is not regenerable — those are the pictures where the account
 under rules is called `kid` while the commands beside them say `kid`.
