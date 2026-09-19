@@ -3,7 +3,7 @@
 # Everything in C++ reads OMAHOUSE_VERSION; nothing spells the number in a .cpp.
 # The usage declaration carries a literal of its own, which a test pins against
 # `omahouse --version`, and release-please moves both.
-OMAHOUSE_VERSION = 0.1.0 # x-release-please-version
+OMAHOUSE_VERSION = 0.1.1 # x-release-please-version
 VERSION = $$OMAHOUSE_VERSION
 
 # Handed to C++ through a header rather than DEFINES. A changed DEFINES rewrites
