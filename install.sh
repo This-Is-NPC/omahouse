@@ -30,10 +30,13 @@ command -v pacman >/dev/null 2>&1 ||
   die "there is only an x86_64 package, and this machine is $(uname -m)."
 command -v curl >/dev/null 2>&1 || die "curl is needed to download the release."
 
+# The whole answer is read before it is searched. Piping curl into `grep -m1`
+# lets grep close the pipe at the first match, and under pipefail curl's
+# "Failed writing body" then reads as there being no release at all.
 latest_tag() {
-  curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" |
-    grep -m1 '"tag_name":' |
-    sed -E 's/.*"tag_name" *: *"([^"]+)".*/\1/'
+  local answer
+  answer="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")" || return 1
+  sed -nE '/"tag_name"/{s/.*"tag_name" *: *"([^"]+)".*/\1/p;q;}' <<<"$answer"
 }
 
 if [[ -z "$BASE_URL" ]]; then
