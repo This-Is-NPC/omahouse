@@ -256,15 +256,8 @@ class VM:
         """
         global _built_package
         if _built_package is None:
-            _built_package = build_the_package()
+            _built_package = build_the_package(self.omakure_binary)
         return _built_package
-
-    @property
-    def built_omakure_package(self):
-        global _built_omakure_package
-        if _built_omakure_package is None:
-            _built_omakure_package = build_the_omakure_package(self.omakure_binary)
-        return _built_omakure_package
 
     @property
     def build_binary(self):
@@ -1092,10 +1085,9 @@ def log_in_on_omarchy(vm):
 
 
 _built_package = None
-_built_omakure_package = None
 
 
-def build_the_package():
+def build_the_package(omakure):
     """`makepkg` over `vm/PKGBUILD`, into a temporary directory.
 
     Twenty seconds, and every byte of it lands under `$TMPDIR`: `BUILDDIR`,
@@ -1105,12 +1097,17 @@ def build_the_package():
     one that can actually break a copied binary, which is Qt -- and a build
     machine is not the machine under test.
 
+    The package bundles omakure, and the one bundled here is `omakure`, the
+    binary under test, handed in through `OMAHOUSE_OMAKURE_BINARY` rather than
+    the release the recipe would otherwise download.
+
     The `-debug` package makepkg also produces when the local `makepkg.conf` asks
     for it is not what is installed: the file is picked by exact name.
     """
     out = Path(tempfile.mkdtemp(prefix="omahouse-pkg."))
     done = run(["makepkg", "-f", "-d", "--noconfirm"], cwd=str(HERE),
                env={**os.environ,
+                    "OMAHOUSE_OMAKURE_BINARY": str(omakure),
                     "BUILDDIR": str(out / "build"),
                     "PKGDEST": str(out / "pkg"),
                     "SRCDEST": str(out / "src"),
@@ -1120,35 +1117,6 @@ def build_the_package():
         raise Blocked("makepkg over vm/PKGBUILD failed:\n" + tail)
     built = sorted(p for p in (out / "pkg").glob("omahouse-[0-9]*.pkg.tar.*")
                    if "-debug-" not in p.name)
-    if not built:
-        raise Blocked(f"makepkg produced nothing under {out / 'pkg'}")
-    return built[0]
-
-
-def build_the_omakure_package(binary):
-    """The omakure binary under test, wrapped as the package pacman would get.
-
-    Needed for exactly one thing: `omahouse machine link` installs omahouse with
-    `pacman -S`, and omahouse depends on omakure. Without a package to resolve
-    that against, the case that proves the install would have to reach around
-    the package manager to prove something about the package manager.
-
-    It is not omakure's own packaging. When the `omarchy` repository carries
-    omakure this goes away.
-    """
-    here = HERE / "omakure-pkg"
-    shutil.copy(binary, here / "omakure")
-    out = Path(tempfile.mkdtemp(prefix="omakure-pkg."))
-    done = run(["makepkg", "-f", "-d", "--noconfirm"], cwd=str(here),
-               env={**os.environ,
-                    "BUILDDIR": str(out / "build"),
-                    "PKGDEST": str(out / "pkg"),
-                    "SRCDEST": str(out / "src"),
-                    "LOGDEST": str(out / "log")})
-    if done.returncode != 0:
-        tail = "\n".join((done.stdout + done.stderr).splitlines()[-20:])
-        raise Blocked("makepkg over vm/omakure-pkg/PKGBUILD failed:\n" + tail)
-    built = sorted((out / "pkg").glob("omakure-[0-9]*.pkg.tar.*"))
     if not built:
         raise Blocked(f"makepkg produced nothing under {out / 'pkg'}")
     return built[0]
@@ -1171,7 +1139,7 @@ def deploy_on_omarchy(vm):
         raise Blocked(f"qt6-base is {host_qt[1]} here and {guest_qt[1]} there")
 
     say("  building the package from the tree")
-    package = build_the_package()
+    package = build_the_package(vm.omakure_binary)
     say(f"    {package.name}")
     install_the_package(vm, package)
     # Handed to the cases on the object they are given rather than imported, for
@@ -1192,6 +1160,11 @@ def install_the_package(vm, package):
     over. It cannot reach a file omahouse does not ship.
     """
     vm.put(package, f"/tmp/{package.name}")
+    # A standalone omakure package, which earlier runs of this suite installed
+    # before omahouse bundled it. The package conflicts with it, and
+    # `--noconfirm` answers that question no.
+    vm.root("sh -c 'pacman -Qq omakure >/dev/null 2>&1 && "
+            "pacman -Rdd --noconfirm omakure || true'", check=False)
     code, said = vm.root(f"pacman -U --noconfirm --overwrite '*' /tmp/{package.name}",
                          check=False)
     if code != 0:

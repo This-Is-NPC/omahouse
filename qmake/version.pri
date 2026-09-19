@@ -4,6 +4,6 @@
 # the usage declaration arrives with stage 4 it gets a literal of its own that a
 # test pins against `omahouse --version`, which is the only copy this file will
 # tolerate.
-OMAHOUSE_VERSION = 0.1.0
+OMAHOUSE_VERSION = 0.1.0 # x-release-please-version
 DEFINES += OMAHOUSE_VERSION=\\\"$$OMAHOUSE_VERSION\\\"
 VERSION = $$OMAHOUSE_VERSION

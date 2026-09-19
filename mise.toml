@@ -29,8 +29,12 @@ run = ".scripts/verify.sh"
 description = "Lints the QML with every warning fatal"
 run = ".scripts/qml-check.sh"
 
+[tasks."local-check"]
+description = "Runs the local gate on HEAD and posts the local-check status master requires"
+run = ".scripts/local-check.sh"
+
 [tasks."hooks:install"]
-description = "Installs versioned git hooks that exec .scripts/verify.sh"
+description = "Installs the versioned pre-push hook that runs the local gate"
 run = ".scripts/install-hooks.sh"
 
 [tasks.shots]

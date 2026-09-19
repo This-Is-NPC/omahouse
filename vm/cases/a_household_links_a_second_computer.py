@@ -79,9 +79,9 @@ def walked(vm, dad):
     # And the far machine as the page describes it: Omarchy, ssh, nothing else.
     # The repository stands in for the shelf a household would have; removing
     # omahouse is what makes this a computer that has never had it.
-    packages = [vm.built_package, vm.built_omakure_package]
-    vm.serve_a_repository(packages)
+    vm.serve_a_repository([vm.built_package])
     vm.root("pacman -Rns --noconfirm omahouse", check=False)
+    vm.root("pacman -Rdd --noconfirm omakure", check=False)
     # And every file the suite itself deployed by hand before any case ran.
     # Read out of the package rather than listed here, so the two cannot drift:
     # a path this case forgot is `pacman -S` refusing the whole transaction with
@@ -121,13 +121,13 @@ def walked(vm, dad):
                          f"says it does:\n{said[:700]}")
     print("      one command: installed, linked, and in the list")
 
-    # And it really installed it, out of the repository, with the dependency
-    # resolved. This is the whole reason the far machine started empty.
+    # And it really installed it, out of the repository, with omakure inside
+    # it. This is the whole reason the far machine started empty.
     if vm.ssh("command -v omahouse", check=False)[0] != 0:
         raise Failed("the far machine still has no omahouse after `machine link`")
-    if vm.ssh("command -v omakure", check=False)[0] != 0:
-        raise Failed("omahouse was installed without omakure, so the one install "
-                     "was not the only install")
+    if "omahouse" not in vm.root("pacman -Qo /usr/bin/omakure", check=False)[1]:
+        raise Failed("omahouse was installed without its omakure, so the one "
+                     "install was not the only install")
     owner = vm.root("pacman -Qo /usr/bin/omahouse", check=False)[1]
     if "omahouse" not in owner:
         raise Failed(f"omahouse is on the machine but pacman does not own it, so "

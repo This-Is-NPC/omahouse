@@ -696,7 +696,7 @@ end.
 ## 7. The command line
 
 The verbs are declared in `omahouse.usage.kdl` and [`cli.md`](cli.md) is
-generated from it; `mise run usage:check` refuses a commit where the two have
+generated from it; `mise run usage:check` refuses a push where the two have
 come apart.
 
 Writing needs root, and the studio gets there through `pkexec`. `status`,
@@ -1458,9 +1458,13 @@ invisible until somebody writes down its negation.
 mise run verify
 ```
 
-That is the whole local gate, and the versioned pre-commit hook execs
-`.scripts/verify.sh` directly rather than going through `mise run`. Install it
-once per checkout with `mise run hooks:install`. In order, it runs:
+That is the whole local gate. The versioned pre-push hook runs it through
+`.scripts/local-check.sh`, which calls `.scripts/verify.sh` directly rather than
+going through `mise run`: a red gate refuses the push, and a green one posts the
+`local-check` commit status that `master` requires before a pull request can
+merge. Nothing on GitHub runs the gate, because it needs Qt, an offscreen
+studio and the pinned `usage`. Install the hook once per checkout with
+`mise run hooks:install`. In order, it runs:
 
 | step | what it refuses |
 |---|---|

@@ -11,9 +11,9 @@ to lift it.
 ---
 
 Linking another computer also installs the runtime adapters from the public
-`omahouse-battery` master automatically on both computers. The package declares
-Git, Python, curl and jq alongside Omakure, so there is no separate dependency
-or Battery preparation step for the client. See
+`omahouse-battery` master automatically on both computers. The package carries
+its own Omakure, as `/usr/bin/omakure`, and declares Git, Python, curl and jq,
+so there is no separate dependency or Battery preparation step for the client. See
 [how to link another computer](how-to-link-another-computer.md).
 
 ## What it needs
@@ -68,10 +68,21 @@ own `/etc/omahouse`.
 
 ## As a package
 
-The Arch recipe lives in the sibling `omarchy-pkgs` repository, and
-`packaging/` here holds what it installs: the systemd unit, the polkit policy
-and its rule, the desktop entry, the icon, the native messaging host shim, the
-extension packer and the `.install` scriptlet.
+Every GitHub release carries the Arch package, built from the release's tag by
+`vm/PKGBUILD`, and a `SHA256SUMS` beside it. `install.sh` downloads the package,
+refuses it when the checksum does not match, and installs it with `pacman -U`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/This-Is-NPC/omahouse/master/install.sh | bash
+VERSION=0.1.0 bash install.sh    # a release other than the latest
+```
+
+The package carries its own statically linked Omakure, pinned in the recipe,
+and pulls Qt, polkit and the rest from the machine's repositories. `packaging/`
+holds what it installs: the systemd unit, the polkit policy and its rule, the
+desktop entry, the icon, the native messaging host shim, the extension packer
+and the `.install` scriptlet. A recipe for the sibling `omarchy-pkgs`
+repository, which would make this `pacman -S omahouse`, does not exist yet.
 
 ```
 >>> omahouse: /etc/omahouse and /var/lib/omahouse are ready, and

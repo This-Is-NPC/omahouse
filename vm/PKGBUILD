@@ -2,19 +2,19 @@
 #
 # docs/design.md §9 puts the real PKGBUILD in `omarchy-pkgs`, built from the tarball of
 # a tag. This one is its local twin: same file list, same `.install`, same
-# `pkgname`, and `source=()` because the tree is already on the machine. It
-# exists so the demo VM gets omahouse through `pacman -U` rather than through a
-# fistful of `install -Dm755` — which means the `.install` scriptlet of
-# `packaging/omahouse.install` runs the way it will run on somebody's laptop:
-# the two directories, the PAM line, and `systemctl enable`.
+# `pkgname`, and no omahouse tarball in `source=()` because the tree is already
+# on the machine. It exists so the demo VM gets omahouse through `pacman -U`
+# rather than through a fistful of `install -Dm755` — which means the `.install`
+# scriptlet of `packaging/omahouse.install` runs the way it will run on
+# somebody's laptop: the two directories, the PAM line, and `systemctl enable`.
 #
-# Used by vm/provision.sh, which copies the tree to /home/howl/omahouse-src on
-# the guest and runs `makepkg -si` there.
+# Used by vm/e2e.py, and by `.github/workflows/release.yml`, which builds it from
+# the tagged checkout and attaches the package to the GitHub release that
+# `install.sh` downloads.
 pkgname=omahouse
-# Fixed, and it is a trap for anybody who installs this with `pacman -S`.
-#
-# Every build of this working tree is 0.1.0-1, however many commits apart they
-# are. `pacman -S --needed omahouse` compares the installed version with the
+# Moved by release-please and by nothing else, so between two releases every
+# build of the working tree carries the same version however many commits apart
+# they are. `pacman -S --needed omahouse` compares the installed version with the
 # repository's, finds them equal, does nothing, and **exits zero**: a provisioner
 # that reads the exit code is told the install worked and the guest goes on
 # running whatever binary it already had. That is how a showcase machine ran a
@@ -24,16 +24,14 @@ pkgname=omahouse
 # `pacman -U --noconfirm --overwrite '*'` on a package file it just built, which
 # names the file rather than the version and always lands.
 #
-# So: install this package by path with `pacman -U`, never by name with
-# `pacman -S --needed`. The real PKGBUILD in `omarchy-pkgs` builds from the
-# tarball of a tag and has a version that moves; this one is the local twin of
-# it and deliberately does not, which is what makes the shortcut wrong here and
-# right there.
-pkgver=0.1.0
+# So: install a working-tree build by path with `pacman -U`, never by name with
+# `pacman -S --needed`. Only a released package has a version that means one
+# tree.
+pkgver=0.1.0 # x-release-please-version
 pkgrel=1
 pkgdesc='House rules: which programs each account may open, and for how long'
 arch=('x86_64')
-url='https://github.com/omarchy/omahouse'
+url='https://github.com/This-Is-NPC/omahouse'
 license=('MIT')
 # `libnotify` is not decoration and it is not implied. `src/sys/Notify.cpp`
 # shells out to `notify-send`, and a stock Omarchy 4.0.2 does not have it: the
@@ -49,19 +47,34 @@ license=('MIT')
 # them is the same silent shape as the one libnotify has: the scriptlet cannot
 # make the archive, no policy is written, and the first anybody knows is a
 # household with no time per site in the report and nothing saying why.
-# omakure is a dependency and not a bundle. It is its own product and stands on
-# its own; what this line buys is that installing omahouse installs everything
-# omahouse needs, in one command, with nothing for a household to go and find.
-# The same will be true of omastore when there is one to depend on.
+# omakure is bundled rather than depended on. No pacman repository carries it
+# yet, so `depends=('omakure')` made the package impossible to install anywhere
+# the suite had not built one by hand. The binary is the statically linked
+# release pinned below, which runs on any Arch whatever its glibc; `provides`
+# and `conflicts` keep a future standalone omakure package from fighting over
+# `/usr/bin/omakure`. Installing omahouse still installs everything omahouse
+# needs, in one command, with nothing for a household to go and find.
 depends=('qt6-base' 'qt6-declarative' 'polkit' 'libnotify' 'openssl' 'zip'
-         'omakure' 'git' 'python' 'curl' 'jq')
+         'git' 'python' 'curl' 'jq')
+_omakure_ver=0.4.5
+provides=("omakure=$_omakure_ver")
+conflicts=('omakure')
 makedepends=('qt6-base' 'qt6-declarative' 'qt6-tools' 'gcc' 'make')
 # `vm/omahouse.install` is a symlink to `packaging/omahouse.install`, so the
 # scriptlet pacman runs here is the very file the repo ships and not a copy that
 # could drift from it. makepkg reads it before `prepare()`, which is why it is a
 # symlink in the tree rather than something written at build time.
 install=omahouse.install
-source=()
+# `OMAHOUSE_OMAKURE_BINARY` names a local omakure to bundle instead of the
+# release. The VM suite sets it to the musl build of the checkout beside this
+# one, because it tests that code and not whatever was last published.
+if [[ -n ${OMAHOUSE_OMAKURE_BINARY:-} ]]; then
+  source=()
+  sha256sums=()
+else
+  source=("omakure-$_omakure_ver.tar.gz::https://github.com/This-Is-NPC/omakure/releases/download/v$_omakure_ver/omakure-v$_omakure_ver-linux-musl-x86_64.tar.gz")
+  sha256sums=('51921b656ff05c6a52d6ec8ffe08e5eba1d6af149ce013e05218d810aed3ba85')
+fi
 
 # The tree, handed in by the provisioner. Not a `source=()` entry, because there
 # is no tarball and no tag here -- this is the working copy under test.
@@ -86,6 +99,7 @@ package() {
 
   install -Dm755 build/bin/omahouse        "$pkgdir/usr/bin/omahouse"
   install -Dm755 build/bin/omahouse-studio "$pkgdir/usr/bin/omahouse-studio"
+  install -Dm755 "${OMAHOUSE_OMAKURE_BINARY:-$srcdir/omakure}" "$pkgdir/usr/bin/omakure"
 
   install -Dm644 packaging/omahouse.service \
     "$pkgdir/usr/lib/systemd/system/omahouse.service"

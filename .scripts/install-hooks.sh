@@ -6,7 +6,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
 hooks_path=".githooks"
-required_hooks=("pre-commit")
+required_hooks=("pre-push")
 
 for hook in "${required_hooks[@]}"; do
   if [ ! -f "$hooks_path/$hook" ]; then
@@ -31,4 +31,4 @@ for hook in "${required_hooks[@]}"; do
 done
 
 echo "Hooks installed: core.hooksPath=$hooks_path"
-echo "  pre-commit execs '.scripts/verify.sh' and refuses the commit when it is red."
+echo "  pre-push runs .scripts/local-check.sh: a red gate refuses the push, a green one posts local-check."

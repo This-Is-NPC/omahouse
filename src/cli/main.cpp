@@ -1953,7 +1953,7 @@ bool omakureIsReady(const QString &verb)
     if (Omakure::installed(&why))
         return true;
     // A broken install and not a missing prerequisite. The omahouse package
-    // depends on omakure, so a machine with one and not the other is a machine
+    // carries omakure, so a machine with one and not the other is a machine
     // where something took it away -- and telling somebody to go and install a
     // second product would be telling them to work around their own package
     // manager.
