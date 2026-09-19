@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/This-Is-NPC/omahouse/compare/v0.1.0...v0.1.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **build:** rebuild when the version changes ([eb6cc4a](https://github.com/This-Is-NPC/omahouse/commit/eb6cc4a9749619787f3f0be02287179c01eb72e4))
+* **install:** read the whole release answer ([1a1c04e](https://github.com/This-Is-NPC/omahouse/commit/1a1c04ea4a37ffa67dd425459c701e238df14b83))
+
 ## 0.1.0 (2026-09-19)
 
 

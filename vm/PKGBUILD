@@ -27,7 +27,7 @@ pkgname=omahouse
 # So: install a working-tree build by path with `pacman -U`, never by name with
 # `pacman -S --needed`. Only a released package has a version that means one
 # tree.
-pkgver=0.1.0 # x-release-please-version
+pkgver=0.1.1 # x-release-please-version
 pkgrel=1
 pkgdesc='House rules: which programs each account may open, and for how long'
 arch=('x86_64')
