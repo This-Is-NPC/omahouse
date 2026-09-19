@@ -1,4 +1,5 @@
 #include "Users.h"
+#include "Version.h"
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
